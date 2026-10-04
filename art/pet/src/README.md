@@ -143,6 +143,22 @@ $py = 'C:\Users\A\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\pyth
 拿 `frameHeight` 当帧宽会把图横向压扁，并在切状态时宽度跳变。
 两侧都必须优先用图片实测值（`naturalWidth / frames`），`frameWidth` 用于加载前占位。
 
+**几何按文件给出（`files` 映射）**：`variants` 只是文件名数组，而变体之间帧数
+差异极大（静态 PNG 1 帧 vs 动态 GIF 44 帧），套用 `states` 的 `frames` 去切会切出碎条。
+所以顶层另有 `files`，登记每个文件自己的几何：
+
+```jsonc
+"variants": { "happy": ["happy.png", "happy-2.png", "happy-3.png"] },
+"files": {                                    // canonical + 全部 variants
+  "happy.png":   { "frames": 33, "frameWidth": 256, "frameMs": 30 },
+  "happy-2.png": { "frames": 1,  "frameWidth": 274, "frameMs": 0  },
+  "happy-3.png": { "frames": 24, "frameWidth": 254, "frameMs": 60 }
+}
+```
+
+切帧一律以 `files[<文件名>]` 为准，**不要**用 `states[<状态>].frames` 去切变体。
+`files` 是纯附加字段，旧消费者忽略它也能跑。
+
 精灵条带一份产物同时喂 WPF 的 `CroppedBitmap` 与 overlay 的 CSS `steps(N)`；
 exe 按 `pet.json` 的 `frameHeight` 缩放，**不得假设固定值**。
 

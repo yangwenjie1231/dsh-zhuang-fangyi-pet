@@ -259,11 +259,17 @@ namespace DshZhuangFangyiPet
             Check(haveIdle && ie.FrameWidth == sh.FrameW, "清单 frameWidth 与实测一致（自洽性校验）",
                   haveIdle ? (ie.FrameWidth + " == " + sh.FrameW) : "-");
 
-            // TryGetDeclaredSize：解码前就能算窗口占位尺寸
+            // TryGetDeclaredSize：解码前就能算窗口占位尺寸。
+            // 它预测的是**下一次 GetSheet 会返回的条带**，所以必须和随后的实际取帧比对
+            // （真实素材里 idle 有 3 个变体，尺寸各不相同，拿旧的 sh 比会误判）。
             int dw, dh;
             bool declared = store.TryGetDeclaredSize("idle", out dw, out dh);
-            Check(declared && dw == sh.FrameW && dh == sh.FrameH, "解码前预估尺寸（TryGetDeclaredSize）",
-                  declared ? (dw + "x" + dh) : "未命中");
+            SpriteSheet nxt = store.GetSheet("idle");
+            bool sizeOk = declared && nxt != null && dw == nxt.FrameW && dh == nxt.FrameH;
+            Check(sizeOk, "解码前预估尺寸（TryGetDeclaredSize）",
+                  (declared && nxt != null)
+                    ? ("预估 " + dw + "x" + dh + "，实际 " + nxt.FrameW + "x" + nxt.FrameH + "（" + nxt.File + "）")
+                    : (declared ? "未命中条带" : "未命中"));
 
             // canonical 文件的声明若与实测不符，应以实测为准（不能拒收，否则宠物不显示）。
             // 合成素材里 happy 故意写错 frameWidth=999；真实素材里它是自洽的。
