@@ -210,7 +210,14 @@ export function sessionState (rec, at) {
  */
 export function createPetState (options = {}) {
   const now = typeof options.now === 'function' ? options.now : () => Date.now()
-  const cfg = { ...DEFAULT_CONFIG, ...(options.config ?? {}) }
+  // **过滤掉 undefined 的覆盖项**：`{...DEFAULT_CONFIG, ...{bubbleStates: undefined}}`
+  // 会把默认值抹成 undefined，之后 `cfg.bubbleStates.includes(...)` 直接抛 TypeError。
+  // 调用方传 undefined 的意图几乎总是"用默认值"，所以这里按意图处理。
+  const overrides = {}
+  for (const [key, value] of Object.entries(options.config ?? {})) {
+    if (value !== undefined) overrides[key] = value
+  }
+  const cfg = { ...DEFAULT_CONFIG, ...overrides }
   const pickBubbleImage = typeof options.pickBubbleImage === 'function'
     ? options.pickBubbleImage
     : () => null

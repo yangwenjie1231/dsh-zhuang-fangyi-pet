@@ -20,7 +20,26 @@
  *
  * 围栏挡的是 DNS 重绑定与跨站请求。**它挡不住本机任意进程**（任何进程都能伪造
  * loopback Host）。所以再加**一次性令牌**：每次 spawn exe 时随机生成、经 argv 传递、
- * 不落盘。这才是「别的程序不该读我的桌宠状态」的真正防线。
+ * 不落盘。
+ *
+ * ── 两条准入路径（**必须两条，否则浏览器半边直接坏掉**）──────────────────
+ *
+ * 这一点踩过，值得写清楚：
+ *
+ *   · **原生 exe** 能带请求头 → 走 `Authorization: Bearer <token>`；
+ *   · **浏览器半边** 带不了令牌。而且 **`EventSource` 根本不允许设置请求头**，
+ *     所以 SSE 那条路在浏览器侧**不可能**用令牌。
+ *
+ * 因此准入是「**令牌 或 同源围栏**」二者之一：
+ *
+ *   1. 令牌正确 → 放行（原生 exe）；
+ *   2. 否则走信任围栏：仅 loopback Host、非 cross-site、Origin/Referer 同 authority
+ *      → 放行（DSH 渲染进程的同源 fetch / EventSource）。
+ *
+ * 这个取舍与本 profile 的既有事实一致：主题插件的 `/api/zhuang-fangyi/*`
+ * 本来就是**无令牌、仅靠 loopback 暴露**的（实测 `Invoke-WebRequest` 裸访问返回 200），
+ * 而桌宠快照里**不含任何消息正文**，只有 `thinking/working/…` 这类状态词。
+ * 真正需要防的是**网页**（跨站读取/DNS 重绑定），那正是围栏在做的事。
  *
  * ── 第三道：素材白名单 ───────────────────────────────────────────────────
  *
@@ -153,6 +172,8 @@ function readBody (req) {
  * @param {object} deps.hub - SSE hub
  * @param {(patch: object) => void} deps.onPosition - 位置回报
  * @param {(command: string) => object} deps.onCommand - 命令处理
+ * @param {() => object} deps.getSettings - 取当前设置
+ * @param {(next: object) => object} deps.setSettings - 覆盖设置（归一化后返回）
  * @param {() => object|undefined} deps.connection - 取 `connection` 服务
  * @param {object} [deps.logger]
  * @returns {(req, res) => Promise<void>}
@@ -185,24 +206,51 @@ export function createHandler (deps) {
     }
     const route = url.pathname.slice(ROUTE_PREFIX.length) || '/'
 
-    // ── 围栏 1：信任（在令牌之前：先挡掉明显不是本机的调用者）─────────────
+    // ── 准入：令牌 **或** 同源围栏（见文件头"两条准入路径"）─────────────────
+    //
+    // 先算围栏，再决定是否放行：原生 exe 带令牌但**不带 Origin**，围栏也会放行；
+    // 浏览器不带令牌但 Origin 同源，围栏放行。
+    // 只有「令牌错 **且** 围栏拒」才 403 —— 这样既挡住网页，又不破坏浏览器半边。
     let connection
     try {
       connection = deps.connection?.()
     } catch { connection = undefined }
     const rejection = rejectionFor(req, connection)
-    if (rejection !== undefined) {
+    const hasToken = tokenMatches(req, deps.token)
+
+    if (!hasToken && rejection !== undefined) {
       deny(res, rejection)
       return
     }
 
-    // ── 围栏 2：一次性令牌 ────────────────────────────────────────────────
-    if (!tokenMatches(req, deps.token)) {
-      deny(res, 401)
-      return
-    }
-
     try {
+      // ── 设置读写 ────────────────────────────────────────────────────────
+      //
+      // 桌宠有**自己**的设置文件（`$DSH_HOME/zhuang-fangyi-pet/settings.json`），
+      // 与主题插件各自独立 —— 两个插件零耦合，装一个不装另一个都能工作。
+      // 所以这里绝不代理到主题插件的 `/api/zhuang-fangyi/settings`：
+      // 那样写会把桌宠的 `pet` 块塞进主题插件的设置，被它的 normalize 丢掉。
+      if (route === '/settings') {
+        if (req.method === 'GET') {
+          sendJson(res, 200, { settings: deps.getSettings() })
+          return
+        }
+        if (req.method === 'POST' || req.method === 'PUT') {
+          let parsed
+          try {
+            parsed = JSON.parse(await readBody(req))
+          } catch {
+            sendJson(res, 400, { error: 'invalid json' })
+            return
+          }
+          const next = deps.setSettings(parsed?.settings ?? parsed)
+          sendJson(res, 200, { settings: next })
+          return
+        }
+        sendJson(res, 405, { error: 'method not allowed' })
+        return
+      }
+
       // ── SSE 下行 ────────────────────────────────────────────────────────
       if (route === '/events' && req.method === 'GET') {
         deps.hub.attach(req, res)

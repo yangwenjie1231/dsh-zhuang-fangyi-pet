@@ -109,6 +109,7 @@ const hub = createHub({ logger: { warn () {}, debug () {}, info () {} }, heartbe
 
 let positionPatch = null
 let commandSeen = null
+let settingsValue = { enabled: true, mode: 'auto', scale: 1 }
 
 const handler = createHandler({
   snapshot,
@@ -125,6 +126,11 @@ const handler = createHandler({
   onCommand: command => {
     commandSeen = command
     return { ok: command }
+  },
+  getSettings: () => settingsValue,
+  setSettings: next => {
+    settingsValue = { ...settingsValue, ...next }
+    return settingsValue
   }
 })
 
@@ -155,7 +161,7 @@ function auth (extra = {}) {
 /* ══════════════════════════════════════════════════════════════════════════
  * 1. 令牌
  * ═════════════════════════════════════════════════════════════════════════ */
-section('1. 一次性令牌（围栏 2）')
+section('1. 准入：令牌 或 同源围栏（两条路径都必须成立）')
 
 ok('newToken 产生 48 位 hex 且每次都不同', () => {
   const a = newToken()
@@ -177,17 +183,7 @@ ok('tokenMatches 拒绝缺失/错误/格式不符', () => {
   assert.equal(tokenMatches({ headers: { authorization: 'Bearer ' } }, TOKEN), false)
 })
 
-await okAsync('无令牌访问 /state → 401', async () => {
-  const r = await call(`${ROUTE_PREFIX}/state`)
-  assert.equal(r.status, 401)
-})
-
-await okAsync('错误令牌访问 /state → 401', async () => {
-  const r = await call(`${ROUTE_PREFIX}/state`, { headers: { authorization: 'Bearer nope' } })
-  assert.equal(r.status, 401)
-})
-
-await okAsync('正确令牌访问 /state → 200 且形状符合契约 §2', async () => {
+await okAsync('带正确令牌访问 /state → 200（原生 exe 路径）', async () => {
   const r = await call(`${ROUTE_PREFIX}/state`, { headers: auth() })
   assert.equal(r.status, 200)
   const body = JSON.parse(r.body)
@@ -196,15 +192,56 @@ await okAsync('正确令牌访问 /state → 200 且形状符合契约 §2', asy
   assert.ok(Array.isArray(body.sessions))
 })
 
-await okAsync('所有端点都要求令牌（/atlas /diag /position /command /art）', async () => {
-  for (const p of ['/atlas', '/diag', '/art/idle.png']) {
-    const r = await call(`${ROUTE_PREFIX}${p}`)
-    assert.equal(r.status, 401, `${p} 应要求令牌`)
-  }
-  for (const p of ['/position', '/command']) {
-    const r = await call(`${ROUTE_PREFIX}${p}`, { method: 'POST', body: '{}' })
-    assert.equal(r.status, 401, `${p} 应要求令牌`)
-  }
+await okAsync('不带令牌但同源访问 /state → 200（浏览器半边路径）', async () => {
+  // 关键：浏览器半边带不了令牌，EventSource 更是连请求头都不允许设。
+  // 所以同源请求必须放行，否则窗口内兜底桌宠直接坏掉。
+  const r = await call(`${ROUTE_PREFIX}/state`)
+  assert.equal(r.status, 200, '同源无令牌必须放行')
+})
+
+await okAsync('不带令牌且非 loopback Host → 403（挡住网页）', async () => {
+  const raw = await new Promise((resolve, reject) => {
+    const socket = http.request({
+      host: '127.0.0.1',
+      port,
+      path: `${ROUTE_PREFIX}/state`,
+      method: 'GET',
+      headers: { host: 'evil.example.com' }
+    }, res => {
+      let body = ''
+      res.on('data', c => { body += c })
+      res.on('end', () => resolve({ status: res.statusCode, body }))
+    })
+    socket.on('error', reject)
+    socket.end()
+  })
+  assert.equal(raw.status, 403)
+})
+
+await okAsync('不带令牌且 cross-site → 403（挡住网页）', async () => {
+  const raw = await new Promise((resolve, reject) => {
+    const socket = http.request({
+      host: '127.0.0.1',
+      port,
+      path: `${ROUTE_PREFIX}/state`,
+      method: 'GET',
+      headers: { host: `127.0.0.1:${port}`, 'sec-fetch-site': 'cross-site' }
+    }, res => {
+      res.on('data', () => {})
+      res.on('end', () => resolve({ status: res.statusCode }))
+    })
+    socket.on('error', reject)
+    socket.end()
+  })
+  assert.equal(raw.status, 403)
+})
+
+await okAsync('带令牌时即使 Origin 可疑也放行（原生 exe 不带 Origin）', async () => {
+  // exe 是原生进程，不会有 Origin；但万一有代理加上了，令牌仍应生效。
+  const r = await call(`${ROUTE_PREFIX}/state`, {
+    headers: auth({ origin: 'http://evil.com' })
+  })
+  assert.equal(r.status, 200, '令牌有效即放行')
 })
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -287,7 +324,7 @@ ok('connection 缺 admit 方法时退回结构围栏', () => {
   assert.equal(rejectionFor({ headers: { host: 'evil.com' } }, {}), 403)
 })
 
-await okAsync('真实请求：伪造非 loopback Host → 403', async () => {
+await okAsync('真实请求：伪造非 loopback Host 且无令牌 → 403', async () => {
   // fetch 不允许改 Host 头，所以直接对 server 发原始请求。
   const raw = await new Promise((resolve, reject) => {
     const socket = http.request({
@@ -295,7 +332,7 @@ await okAsync('真实请求：伪造非 loopback Host → 403', async () => {
       port,
       path: `${ROUTE_PREFIX}/state`,
       method: 'GET',
-      headers: { host: 'evil.example.com', authorization: `Bearer ${TOKEN}` }
+      headers: { host: 'evil.example.com' }
     }, res => {
       let body = ''
       res.on('data', c => { body += c })
@@ -305,6 +342,26 @@ await okAsync('真实请求：伪造非 loopback Host → 403', async () => {
     socket.end()
   })
   assert.equal(raw.status, 403)
+})
+
+await okAsync('真实请求：伪造 Host 但令牌有效 → 放行（令牌强于围栏）', async () => {
+  // 令牌是比 Host 头更强的秘密：持有令牌的一方本就能读快照，
+  // 所以令牌正确时不再因 Host 可疑而拒绝（原生 exe 也不带 Origin）。
+  const raw = await new Promise((resolve, reject) => {
+    const socket = http.request({
+      host: '127.0.0.1',
+      port,
+      path: `${ROUTE_PREFIX}/state`,
+      method: 'GET',
+      headers: { host: 'evil.example.com', authorization: `Bearer ${TOKEN}` }
+    }, res => {
+      res.on('data', () => {})
+      res.on('end', () => resolve({ status: res.statusCode }))
+    })
+    socket.on('error', reject)
+    socket.end()
+  })
+  assert.equal(raw.status, 200)
 })
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -483,6 +540,34 @@ await okAsync('POST /command 缺 command → 400', async () => {
 await okAsync('未知路由 → 404', async () => {
   const r = await call(`${ROUTE_PREFIX}/nope`, { headers: auth() })
   assert.equal(r.status, 404)
+})
+
+await okAsync('GET /settings 返回桌宠自己的设置', async () => {
+  const r = await call(`${ROUTE_PREFIX}/settings`, { headers: auth() })
+  assert.equal(r.status, 200)
+  const body = JSON.parse(r.body)
+  assert.equal(body.settings.mode, 'auto')
+})
+
+await okAsync('POST /settings 覆盖设置并回执归一化结果', async () => {
+  const r = await call(`${ROUTE_PREFIX}/settings`, {
+    method: 'POST',
+    headers: auth({ 'content-type': 'application/json' }),
+    body: JSON.stringify({ settings: { mode: 'overlay', scale: 1.5 } })
+  })
+  assert.equal(r.status, 200)
+  const body = JSON.parse(r.body)
+  assert.equal(body.settings.mode, 'overlay')
+  assert.equal(body.settings.scale, 1.5)
+})
+
+await okAsync('POST /settings 非法 JSON → 400', async () => {
+  const r = await call(`${ROUTE_PREFIX}/settings`, {
+    method: 'POST',
+    headers: auth({ 'content-type': 'application/json' }),
+    body: '{oops'
+  })
+  assert.equal(r.status, 400)
 })
 
 await okAsync('GET /diag 暴露构建标记与素材报告', async () => {

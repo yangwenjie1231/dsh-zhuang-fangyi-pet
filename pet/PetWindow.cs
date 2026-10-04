@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Controls;
@@ -40,7 +40,7 @@ namespace DshZhuangFangyiPet
         private readonly Border _fallback;
         private readonly TextBlock _fallbackText;
 
-        public event Action<int, int, double> PositionReported;
+        public Action<int, int, double> PositionReported = delegate { };
 
         public PetWindow(PetOptions opt, PetHttp http, PetSpriteStore store)
         {
@@ -479,7 +479,8 @@ namespace DshZhuangFangyiPet
         // 供 Program 挂接的回调（托盘菜单复用）
         // ------------------------------------------------------------------
 
-        public Action PetContextMenuRequested = delegate(PetWindow w, MouseButtonEventArgs e) { };
+        public Action<PetWindow, MouseButtonEventArgs> PetContextMenuRequested =
+            delegate(PetWindow w, MouseButtonEventArgs e) { };
         public Action FocusDshRequested = delegate { };
 
         // ------------------------------------------------------------------

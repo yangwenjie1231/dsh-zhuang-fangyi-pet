@@ -118,6 +118,13 @@ class JsonStore {
     return this.value
   }
 
+  /** 整体替换（设置页提交完整对象时用）。 */
+  replace (next) {
+    this.value = this.normalize ? this.normalize(next) : next
+    this.schedule()
+    return this.value
+  }
+
   schedule () {
     if (this.timer !== null) return
     this.timer = setTimeout(() => {
@@ -192,6 +199,8 @@ export function apply (ctx, config) {
       happyMs: settings.get().happyMs,
       sleepMs: settings.get().sleepMs,
       locale: settings.get().locale,
+      // 只在**关闭**气泡时覆盖；开启时用默认的状态列表。
+      // （传 undefined 会被状态机过滤掉，见 state.js 的说明。）
       bubbleStates: settings.get().bubble ? undefined : []
     },
     pickBubbleImage: (key, seed) => {
@@ -274,6 +283,14 @@ export function apply (ctx, config) {
     },
     onPosition: patch => {
       settings.update(patch)
+    },
+    getSettings: () => settings.get(),
+    setSettings: next => {
+      const applied = settings.replace(next)
+      settings.flush()
+      // 设置变了要让状态机跟着变（气泡开关、语言、时长）。
+      machine.apply({ type: 'tick' })
+      return applied
     },
     onCommand: command => {
       switch (command) {

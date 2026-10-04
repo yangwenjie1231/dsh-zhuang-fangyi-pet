@@ -1,0 +1,303 @@
+{
+  "bubble": [
+    {
+      "file": "bubble/cheer.png",
+      "h": 240,
+      "w": 240
+    },
+    {
+      "file": "bubble/joy.png",
+      "h": 240,
+      "w": 240
+    },
+    {
+      "file": "bubble/shy.png",
+      "h": 240,
+      "w": 240
+    },
+    {
+      "file": "bubble/sleepy.png",
+      "h": 240,
+      "w": 240
+    },
+    {
+      "file": "bubble/snack.png",
+      "h": 240,
+      "w": 240
+    },
+    {
+      "file": "bubble/starry.png",
+      "h": 240,
+      "w": 240
+    },
+    {
+      "file": "bubble/wink.png",
+      "h": 240,
+      "w": 240
+    },
+    {
+      "file": "bubble/writing.png",
+      "h": 240,
+      "w": 240
+    },
+    {
+      "file": "bubble/gif-01.png",
+      "h": 256,
+      "w": 256
+    },
+    {
+      "file": "bubble/gif-02.png",
+      "h": 256,
+      "w": 256
+    },
+    {
+      "file": "bubble/gif-03.png",
+      "h": 256,
+      "w": 256
+    },
+    {
+      "file": "bubble/gif-04.png",
+      "h": 256,
+      "w": 256
+    },
+    {
+      "file": "bubble/gif-06.png",
+      "h": 256,
+      "w": 256
+    },
+    {
+      "file": "bubble/gif-07.png",
+      "h": 256,
+      "w": 256
+    },
+    {
+      "file": "bubble/gif-24.png",
+      "h": 256,
+      "w": 256
+    },
+    {
+      "file": "bubble/gif-26.png",
+      "h": 256,
+      "w": 256
+    },
+    {
+      "file": "bubble/gif-28.png",
+      "h": 256,
+      "w": 256
+    },
+    {
+      "file": "bubble/gif-29.png",
+      "h": 256,
+      "w": 256
+    }
+  ],
+  "frameHeight": 256,
+  "generatedAt": "1970-01-01T00:00:00.000Z",
+  "missing": [
+    {
+      "detail": "有实心帧（33/33 帧铺满不透明），播放会出现矩形块；已排除动画，等手动抠图",
+      "name": "表情包_05_星空公式.gif",
+      "reason": "needsCutout"
+    },
+    {
+      "detail": "有实心帧（10/18 帧铺满不透明），播放会出现矩形块；已排除动画，等手动抠图",
+      "name": "表情包_27_生气指人.gif",
+      "reason": "needsCutout"
+    },
+    {
+      "detail": "四角纯白、完全不透明，需手动抠图",
+      "name": "表情包_08_爱你哦.png",
+      "reason": "needsCutout"
+    },
+    {
+      "detail": "四角纯白、完全不透明，需手动抠图",
+      "name": "表情包_09_比心.png",
+      "reason": "needsCutout"
+    },
+    {
+      "detail": "四角纯白、完全不透明，需手动抠图",
+      "name": "表情包_10_略略略.png",
+      "reason": "needsCutout"
+    },
+    {
+      "detail": "四角纯白、完全不透明，需手动抠图",
+      "name": "表情包_11_hi～.png",
+      "reason": "needsCutout"
+    },
+    {
+      "detail": "四角纯白、完全不透明，需手动抠图",
+      "name": "表情包_12_晚安啦.png",
+      "reason": "needsCutout"
+    },
+    {
+      "detail": "四角纯白、完全不透明，需手动抠图",
+      "name": "表情包_13_眨眼.png",
+      "reason": "needsCutout"
+    },
+    {
+      "detail": "四角纯白、完全不透明，需手动抠图",
+      "name": "表情包_14_么么哒.png",
+      "reason": "needsCutout"
+    },
+    {
+      "detail": "四角纯白、完全不透明，需手动抠图",
+      "name": "表情包_15_加油.png",
+      "reason": "needsCutout"
+    },
+    {
+      "detail": "四角纯白、完全不透明，需手动抠图",
+      "name": "表情包_16_开心点嘛.png",
+      "reason": "needsCutout"
+    },
+    {
+      "detail": "四角纯白、完全不透明，需手动抠图",
+      "name": "表情包_17_好耶.png",
+      "reason": "needsCutout"
+    },
+    {
+      "detail": "四角纯白、完全不透明，需手动抠图",
+      "name": "表情包_18_有点懵.png",
+      "reason": "needsCutout"
+    },
+    {
+      "detail": "四角纯白、完全不透明，需手动抠图",
+      "name": "表情包_19_谢谢哦.png",
+      "reason": "needsCutout"
+    },
+    {
+      "detail": "四角纯白、完全不透明，需手动抠图",
+      "name": "表情包_20_默大契.png",
+      "reason": "needsCutout"
+    },
+    {
+      "detail": "四角纯白、完全不透明，需手动抠图",
+      "name": "表情包_21_工作中.png",
+      "reason": "needsCutout"
+    },
+    {
+      "detail": "四角纯白、完全不透明，需手动抠图",
+      "name": "表情包_22_好气人哦.png",
+      "reason": "needsCutout"
+    },
+    {
+      "detail": "四角纯白、完全不透明，需手动抠图",
+      "name": "表情包_23_你最好了.png",
+      "reason": "needsCutout"
+    },
+    {
+      "detail": "已含部分 alpha（透明占比 31%），但带不透明桌面场景；用户认可即可直接放入 src/cutout/",
+      "name": "表情包_25_看书.png",
+      "reason": "needsCutout"
+    }
+  ],
+  "states": {
+    "error": {
+      "anchorY": 1.0,
+      "file": "error.png",
+      "frameHeight": 256,
+      "frameMs": 30,
+      "frames": 33
+    },
+    "happy": {
+      "anchorY": 1.0,
+      "file": "happy.png",
+      "frameHeight": 256,
+      "frameMs": 30,
+      "frames": 33
+    },
+    "idle": {
+      "anchorY": 1.0,
+      "file": "idle.png",
+      "frameHeight": 256,
+      "frameMs": 0,
+      "frames": 1
+    },
+    "listening": {
+      "anchorY": 1.0,
+      "file": "listening.png",
+      "frameHeight": 256,
+      "frameMs": 0,
+      "frames": 1
+    },
+    "sleeping": {
+      "anchorY": 1.0,
+      "file": "sleeping.png",
+      "frameHeight": 256,
+      "frameMs": 60,
+      "frames": 4
+    },
+    "thinking": {
+      "anchorY": 1.0,
+      "file": "thinking.png",
+      "frameHeight": 256,
+      "frameMs": 0,
+      "frames": 1
+    },
+    "waiting": {
+      "anchorY": 1.0,
+      "file": "waiting.png",
+      "frameHeight": 256,
+      "frameMs": 0,
+      "frames": 1
+    },
+    "waking": {
+      "anchorY": 1.0,
+      "file": "waking.png",
+      "frameHeight": 256,
+      "frameMs": 0,
+      "frames": 1
+    },
+    "working": {
+      "anchorY": 1.0,
+      "file": "working.png",
+      "frameHeight": 256,
+      "frameMs": 0,
+      "frames": 1
+    }
+  },
+  "variants": {
+    "error": [
+      "error.png",
+      "error-2.png"
+    ],
+    "happy": [
+      "happy.png",
+      "happy-2.png",
+      "happy-3.png",
+      "happy-4.png",
+      "happy-5.png"
+    ],
+    "idle": [
+      "idle.png",
+      "idle-2.png",
+      "idle-3.png"
+    ],
+    "listening": [
+      "listening.png",
+      "listening-2.png"
+    ],
+    "sleeping": [
+      "sleeping.png",
+      "sleeping-2.png"
+    ],
+    "thinking": [
+      "thinking.png",
+      "thinking-2.png",
+      "thinking-3.png"
+    ],
+    "waiting": [
+      "waiting.png",
+      "waiting-2.png"
+    ],
+    "waking": [
+      "waking.png",
+      "waking-2.png"
+    ],
+    "working": [
+      "working.png",
+      "working-2.png",
+      "working-3.png"
+    ]
+  },
+  "version": 1
+}

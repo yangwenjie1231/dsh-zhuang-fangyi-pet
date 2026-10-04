@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -163,10 +163,11 @@ namespace DshZhuangFangyiPet
             bool anchor = true;
             foreach (KeyValuePair<string, PetJson.StateEntry> kv in a.States)
                 if (kv.Value.AnchorY < 0 || kv.Value.AnchorY > 1) anchor = false;
-            Check(anchor, "anchorY 归一化在 0~1");
+            Check(anchor, "anchorY 归一化在 0~1", "全部状态 anchorY ∈ [0,1]");
 
             // 缺状态时回落 idle（契约 §4）
-            Check(PetJson.NormalizeState("不存在的状态") == "idle", "未知状态回落 idle");
+            Check(PetJson.NormalizeState("不存在的状态") == "idle", "未知状态回落 idle",
+                  "NormalizeState(\"不存在的状态\") → idle");
             return a;
         }
 
@@ -272,6 +273,10 @@ namespace DshZhuangFangyiPet
             o.BubbleEnabled = false;
 
             PetSpriteStore store = new PetSpriteStore(o, null, cacheDir);
+            // 必须先把清单装进 store，否则本体窗取不到条带、退化成兜底方块，
+            // alpha 命中测试就失去意义（自检必须验证真实精灵的穿透）。
+            bool atlasOk = store.LoadAtlas();
+            Check(atlasOk, "自检用 store 载入清单", atlasOk ? (store.Atlas.States.Count + " 状态") : store.AtlasError);
 
             // ---- 气泡窗：恒 HTTRANSPARENT ----
             PetBubble bubble = null;
@@ -328,15 +333,19 @@ namespace DshZhuangFangyiPet
                       "角落(" + (x + 2) + "," + (y + 2) + ")=" + corner.ToInt32() +
                       " 期望 -1；中心(" + (x + w / 2) + "," + (y + hh / 2) + ")=" + center.ToInt32() + " 期望 1");
 
-                // 150% DPI：DIP 尺寸应 ≈ 物理尺寸 × 96/dpi
+                // 150% DPI：窗口 DIP 尺寸 × dpi/96 必须等于精灵的物理像素帧尺寸
                 double dpi = PetNative.GetDpiForWindowSafe(h);
                 if (dpi <= 0) dpi = 96;
-                double expectDip = sheet == null ? 0 : sheet.FrameW * 96.0 / dpi;
-                double actualDip = win.ActualWidth;
-                bool dipOk = sheet == null || Math.Abs(actualDip - expectDip) < 2.0;
-                Check(dipOk, "150% DPI 缩放换算",
-                      "物理 " + (sheet == null ? 0 : sheet.FrameW) + "px @ dpi " + dpi + " → 期望 DIP " +
-                      expectDip.ToString("0.0") + "，实际 " + actualDip.ToString("0.0"));
+                bool hasSprite = win.HasSprite;
+                int physW = (int)Math.Round(win.ActualWidth * dpi / 96.0);
+                int physH = (int)Math.Round(win.ActualHeight * dpi / 96.0);
+                int wantW = sheet == null ? 0 : sheet.FrameW;
+                int wantH = sheet == null ? 0 : sheet.FrameH;
+                bool dipOk = hasSprite && Math.Abs(physW - wantW) <= 1 && Math.Abs(physH - wantH) <= 1;
+                Check(dipOk, "150% DPI 缩放换算（物理像素 1:1，不糊）",
+                      "精灵 " + wantW + "x" + wantH + "px @ dpi " + dpi + "（" + (dpi * 100 / 96) + "%）→ 窗口 DIP " +
+                      win.ActualWidth.ToString("0.0") + "x" + win.ActualHeight.ToString("0.0") +
+                      " = 物理 " + physW + "x" + physH + "px");
 
                 // 位置 clamp
                 win.ReclampPosition(true);
@@ -383,7 +392,7 @@ namespace DshZhuangFangyiPet
 
         private static void TestMutex()
         {
-            bool created;
+            bool created = false;
             Mutex m = null;
             try
             {
@@ -487,10 +496,11 @@ namespace DshZhuangFangyiPet
                     {
                         int ox = i * fh;
                         int shade = 20 * i;
+                        // 显式 (int) 转换：否则 Math.Min(byte,byte) 与 Math.Min(int,int) 二义
                         Color c = Color.FromArgb(255,
-                            Math.Min(255, color.R + shade),
-                            Math.Min(255, color.G + shade),
-                            Math.Min(255, color.B));
+                            Math.Min(255, (int)color.R + shade),
+                            Math.Min(255, (int)color.G + shade),
+                            Math.Min(255, (int)color.B));
                         using (SolidBrush b = new SolidBrush(c))
                             g.FillEllipse(b, ox + 7, 7, fh - 15, fh - 15);
                     }

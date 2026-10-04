@@ -138,11 +138,13 @@ $ManifestPath = Join-Path $PetDir 'app.manifest'
 $UseManifest = (-not $NoManifest) -and (Test-Path -LiteralPath $ManifestPath)
 
 $CommonArgs = New-Object System.Collections.Generic.List[string]
+# 注意：PowerShell 里 ',' 比 '+' 结合更紧，'-out:' + $OutExe 会被拆成两个数组元素，
+# 因此这里必须加括号，否则 csc 报 CS2005「-out: 选项缺少文件规范」。
 foreach ($a in @(
     '-nologo', '-noconfig', '-nostdlib+',
     '-target:winexe', '-optimize+', '-debug-',
     '-platform:anycpu',
-    '-out:' + $OutExe
+    ('-out:' + $OutExe)
 )) { $CommonArgs.Add($a) }
 if ($UseManifest) { $CommonArgs.Add('-win32manifest:' + $ManifestPath) }
 foreach ($a in $RefArgs) { $CommonArgs.Add($a) }
@@ -152,7 +154,8 @@ function Invoke-Compiler([string]$FilePath, [string[]]$ArgumentList, [string]$La
     Write-Host "[build] $Label"
     Write-Host "[build] $FilePath $($ArgumentList -join ' ')"
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
-    & $FilePath @ArgumentList
+    # csc 的 stdout/stderr 会流进函数返回值；必须吞掉，只把退出码返回给调用方。
+    & $FilePath @ArgumentList 2>&1 | Out-Host
     $code = $LASTEXITCODE
     $sw.Stop()
     Write-Host ("[build] $Label 退出码 $code，耗时 {0:n2}s" -f $sw.Elapsed.TotalSeconds)
