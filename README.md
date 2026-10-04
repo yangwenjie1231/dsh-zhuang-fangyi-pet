@@ -133,6 +133,34 @@ powershell -NoProfile -File tools\deploy.ps1
 详细规则见 `art/pet/src/README.md`。**抠图不做也不会让桌宠坏掉** ——
 9 个状态目前都已覆盖，只是表情没那么多。
 
+### ⚠️ 变体几何：`pet.json` 的 `files` 映射
+
+`variants` 里的素材**几何差异极大** —— 它混了「静态 PNG（1 帧）」与
+「动态 GIF（N 帧）」。实测 24 个变体里 **14 个**与所属状态的声明不符：
+
+```
+happy 声明 33帧 × 256px，但 happy-2 = 274px（1 帧）、happy-4 = 239px（1 帧）
+```
+
+若按状态的 `frames` 去切变体，`happy-4.png` 会变成 `239/33 = 7px` 的**碎条**。
+
+所以 `pet.json` 有一个顶层 **`files` 映射**，给**每个文件自己的**几何：
+
+```jsonc
+"files": {
+  "happy.png":   { "frames": 33, "frameWidth": 256, "frameMs": 30 },
+  "happy-2.png": { "frames": 1,  "frameWidth": 274, "frameMs": 0  }
+}
+```
+
+**几何解析优先级**（Host / exe / overlay 三方统一）：
+
+```
+files[<文件名>]  →  states[<state>]  →  图片实测（naturalWidth / frames）
+```
+
+`files` 缺失时自动回落后两级，**旧清单仍可用**。
+
 ---
 
 ## 五、状态机
@@ -219,12 +247,15 @@ tools/build-pet.ps1   离线编译 exe
 ### 测试
 
 ```powershell
-node tools/test-pet-state.mjs    # 状态机 + 事件翻译 + 素材清单（87 项）
-node tools/test-pet-route.mjs    # 路由 + 三道安全围栏 + SSE 帧格式（51 项）
+node tools/test-pet-state.mjs    # 状态机 + 事件翻译 + 素材清单（96 项）
+node tools/test-pet-route.mjs    # 路由 + 三道安全围栏 + SSE 帧格式（52 项）
 node tools/test-pet-client.mjs   # 浏览器半边 + 渲染约束（47 项）
+node tools/test-pet-e2e.mjs      # 真实装配端到端（23 项）
 ```
 
-三套共 **185 项断言**，无框架依赖（纯 `node:assert`）。
+四套共 **218 项断言**，无框架依赖（纯 `node:assert`）。
+端到端那套用**真实** `apply()` + **真实** `pet.json` + 真读 SSE 帧，
+验证「宿主事件 → 状态机 → 推送」整条链路。
 
 ### 两道接口契约
 
