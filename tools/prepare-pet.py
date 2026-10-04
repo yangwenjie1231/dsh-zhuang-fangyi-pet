@@ -25,6 +25,10 @@
     实测被它拦下的只有 `05_星空公式`（33/33 帧全实心）与 `27_生气指人`（10/18 帧实心）。
   · **帧高 256px**（本机 150% DPI，小了会糊）。`frameMs` 取该 GIF 各帧时长的**中位数**，
     所以 30/60ms 交错的动画取 30ms（快帧才是视觉主体）。
+  · **单帧不是方的**：各素材内容 bbox 的纵横比不同（0.85~1.13），所以「帧高统一 256、
+    宽度保纵横比」后单帧宽落在 239~288 之间。清单必须为每个状态写出 `frameWidth`
+    （契约 §4 必需字段），否则两侧会拿 `frameHeight` 当帧宽，把图横向压扁。
+    条带宽 = `frames × frameWidth`，**不是** `frames × frameHeight`。
   · **清单是唯一契约**。`pet.json` 严格照契约 §4；`states` 的键只能取 §1 的 9 个状态名，
     缺状态时 Host 回落 `idle`，**缺失不得导致任何一方报错**。
   · **用户手动抠图自动纳入**。`art/pet/src/cutout/<状态名>.png` 会覆盖同名状态映射，
@@ -290,6 +294,29 @@ def strip_name(state, index):
     return '%s.png' % state if index == 0 else '%s-%d.png' % (state, index + 1)
 
 
+def render_tiles(item):
+    """把一份素材渲染成**规整化的帧列表**，返回 `(tiles, frame_ms)`。
+
+    主流程与 `--check` **共用这一个函数**，保证 `--check` 打印的单帧尺寸
+    就是产出条带的真实尺寸，不会因为两份逻辑各自演化而漂移。
+
+    规整化两步：
+      1. 用**并集**包围盒统一裁切 —— 逐帧各自裁切会让偏移不同，动画会抖动；
+      2. 等比缩放到精确 `FRAME_HEIGHT` 高。
+    """
+    src = item.get('cutout') or item['path']
+    if item['kind'] == 'gif':
+        frames, durations = gif_frames(src)
+        frame_ms = median_ms(durations)
+    else:
+        frames, frame_ms = [read_rgba(src)], 0
+
+    box = union_bbox(frames)
+    if box:
+        frames = [f.crop(box) for f in frames]
+    return [to_height(f, FRAME_HEIGHT) for f in frames], frame_ms
+
+
 def write_strip(state, item, index, report, cache, want_thumb=False):
     """产出某状态的横向精灵条带 `art/pet/<state>.png`。
 
@@ -310,18 +337,7 @@ def write_strip(state, item, index, report, cache, want_thumb=False):
         report['made'].append((rel, None, os.path.getsize(os.path.join(ART, rel))))
         return dict(prev, file=rel)
 
-    src = item.get('cutout') or item['path']
-    if item['kind'] == 'gif':
-        frames, durations = gif_frames(src)
-        frame_ms = median_ms(durations)
-    else:
-        frames, frame_ms = [read_rgba(src)], 0
-
-    # 用**并集**包围盒统一裁切，避免逐帧偏移不同导致动画抖动
-    box = union_bbox(frames)
-    if box:
-        frames = [f.crop(box) for f in frames]
-    tiles = [to_height(f, FRAME_HEIGHT) for f in frames]
+    tiles, frame_ms = render_tiles(item)
 
     # 帧宽取最大值，窄帧水平居中 —— 保证条带是规整网格，取帧不会错位
     cell_w = max(t.width for t in tiles)
@@ -467,12 +483,16 @@ def print_check(mapping, gif_rows, png_rows, dropped, bubbles, usable, states_li
     print()
     print('弃用（与 wx PNG 重复的单帧 GIF）：%d 张' % len(dropped))
     print()
-    print('状态覆盖（契约 §1 的 9 个状态）：')
+    print('状态覆盖（契约 §1 的 9 个状态；单帧宽高 = 产出条带的实际单帧尺寸）：')
+    print('  %-4s %-10s %-14s %5s %6s %11s %6s %8s' % (
+        '', '状态', '文件', '帧数', '帧宽', '单帧(宽x高)', 'frameMs', 'variants'))
     for s in PET_STATES:
         if s in states_light:
             st = states_light[s]
-            print('  [OK] %-10s %-14s %2d 帧 @%dms  variants=%d'
-                  % (s, st['file'], st['frames'], st['frameMs'], len(mapping.get(s, []))))
+            print('  [OK] %-10s %-14s %5d %6d %5dx%-5d %6d %8d'
+                  % (s, st['file'], st['frames'], st['frameWidth'],
+                     st['frameWidth'], FRAME_HEIGHT, st['frameMs'],
+                     len(mapping.get(s, []))))
         else:
             print('  [缺] %-10s → Host 回落 idle' % s)
     print()
@@ -524,18 +544,14 @@ def main():
             bubble_items.append(u)
 
     if args.check:
-        # 只报覆盖率：轻量探测（不写文件、不缩放、不裁切）
+        # 只读：不写任何文件。单帧尺寸走 render_tiles（与主流程同一函数），
+        # 所以这里打印的就是产出条带的真实单帧宽高。
         light = {}
         for state, items in mapping.items():
-            it = items[0]
-            src = it.get('cutout') or it['path']
-            if it['kind'] == 'gif':
-                _, durs = gif_frames(src)
-                light[state] = {'file': '%s.png' % state,
-                                'frames': it.get('frames') or 1,
-                                'frameMs': median_ms(durs)}
-            else:
-                light[state] = {'file': '%s.png' % state, 'frames': 1, 'frameMs': 0}
+            tiles, frame_ms = render_tiles(items[0])
+            light[state] = {'file': '%s.png' % state, 'frames': len(tiles),
+                            'frameWidth': max(t.width for t in tiles),
+                            'frameMs': frame_ms}
         gif_rows = [(u['name'], u['frames'], True, u['minT'])
                     for u in usable if u['kind'] == 'gif']
         # 被排除的 GIF 也列出来，让用户看清为什么被排除

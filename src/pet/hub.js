@@ -117,11 +117,15 @@ export function createHub (options = {}) {
         'x-accel-buffering': 'no'
       })
       res.write(': connected\n\n')
-      // 建议重连间隔：断线后 3s 再试（C# 侧也读这一行，但自己有退避）。
+      // 建议重连间隔：断线后 3s 再试（C# 侧也读这一行，但有自己退避）。
       res.write('retry: 3000\n\n')
       // 连上立刻给一帧全量现状：新客户端不需要回放历史。
+      //
+      // **绝不发空对象** `{}` —— 那会让客户端的 `petState` / `rev` 变成 undefined，
+      // 而它们按契约 §2 是必填的（实测过：空帧会让客户端的合法性校验失败、
+      // rev 单调性被破坏）。没有快照时就不发 hello，客户端会等下一帧 state；
+      // 若一直没有，它会走轮询兜底。
       if (lastSnapshot !== null) writeFrame(res, 'hello', lastSnapshot)
-      else res.write('event: hello\ndata: {}\n\n')
 
       clients.add(res)
       startHeartbeat()

@@ -124,12 +124,24 @@ $py = 'C:\Users\A\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\pyth
 
 | 路径 | 内容 |
 |---|---|
-| `art\pet\<state>.png` | 状态精灵条带，**横向**：`帧数 × 256px` 宽、256px 高 |
+| `art\pet\<state>.png` | 状态精灵条带，**横向**：`帧数 × frameWidth` 宽、256px 高 |
 | `art\pet\<state>-2.png` | 同状态的轮换变体 |
 | `art\pet\thumbs\<state>.png` | 48px 缩略图（UI 预览用） |
 | `art\pet\bubble\*.png` | 气泡表情池（≤256px，1:1 不裁切） |
 | `art\pet\pet.json` | **素材清单**，Host 与 exe 的唯一契约（契约 §4） |
 | `art\pet\src\` | 源素材暂存：`png\` `gif\` `raw\` `cutout\` |
+
+**单帧不是方的**：各素材内容 bbox 的纵横比不同（0.85~1.13），所以帧高统一 256、
+宽度保纵横比后，单帧宽落在 **239~288** 之间。因此 `pet.json` 为每个状态写出
+`frameWidth`（契约 §4 必需字段）：
+
+```jsonc
+"idle": { "file": "idle.png", "frames": 1, "frameWidth": 284, "frameMs": 0 }
+```
+
+条带宽 = `frames × frameWidth`，**不是** `frames × frameHeight` ——
+拿 `frameHeight` 当帧宽会把图横向压扁，并在切状态时宽度跳变。
+两侧都必须优先用图片实测值（`naturalWidth / frames`），`frameWidth` 用于加载前占位。
 
 精灵条带一份产物同时喂 WPF 的 `CroppedBitmap` 与 overlay 的 CSS `steps(N)`；
 exe 按 `pet.json` 的 `frameHeight` 缩放，**不得假设固定值**。

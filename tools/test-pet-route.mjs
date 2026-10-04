@@ -418,6 +418,10 @@ await okAsync('/atlas 返回清单且含覆盖率报告', async () => {
 section('4. SSE 帧格式（契约 §2）')
 
 await okAsync('/events 建立流并立刻发 hello + retry', async () => {
+  // hello 只在**已有快照**时发送（绝不发空对象，见 hub.attach 的说明），
+  // 所以先广播一帧再连，模拟宿主启动时的行为。
+  hub.broadcast(snapshot())
+
   const controller = new AbortController()
   const res = await fetch(`${ROUTE}/events`, { headers: auth(), signal: controller.signal })
   assert.equal(res.status, 200)
@@ -426,11 +430,9 @@ await okAsync('/events 建立流并立刻发 hello + retry', async () => {
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let text = ''
-  // 读的同时广播，直到 hello 与 state 都到齐（或超时）。
-  hub.broadcast(snapshot())
   const deadline = Date.now() + 4000
   while (Date.now() < deadline) {
-    if (text.includes('event: hello') && text.includes('event: state')) break
+    if (text.includes('event: hello')) break
     const { value, done } = await reader.read()
     if (done) break
     text += decoder.decode(value, { stream: true })
@@ -440,8 +442,25 @@ await okAsync('/events 建立流并立刻发 hello + retry', async () => {
   assert.ok(text.includes(': connected'), '应有连接注释帧')
   assert.ok(text.includes('retry: 3000'), '应有重连建议')
   assert.ok(text.includes('event: hello'), '应有 hello 帧')
-  assert.ok(text.includes('event: state'), '应有 state 帧')
   assert.match(text, /\ndata: \{/, 'data 行格式应为 "data: {..."')
+})
+
+await okAsync('无快照时不发空 hello（避免 petState/rev 变 undefined）', async () => {
+  // 用一个全新的 hub，确保没有 lastSnapshot。
+  const fresh = createHub({ logger: { warn () {} }, heartbeatMs: 60000 })
+  const seen = []
+  fresh.attach({ on () {} }, {
+    writeHead () {},
+    write (chunk) { seen.push(String(chunk)) },
+    end () {},
+    on () {},
+    writableEnded: false,
+    destroyed: false
+  })
+  const joined = seen.join('')
+  assert.ok(joined.includes(': connected'), '仍应有连接注释')
+  assert.ok(!joined.includes('data: {}'), '绝不能发空对象 hello')
+  fresh.dispose()
 })
 
 await okAsync('SSE 的 data 行是单行 JSON（不能含裸换行）', async () => {

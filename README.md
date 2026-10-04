@@ -1,0 +1,271 @@
+# dsh-zhuang-fangyi-pet · 庄方宜桌宠
+
+**真的浮在桌面上的桌宠** —— 不是一个待在 DSH 窗口里的悬浮层。
+
+表情随 agent 的实时状态变化（思考 / 调工具 / 等你审批 / 完成 / 出错 / 睡觉…），
+气泡用**表情图 + 文字**把其余表情也带出来。零安装运行时，跨平台自动回落窗口内。
+
+> 官方素材，非官方同人作品。
+
+---
+
+## 一、它和 `dsh-zhuang-fangyi`（主题插件）的关系
+
+**零耦合，各自独立。**
+
+| | 主题插件 | 桌宠 |
+|---|---|---|
+| 包名 | `dsh-zhuang-fangyi` | `dsh-zhuang-fangyi-pet` |
+| 设置 | `$DSH_HOME/zhuang-fangyi/settings.json` | `$DSH_HOME/zhuang-fangyi-pet/settings.json` |
+| 路由 | `/api/zhuang-fangyi/*` | `/api/zhuang-fangyi/pet/*` |
+| 依赖对方？ | 否 | 否 |
+
+可以只装桌宠不装主题。桌宠会读主题写在 CSS 变量上的配色（`--dsw-alias-*`）做联动，
+**但不读主题的设置文件** —— 那是实现细节，会锁死两个插件的版本关系。
+
+---
+
+## 二、为什么能浮在桌面上（而不只是窗口内）
+
+原先的调研把候选限定为「窗口内 overlay / 自带 Electron / Tauri / 借主进程开窗 / koffi」，
+于是得出「只能待在窗口内」。**这个选择集漏了最优解**：
+
+> 由插件宿主用官方 `ctx.subprocess` 接缝，启动一个**我们自己编译的 .NET Framework 4.8 小 exe**，
+> 由它自建无边框 + 透明 + 置顶 + **alpha 点击穿透**的窗口，经 HTTP/SSE 连回宿主拿状态。
+
+| 维度 | 窗口内 overlay | 自带 Electron | **本方案（net48 小 exe）** |
+|---|---|---|---|
+| 浮在桌面 | ❌ | ✅ | ✅ |
+| 额外内存 | 0 | +80~150 MB | ~50 MB |
+| 交付体积 | 0 | 一整个 Electron | **~12 KB 空壳** |
+| 需装运行时 | — | 需打包 | **不需要**（net48 是 Win10 1903+/Win11 自带） |
+| 需联网构建 | — | — | **不需要**（离线编译已验证） |
+| 跨平台 | ✅ 全平台 | 差 | Windows 优先；其它平台回落 overlay |
+
+**关键：这不碰 DSH 的主进程 IPC 白名单。** 那条白名单限制的是"让 DSH 替我开窗"，
+不限制"我自己 spawn 一个进程"。用的是官方受管的子进程接缝（服务 dispose 时会自动
+终止受管进程，所以关掉 DSH 不会留孤儿）。
+
+### 它怎么知道该摆什么表情（零桥接）
+
+桌宠**不需要任何人转发状态**，宿主自己就能读到：
+
+- 宿主在**根 Context** 上监听 `agent/status` / `session/event` / `agent/error` 等事件；
+- `@deepseek-ai/dsh-scope` 的作用域过滤器对**无 tag 的根监听者一律放行**，
+  所以根监听者能收到**全部**会话的事件 —— 不需要按会话 `retain()`，
+  因此也不存在引用计数泄漏（这是原设计文档担心的头号风险）。
+- `session/event` 里的 `turn/end` 带 `reason.kind`（`completed` / `error` /
+  `max-tokens` / `aborted`…），这正是"完成"与"出错"的权威来源。
+
+**绝不读会话消息正文** —— 只消费事件元数据与 `reason.kind`。
+
+---
+
+## 三、安装
+
+```powershell
+# 1. 编译原生窗口（离线，只需系统自带的 .NET Framework 4.8）
+pwsh -File tools/build-pet.ps1
+
+# 2. 装进 profile（与主题插件同样的做法）
+dsh plugin --profile desktop add <本目录的绝对路径>
+
+# 3. 部署（会一起搬运 exe 与素材）
+pwsh -File tools/deploy.ps1
+
+# 4. 重载
+#    plugin_manager set_plugin target=include:zhuang-fangyi-pet enabled=false → true
+```
+
+**没有 exe 也能用**：桌宠会自动回落到窗口内悬浮层（`shell.overlay`），
+功能完整，只是不浮在桌面上。`/api/zhuang-fangyi/pet/diag` 会给出确切原因。
+
+---
+
+## 四、素材：PNG 优先，抠图交给你
+
+素材来源 `庄方宜素材\10-表情包\`，分三类：
+
+| 类别 | 文件 | 处置 |
+|---|---|---|
+| **已透明 PNG** | `wx\*.png`（8 张，240×240） | **首选**，直接用 |
+| **已透明 GIF** | `QQ表情\*.gif` 中干净的 **10 张** | 本体动画 |
+| **待抠图** | `QQ表情\*.png`（17 张纯白底 1000×1000） | ⚠️ **等你手动抠** |
+
+### 哪些 GIF 能用，哪些不能用
+
+判据是**逐帧统计「alpha==0 的像素占比」** —— 因为桌宠的硬要求是
+「**任何一帧都不能铺满不透明像素**」，否则播放到那一帧会出现一个矩形色块。
+
+```
+干净（10 张，可用）：01 02 03 04 06 07 24 26 28 29
+有实心帧（2 张，排除）：05_星空公式（33/33 帧实心）、27_生气指人（10/18 帧实心）
+```
+
+> 这个判据是踩过坑才定下来的：bbox 会被"主体画到画面边缘"骗，
+> 洋红透过率会被"主体占满宽度"骗（02/26/29 都曾被误判为脏）。
+> 只有逐帧透明占比能直接回答"这一帧会不会显示成一个块"。
+
+### 你要做的：手动抠图
+
+1. 打开 `art/pet/src/raw/`，里面是 17 张待抠的纯白底 PNG（还有 `gif/` 里的 05、27）；
+2. 抠好后**保留 alpha**（RGBA PNG，**不要 flatten、不要贴白底** —— 否则透明区
+   残留 RGB 会变成彩色噪点），按状态命名放进 `art/pet/src/cutout/`：
+
+   ```
+   art/pet/src/cutout/
+     sleeping.png          ← 覆盖该状态的主素材
+     happy-2.png           ← 追加为该状态的变体
+     waiting.png
+     ...
+   ```
+
+3. 重跑管线并重载：
+
+   ```powershell
+   python tools/prepare-pet.py
+   # 然后在 DSH 里 POST /api/zhuang-fangyi/pet/command  {"command":"reload-art"}
+   ```
+
+详细规则见 `art/pet/src/README.md`。**抠图不做也不会让桌宠坏掉** ——
+9 个状态目前都已覆盖，只是表情没那么多。
+
+---
+
+## 五、状态机
+
+| 状态 | 触发 |
+|---|---|
+| `waking` | 插件加载后的亮相（~1.5s，有真实活动即提前结束） |
+| `idle` | 默认 |
+| `listening` | 收到用户消息 / 新消息入队 |
+| `thinking` | `agent/status→running` 且无在飞工具 |
+| `working` | `tool/call` 在飞（按 `callId` 去重计数） |
+| `waiting` | 在等你审批 |
+| `happy` | `turn/end` 且 `reason.kind === 'completed'` |
+| `error` | `agent/error` / `api-session/error` / `turn/end` 失败 |
+| `sleeping` | 全局空闲超过设定时长 |
+
+**优先级**（跨会话取最大者，表现"最需要被看到"的那个会话）：
+
+```
+working(90) > waiting(80) > thinking(70) > error(60)
+           > happy(50) > listening(40) > waking(30) > idle(20) > sleeping(10)
+```
+
+两个刻意的排序，都有依据：
+
+- **`error` 低于 `thinking`/`waiting`** —— 实现"历史错误不该覆盖当前回合"。
+  配合"`running` 会清除该会话的错误闩锁"，`error` 只在该会话**真的停在错误上**时生效。
+  否则一次失败之后桌宠会一直生气，与外壳行为不一致。
+- **`waiting` 高于 `thinking`** —— 被审批卡住的会话最该被看到，
+  否则它看起来只是"在忙"。
+
+---
+
+## 六、配置
+
+设置页在 DSH 的「外观」里，或直接改
+`$DSH_HOME/zhuang-fangyi-pet/settings.json`：
+
+| 键 | 默认 | 说明 |
+|---|---|---|
+| `enabled` | `true` | 总开关 |
+| `mode` | `'auto'` | `auto`（优先桌面窗）/ `native` / `overlay` |
+| `scale` | `1.0` | 大小，0.5~2.0 |
+| `opacity` | `1.0` | 不透明度，0.3~1.0 |
+| `topmost` | `true` | 总在最前 |
+| `clickThrough` | `false` | 整窗穿透（纯装饰） |
+| `bubble` | `true` | 气泡总开关 |
+| `bubbleImages` | `true` | 气泡是否显示表情图 |
+| `happyMs` | `3000` | "完成"开心多久 |
+| `sleepMs` | `300000` | 空闲多久后睡觉 |
+| `x` / `y` | `null` | **仅原生窗口**的位置 |
+
+> `x`/`y` **只属于原生窗口**。窗口内 overlay 用视口坐标、原生窗用桌面坐标，
+> 混写同一组字段会互相覆盖导致位置乱跳 —— 所以 overlay 自己记 `localStorage`。
+
+---
+
+## 七、交互
+
+- **拖动**：按住桌宠拖到任意位置，重启后保持（拖出屏幕会被夹回工作区）。
+- **双击**：唤起并前置 DSH 主窗口（best-effort）。
+- **透明处点击穿透**：鼠标能点到桌宠"身后"的桌面图标与窗口 ——
+  这是靠 `WM_NCHITTEST` 按像素 alpha 判定的（已实测）。
+- **托盘图标**：显示/隐藏、点击穿透开关、缩放档位、重置位置、退出。
+- **右键桌宠**：切换表情预览、打开 DSH 窗口、隐藏。
+
+---
+
+## 八、开发
+
+```
+src/pet/state.js      纯函数状态机（9 状态 + 气泡），唯一真相
+src/pet/events.js     DSH 事件 → 状态机信封（唯一翻译点）
+src/pet/atlas.js      素材清单加载 + URL 白名单（唯一素材入口）
+src/pet/hub.js        SSE 推送
+src/pet/routes.js     /pet/* 路由 + 三道围栏
+src/pet/launcher.js   exe 启动 / 观测 / 终止
+pet/*.cs              原生窗口（C# / WPF / net48）
+client.js             窗口内 overlay 兜底 + 设置页
+tools/prepare-pet.py  素材管线
+tools/build-pet.ps1   离线编译 exe
+```
+
+### 测试
+
+```powershell
+node tools/test-pet-state.mjs    # 状态机 + 事件翻译 + 素材清单（87 项）
+node tools/test-pet-route.mjs    # 路由 + 三道安全围栏 + SSE 帧格式（51 项）
+node tools/test-pet-client.mjs   # 浏览器半边 + 渲染约束（47 项）
+```
+
+三套共 **185 项断言**，无框架依赖（纯 `node:assert`）。
+
+### 两道接口契约
+
+改任何跨半边的东西前，先读 **`docs/接口契约.md`** —— 它是
+Host / exe / overlay 三方之间的唯一契约（状态名、快照 payload、SSE 帧格式、
+HTTP 路由、`pet.json` schema、exe argv 与退出码）。改契约要先改文档再改三方。
+
+### 两个容易踩的坑
+
+1. **改了 `index.js` / `src/*.js` 后，disable→enable 不够。** 宿主进程缓存 ESM 模块，
+   重载只重跑 `apply()`，不会重新 `import` 依赖模块。用
+   `GET /api/zhuang-fangyi/pet/diag` 的 `build` 字段确认跑的是哪一版；不匹配就重启 DSH。
+2. **`.ps1` 必须是 UTF-8 with BOM。** 本机 shell 是 Windows PowerShell 5.1，
+   它把无 BOM 的 UTF-8 当 ANSI/GBK 解码，中文注释会让脚本**语法都过不了**。
+
+---
+
+## 九、安全
+
+三道围栏，各管一件事：
+
+1. **准入**：令牌 **或** 同源信任围栏。原生 exe 带令牌；浏览器半边带不了
+   （`EventSource` 不允许设置请求头），所以走围栏（仅 loopback Host、
+   拒 cross-site、Origin/Referer 同 authority）。
+2. **一次性令牌**：每次启动 exe 随机生成、经 argv 传递、**不落盘**、常量时间比较。
+3. **素材白名单**：由 `pet.json` 派生，绝不拼接客户端路径，并二次校验
+   `path.resolve` 仍在 `art/pet` 内（防目录遍历）。
+
+**诚实说明边界**：围栏挡的是**网页**（跨站读取 / DNS 重绑定）。
+它**挡不住本机任意进程**（任何进程都能伪造 loopback Host）。这与本 profile 的
+既有事实一致（主题插件的路由本来就是无令牌、仅靠 loopback 暴露的），
+而桌宠快照**不含任何消息正文**，只有 `thinking/working/…` 这类状态词。
+
+---
+
+## 十、已知限制
+
+- **非 Windows 平台只有窗口内 overlay**（原生窗本版本只做 Windows）。
+- **exe 未签名**，首次运行可能被 SmartScreen 拦一次。
+- 需要 Windows 10 1903+ / Windows 11（net48 自带）。更老的系统需自行安装 .NET Framework 4.8。
+- `turn/end` 是 post-commit 事件，状态有毫秒级延迟（对表现无影响）。
+
+---
+
+## 许可
+
+MIT。素材版权归原作者/发行方所有，本插件仅作本地展示用途。

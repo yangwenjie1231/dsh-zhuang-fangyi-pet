@@ -178,6 +178,8 @@ namespace DshZhuangFangyiPet
         private readonly Dictionary<string, int> _variantCursor = new Dictionary<string, int>(StringComparer.Ordinal);
         private readonly Dictionary<string, BitmapSource> _bubbleCache = new Dictionary<string, BitmapSource>(StringComparer.Ordinal);
         private readonly Dictionary<string, byte[]> _remoteCache = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+        private readonly Dictionary<string, DateTime> _negativeCache = new Dictionary<string, DateTime>(StringComparer.Ordinal);
+        private const int NegativeCacheSeconds = 30;
 
         public string CacheDir { get { return _cacheDir; } }
         public PetJson.Atlas Atlas { get { return _atlas; } }
@@ -197,6 +199,7 @@ namespace DshZhuangFangyiPet
                 _sheets.Clear();
                 _bubbleCache.Clear();
                 _remoteCache.Clear();
+                _negativeCache.Clear();
             }
         }
 
@@ -276,6 +279,10 @@ namespace DshZhuangFangyiPet
             {
                 byte[] cached;
                 if (_remoteCache.TryGetValue(rel, out cached)) return cached;
+                // 负缓存：取不到的素材在 TTL 内不再重试。
+                // 否则动画每帧都会重新拉一遍（宿主未起时会把日志刷爆、并造成无谓的 HTTP 风暴）。
+                DateTime until;
+                if (_negativeCache.TryGetValue(rel, out until) && DateTime.UtcNow < until) return null;
             }
 
             byte[] data = null;
@@ -313,9 +320,17 @@ namespace DshZhuangFangyiPet
                 catch (Exception ex) { PetLog.Info("art " + rel + " 缓存读取失败: " + PetLog.Describe(ex)); }
             }
 
-            if (data == null) return null;
+            if (data == null)
+            {
+                lock (_gate) { _negativeCache[rel] = DateTime.UtcNow.AddSeconds(NegativeCacheSeconds); }
+                return null;
+            }
 
-            lock (_gate) { _remoteCache[rel] = data; }
+            lock (_gate)
+            {
+                _remoteCache[rel] = data;
+                _negativeCache.Remove(rel);
+            }
 
             if (origin == "host")
             {

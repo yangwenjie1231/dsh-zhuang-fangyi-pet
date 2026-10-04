@@ -196,6 +196,7 @@
       "file": "error.png",
       "frameHeight": 256,
       "frameMs": 30,
+      "frameWidth": 256,
       "frames": 33
     },
     "happy": {
@@ -203,6 +204,7 @@
       "file": "happy.png",
       "frameHeight": 256,
       "frameMs": 30,
+      "frameWidth": 256,
       "frames": 33
     },
     "idle": {
@@ -210,6 +212,7 @@
       "file": "idle.png",
       "frameHeight": 256,
       "frameMs": 0,
+      "frameWidth": 284,
       "frames": 1
     },
     "listening": {
@@ -217,6 +220,7 @@
       "file": "listening.png",
       "frameHeight": 256,
       "frameMs": 0,
+      "frameWidth": 288,
       "frames": 1
     },
     "sleeping": {
@@ -224,6 +228,7 @@
       "file": "sleeping.png",
       "frameHeight": 256,
       "frameMs": 60,
+      "frameWidth": 250,
       "frames": 4
     },
     "thinking": {
@@ -231,6 +236,7 @@
       "file": "thinking.png",
       "frameHeight": 256,
       "frameMs": 0,
+      "frameWidth": 241,
       "frames": 1
     },
     "waiting": {
@@ -238,6 +244,7 @@
       "file": "waiting.png",
       "frameHeight": 256,
       "frameMs": 0,
+      "frameWidth": 256,
       "frames": 1
     },
     "waking": {
@@ -245,6 +252,7 @@
       "file": "waking.png",
       "frameHeight": 256,
       "frameMs": 0,
+      "frameWidth": 239,
       "frames": 1
     },
     "working": {
@@ -252,6 +260,7 @@
       "file": "working.png",
       "frameHeight": 256,
       "frameMs": 0,
+      "frameWidth": 266,
       "frames": 1
     }
   },

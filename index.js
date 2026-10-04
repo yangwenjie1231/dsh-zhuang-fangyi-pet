@@ -325,6 +325,13 @@ export function apply (ctx, config) {
     )
     logger.info?.(`zhuang-fangyi-pet: 路由已挂载于 ${ROUTE_PREFIX}`)
 
+    // 先广播一帧初始快照，再启动 exe。
+    //
+    // 为什么：hub 的 `hello` 只在**已有快照**时发送（绝不发空对象 `{}` ——
+    // 那会让客户端拿到 undefined 的 petState/rev）。所以这里主动填一帧，
+    // 让任何时刻连上来的客户端立刻知道现状，而不是干等下一次状态变化。
+    hub.broadcast(machine.snapshot())
+
     // webServer 就绪 = 端口已知 = 可以启动 exe 了。
     if (settings.get().enabled && settings.get().mode !== 'overlay') {
       const started = launcher.start()

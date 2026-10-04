@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -317,13 +317,13 @@ namespace DshZhuangFangyiPet
 
         private void OnAuthGiveUp()
         {
-            // 契约 §5：连续 5 次 401 → 主动退出（宿主重启后不留连不上旧令牌的僵尸）
+            // 契约 §5：连续 5 次 401/403 → 主动退出（宿主换端口/重启后不留连不上旧令牌的僵尸）
             Dispatcher d = _ui;
             if (d != null)
             {
                 d.BeginInvoke(DispatcherPriority.Normal, new Action(delegate
                 {
-                    PetLog.Error("令牌失效（连续 401），桌宠退出");
+                    PetLog.Error("鉴权被拒（连续 401/403），桌宠退出");
                     Quit();
                 }));
             }
@@ -353,7 +353,7 @@ namespace DshZhuangFangyiPet
             if (!_opt.Verbose) return;
             string http = _http == null ? "offline" :
                 ("connected=" + _http.Connected + " frames=" + _http.FramesReceived +
-                 " 401=" + _http.Consecutive401 + " last=" + (_http.LastError == null ? "-" : _http.LastError));
+                 " 401/403=" + _http.Consecutive401 + " last=" + (_http.LastError == null ? "-" : _http.LastError));
             PetLog.Info("diag: 状态=" + _win.CurrentState + " 切换=" + _stateChanges +
                         " 可见=" + _win.IsVisible + " http[" + http + "]");
         }

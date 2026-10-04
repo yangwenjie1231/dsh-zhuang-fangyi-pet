@@ -102,22 +102,27 @@ namespace DshZhuangFangyiPet
         {
             int backoff = 1000;
             int sseFailStreak = 0;
+            int pollCount = 0;
             bool pollMode = false;
 
             while (!_disposed)
             {
                 if (pollMode)
                 {
+                    // 轮询兜底：每 ~2.5s 一次；连续 5 次 401/403 也能在 ~12s 内触发退出，
+                    // 而不是被 30s 的 SSE 重试间隔拖到 2 分钟以上。
                     bool ok = PollOnce();
-                    if (ok) { sseFailStreak = 0; }
-                    // 轮询模式下每 ~30s 试一次 SSE
-                    for (int i = 0; i < 15 && !_disposed; i++)
-                    {
-                        if (Sleeping(2000)) return;
-                    }
                     if (_disposed) return;
-                    pollMode = false;
-                    PetLog.Info("http: 重试 SSE 流");
+                    if (ok) { sseFailStreak = 0; pollCount = 0; }
+                    pollCount++;
+                    if (pollCount % 12 == 0)
+                    {
+                        pollMode = false;
+                        pollCount = 0;
+                        PetLog.Info("http: 重试 SSE 流");
+                        continue;
+                    }
+                    if (Sleeping(2500)) return;
                     continue;
                 }
 
@@ -288,14 +293,20 @@ namespace DshZhuangFangyiPet
             }
         }
 
-        private SseResult Handle401()
+        /// <summary>契约 §3：令牌被拒（401）或令牌+同源围栏都不过（403），都算「连不上宿主」。</summary>
+        private static bool IsAuthRejected(int code)
+        {
+            return code == 401 || code == 403;
+        }
+
+        private SseResult HandleAuthRejected(int code)
         {
             int n = Interlocked.Increment(ref _consecutive401);
-            _lastError = "HTTP 401（令牌无效）";
-            PetLog.Warn("http: 401 第 " + n + "/" + AuthGiveUpAfter + " 次");
+            _lastError = "HTTP " + code + (code == 401 ? "（令牌无效）" : "（令牌与同源围栏均被拒）");
+            PetLog.Warn("http: " + code + " 第 " + n + "/" + AuthGiveUpAfter + " 次");
             if (n >= AuthGiveUpAfter)
             {
-                PetLog.Error("http: 连续 " + AuthGiveUpAfter + " 次 401 → 主动退出（契约 §5）");
+                PetLog.Error("http: 连续 " + AuthGiveUpAfter + " 次 " + code + " → 主动退出（契约 §5）");
                 Action h = AuthGiveUp;
                 if (h != null)
                 {
@@ -316,9 +327,9 @@ namespace DshZhuangFangyiPet
             {
                 byte[] body;
                 int code = GetRaw("/api/zhuang-fangyi/pet/state", 6000, out body);
-                if (code == 401)
+                if (IsAuthRejected(code))
                 {
-                    Handle401();
+                    HandleAuthRejected(code);
                     return false;
                 }
                 if (code != 200 || body == null)
@@ -463,7 +474,7 @@ namespace DshZhuangFangyiPet
                     using (Stream rs = req.GetRequestStream()) rs.Write(payload, 0, payload.Length);
                     resp = (HttpWebResponse)req.GetResponse();
                     int code = (int)resp.StatusCode;
-                    if (code == 401) Interlocked.Increment(ref _consecutive401);
+                    if (IsAuthRejected(code)) Interlocked.Increment(ref _consecutive401);
                     else if (code >= 200 && code < 300) Interlocked.Exchange(ref _consecutive401, 0);
                     else PetLog.Warn("http: POST " + pathAndQuery + " → " + code);
                 }
@@ -472,7 +483,7 @@ namespace DshZhuangFangyiPet
                     HttpWebResponse er = we.Response as HttpWebResponse;
                     int code = er == null ? 0 : (int)er.StatusCode;
                     if (er != null) { try { er.Close(); } catch { } }
-                    if (code == 401) Handle401();
+                    if (IsAuthRejected(code)) HandleAuthRejected(code);
                     else PetLog.Info("http: POST " + pathAndQuery + " 失败: " + DescribeWebError(we));
                 }
                 catch (Exception ex)
@@ -503,6 +514,21 @@ namespace DshZhuangFangyiPet
         public void PostCommand(string command)
         {
             PostJson("/api/zhuang-fangyi/pet/command", "{\"command\":\"" + Escape(command) + "\"}");
+        }
+
+        /// <summary>
+        /// 契约 §3 新增：GET /pet/settings → {"settings":{…}}。
+        /// 原生 exe 目前不用它（位置走 POST /pet/position），但保留读取入口，
+        /// 供将来「宿主侧持久化缩放/穿透」使用；失败一律返回 null，绝不抛。
+        /// </summary>
+        public PetJson.JVal GetSettings(int timeoutMs)
+        {
+            string json = GetString("/api/zhuang-fangyi/pet/settings", timeoutMs);
+            if (string.IsNullOrEmpty(json)) return null;
+            PetJson.JVal root = PetJson.Parse(json);
+            if (root == null || !root.IsObj) return null;
+            PetJson.JVal s = root.Get("settings");
+            return (s != null && s.IsObj) ? s : root;
         }
 
         private static string Escape(string s)
