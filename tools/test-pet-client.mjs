@@ -457,6 +457,18 @@ ok('精灵图用 steps() 硬切帧，不做插值', () => {
   // 真正的帧数由 JS 内联设置（每张图帧数不同），已在组件树测试里验证。
 })
 
+ok('裁剪视口有 overflow:hidden（否则整条带会铺开）', () => {
+  const block = styleCss.match(/\.zf-pet__view\{[^}]*\}/s)?.[0] ?? ''
+  assert.match(block, /overflow\s*:\s*hidden/, '必须裁掉其余帧')
+  assert.match(block, /position\s*:\s*relative/, '要作为条带绝对定位的包含块')
+})
+
+ok('精灵图有 max-width:none（否则会被视口压扁）', () => {
+  const block = styleCss.match(/\.zf-pet__sprite\{[^}]*\}/s)?.[0] ?? ''
+  assert.match(block, /max-width\s*:\s*none/)
+  assert.match(block, /position\s*:\s*absolute/)
+})
+
 ok('尊重 prefers-reduced-motion', () => {
   assert.match(styleCss, /prefers-reduced-motion/)
 })
@@ -483,6 +495,39 @@ ok('Pet 在无素材时渲染为空（不出现"一张巨大的脸"）', () => {
   assert.equal(imgs.length, 0, '没素材时不该渲染 img')
 })
 
+/** 取一个节点的子元素（桩 React 的 children 恒为数组）。 */
+function firstChild (node) {
+  const c = node?.props?.children
+  return Array.isArray(c) ? c[0] : c
+}
+
+/** 从 Pet 的树里取裁剪视口。 */
+function viewOf (tree) {
+  return tree.props.children.find(c => c !== null && c.props?.className === 'zf-pet__view')
+}
+
+ok('精灵图放在**裁剪视口**里，视口宽 = 单帧宽（否则整条带会铺开）', () => {
+  const l = loadClient()
+  l.exports.apply(l.ctx)
+  const { Pet, runtime } = l.exports.__test
+  runtime.__state.atlas = {
+    frameHeight: 256,
+    states: { thinking: { file: 'thinking.png', frames: 33, frameMs: 36 } },
+    report: null
+  }
+  runtime.__state.snapshot = { petState: 'thinking', label: '正在思考…', bubble: null }
+  runtime.__state.settings = normalizePet({ scale: 1 })
+  l.react.resetHooks()
+  const tree = Pet({ runtime })
+  const view = viewOf(tree)
+  assert.ok(view !== undefined, '必须有裁剪视口')
+  assert.equal(view.props.style.width, '256px', '视口宽度应是**单帧**宽，不是整条带')
+  assert.equal(view.props.style.height, '256px')
+  const img = firstChild(view)
+  assert.equal(img.type, 'img')
+  assert.equal(img.props.style.width, `${256 * 33}px`, 'img 自身才是整条带的宽度')
+})
+
 ok('Pet 有素材时渲染精灵条带，宽度 = 帧宽 × 帧数', () => {
   const l = loadClient()
   l.exports.apply(l.ctx)
@@ -496,12 +541,28 @@ ok('Pet 有素材时渲染精灵条带，宽度 = 帧宽 × 帧数', () => {
   runtime.__state.settings = normalizePet({ scale: 1 })
   l.react.resetHooks()
   const tree = Pet({ runtime })
-  const img = tree.props.children.find(c => c !== null && c.type === 'img')
-  assert.ok(img !== undefined, '应渲染 img')
+  const img = firstChild(viewOf(tree))
   assert.equal(img.props.src, '/api/zhuang-fangyi/pet/art/thinking.png')
   assert.equal(img.props.style.height, '256px')
   assert.equal(img.props.style.width, `${256 * 33}px`, '条带宽度应为帧宽×帧数')
   assert.match(img.props.style.animationTimingFunction, /steps\(33\)/)
+  assert.equal(img.props.style.animationDuration, `${33 * 36}ms`)
+})
+
+ok('缩放同时作用于视口与条带（不能只缩一个）', () => {
+  const l = loadClient()
+  l.exports.apply(l.ctx)
+  const { Pet, runtime } = l.exports.__test
+  runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 4, frameMs: 60 } } }
+  runtime.__state.snapshot = { petState: 'idle', label: '', bubble: null }
+  runtime.__state.settings = normalizePet({ scale: 1.5 })
+  l.react.resetHooks()
+  const tree = Pet({ runtime })
+  const view = viewOf(tree)
+  const img = firstChild(view)
+  assert.equal(view.props.style.width, `${Math.round(256 * 1.5)}px`)
+  assert.equal(img.props.style.height, `${Math.round(256 * 1.5)}px`)
+  assert.equal(img.props.style.width, `${Math.round(256 * 1.5) * 4}px`, '条带宽度也要按同比例放大')
 })
 
 ok('Pet 的状态经 data 属性暴露（便于样式与调试）', () => {
@@ -565,8 +626,7 @@ ok('缺该状态的素材时回落到 idle', () => {
   runtime.__state.settings = normalizePet({})
   l.react.resetHooks()
   const tree = Pet({ runtime })
-  const img = tree.props.children.find(c => c !== null && c.type === 'img')
-  assert.match(img.props.src, /idle\.png$/, '应回落 idle 素材')
+  assert.match(firstChild(viewOf(tree)).props.src, /idle\.png$/, '应回落 idle 素材')
 })
 
 /* ══════════════════════════════════════════════════════════════════════════

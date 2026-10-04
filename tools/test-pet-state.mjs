@@ -711,6 +711,29 @@ ok('非法状态名被丢弃（bogus 不在）', () => {
   assert.ok(goodAtlas.states.idle)
 })
 
+ok('frameWidth 被保留（单帧非方形，两侧都要它）', () => {
+  const a = normalizeAtlas({
+    frameHeight: 256,
+    states: { idle: { file: 'idle.png', frames: 1, frameWidth: 284 } }
+  })
+  assert.equal(a.states.idle.frameWidth, 284)
+})
+
+ok('缺 frameWidth 时为 null（回落方形假设，旧清单仍可用）', () => {
+  const a = normalizeAtlas({
+    frameHeight: 256,
+    states: { idle: { file: 'idle.png', frames: 1 } }
+  })
+  assert.equal(a.states.idle.frameWidth, null)
+})
+
+ok('frameWidth 非法值时回落 null，不崩', () => {
+  for (const bad of [0, -5, 'abc', null, {}]) {
+    const a = normalizeAtlas({ states: { idle: { file: 'i.png', frames: 1, frameWidth: bad } } })
+    assert.equal(a.states.idle.frameWidth, null, `${JSON.stringify(bad)} 应回落 null`)
+  }
+})
+
 ok('states 的键都在合法状态名内', () => {
   for (const k of Object.keys(goodAtlas.states)) {
     assert.ok(VALID_STATES.includes(k), `${k} 不是合法状态名`)

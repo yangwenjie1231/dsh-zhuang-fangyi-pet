@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -16,8 +16,9 @@ namespace DshZhuangFangyiPet
     ///   GET  /pet/art/<n>   图片字节（白名单由 Host 校验）
     ///   POST /pet/position  拖动结束上报
     ///   POST /pet/command   托盘/双击命令
-    /// 全部带 Authorization: Bearer &lt;token&gt;。
-    /// 连续 5 次 401 → 主动退出（回调 OnAuthGiveUp，由 Program 决定 exit(0)）。
+    /// 全部带 Authorization: Bearer &lt;token&gt;（令牌正确一定放行）。
+    /// 契约 §3 修订（令牌 **或** 同源围栏）：判定为「令牌正确 → 放行；否则同源围栏通过 → 放行；否则 403」。
+    /// 连续 5 次 401/403 → 主动退出（宿主换端口/重启后不留连不上旧令牌的僵尸）。
     /// </summary>
     internal sealed class PetHttp : IDisposable
     {
@@ -181,9 +182,9 @@ namespace DshZhuangFangyiPet
                     HttpWebResponse er = we.Response as HttpWebResponse;
                     int code = er == null ? 0 : (int)er.StatusCode;
                     if (er != null) { try { er.Close(); } catch { } }
-                    if (code == 401)
+                    if (IsAuthRejected(code))
                     {
-                        return Handle401();
+                        return HandleAuthRejected(code);
                     }
                     _lastError = DescribeWebError(we);
                     return SseResult.Failed;

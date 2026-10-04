@@ -333,8 +333,12 @@ def write_strip(state, item, index, report, cache, want_thumb=False):
     strip.save(path, 'PNG', optimize=True)
     report['made'].append((rel, strip.size, os.path.getsize(path)))
 
-    entry = {'file': rel, 'frames': len(tiles), 'frameMs': frame_ms,
-             'frameHeight': FRAME_HEIGHT, 'anchorY': 1.0}
+    # `frameWidth` 是**契约 §4 的必需字段**：单帧不是方的（各素材 bbox 纵横比
+    # 0.85~1.13 不同），两侧必须靠它才能在图片加载前算对布局。
+    # 它必须与 `strip.width / frames` 严格相等 —— 所以直接取 `cell_w`（整数），
+    # 不做任何二次取整，避免与实测值出现偏差。
+    entry = {'file': rel, 'frames': len(tiles), 'frameWidth': cell_w,
+             'frameMs': frame_ms, 'frameHeight': FRAME_HEIGHT, 'anchorY': 1.0}
     cache[key] = entry
     return entry
 
@@ -393,6 +397,27 @@ def stage_sources(usable, report):
         copy_if_different(p, os.path.join(SRC, 'raw', os.path.basename(p)))
         staged['raw'] += 1
     report['staged'] = staged
+
+
+def prune_unreferenced(referenced, report):
+    """删掉 art/pet 下**清单已不再引用**的旧产物。
+
+    必要性：变体数量会随素材变化（例如你删掉 `cutout/happy-2.png` 后，
+    `variants.happy` 从 7 项缩回 5 项），旧的高序号文件会留在磁盘上变成孤儿。
+    宿主是按 `pet.json` 派生 URL 白名单的，孤儿文件既占体积又容易让人误以为还在用。
+
+    清理范围严格限定在脚本自管的三个目录（顶层 `*.png`、`bubble/`、`thumbs/`），
+    **绝不碰 `src/`（含用户手动抠图）与 `pet.json`**。
+    """
+    removed = []
+    for pat in ('*.png', os.path.join('bubble', '*.png'), os.path.join('thumbs', '*.png')):
+        for p in sorted(glob.glob(os.path.join(ART, pat))):
+            rel = os.path.relpath(p, ART)
+            if rel not in referenced:
+                os.remove(p)
+                removed.append(rel)
+    report['pruned'] = removed
+    return removed
 
 
 def write_manifest(states, variants, bubbles, missing, report):
@@ -550,6 +575,18 @@ def main():
     bubbles = [write_bubble(u, report) for u in bubble_items]
     manifest = write_manifest(states, variants, bubbles, missing, report)
 
+    # 清掉不再被清单引用的旧产物（变体缩水时的高序号文件等）
+    referenced = set()
+    for e in states.values():
+        referenced.add(e['file'])
+    for vs in variants.values():
+        referenced.update(vs)
+    for b in bubbles:
+        referenced.add(b['file'].replace('/', os.sep))
+    for s in states:
+        referenced.add(os.path.join('thumbs', '%s.png' % s))
+    prune_unreferenced(referenced, report)
+
     # ── 汇总 ──
     total = sum(n for _, _, n in report['made'])
     print('产出 %d 个文件到 art/pet/（合计 %.2f MB）'
@@ -570,6 +607,9 @@ def main():
         print('  %s %-10s variants=%d' % ('[OK]' if s in states else '[缺]', s, n))
     print('气泡池：%d 张；待抠：%d 项；弃用：%d 项'
           % (len(bubbles), len(manifest['missing']), len(dropped)))
+    if report.get('pruned'):
+        print('清理旧产物 %d 个（清单已不再引用）：%s'
+              % (len(report['pruned']), ', '.join(report['pruned'])))
     print('（缺失不影响运行：Host 对缺席状态回落 idle，契约 §4）')
     return 0
 

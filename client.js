@@ -258,6 +258,17 @@ window.__ModuleLoader__.load({
       const dragRef = useRef(null)
       const [dragging, setDragging] = useState(false)
       const [size, setSize] = useState({ w: 160, h: 160 })
+      /**
+       * 从**图片本身**量出来的单帧几何。
+       *
+       * 为什么不能假设方形：实测产出的条带单帧宽在 **204~288px** 之间（不是 256），
+       * 因为素材内容 bbox 的纵横比各不相同（0.85~1.13）。若按 `frameHeight` 当宽度，
+       * 图会被**横向压扁**，且切状态时宽度跳变。
+       *
+       * 所以以**图片实际尺寸**为准（`naturalWidth / frames`），清单里的
+       * `frameWidth` 只作为加载前的占位值。
+       */
+      const [natural, setNatural] = useState(null)
 
       // 订阅宿主的运行时（快照/清单/设置都在同一个订阅里推过来）。
       useEffect(() => {
@@ -282,18 +293,6 @@ window.__ModuleLoader__.load({
         window.addEventListener('resize', onResize)
         return () => window.removeEventListener('resize', onResize)
       }, [size.w, size.h])
-
-      // 图片加载后量一次真实尺寸，用于夹取与气泡定位。
-      const onImgLoad = useCallback(event => {
-        const el = event.currentTarget
-        if (el?.naturalWidth > 0) {
-          const h2 = Number(atlas?.frameHeight) || el.naturalHeight
-          const frames = Math.max(1, Number(atlas?.states?.[snapshot?.petState]?.frames) || 1)
-          const frameW = el.naturalWidth / frames
-          const ratio = frameW > 0 ? h2 / frameW : 1
-          setSize({ w: Math.round(h2 / ratio) * (Number(settings.scale) || 1), h: Math.round(h2 * (Number(settings.scale) || 1)) })
-        }
-      }, [atlas, snapshot, settings.scale])
 
       /* ---- 拖动：用 Pointer Events（不是 mouse），并捕获指针 ---- */
       const onPointerDown = useCallback(event => {
@@ -345,14 +344,35 @@ window.__ModuleLoader__.load({
       const state = snapshot?.petState ?? 'idle'
       const scale = Number(settings.scale) || 1
       const entry = atlas?.states?.[state] ?? atlas?.states?.idle ?? null
-      const frameW = entry !== null && entry !== undefined
-        ? Math.max(1, Math.round((Number(atlas?.frameHeight) || 256) * (entry.frames || 1)))
-        : 0
       const spriteUrl = entry !== null && entry !== undefined
         ? `${ROUTE}/art/${encodeURIComponent(entry.file)}`
         : null
       const frameMs = Number(entry?.frameMs) || 36
       const frames = Math.max(1, Number(entry?.frames) || 1)
+
+      // 单帧几何：优先用**实测值**（图片加载后得到），加载前用清单里的
+      // `frameWidth`，最后才回落到 frameHeight。
+      //
+      // 单帧**不是方的**（实测 204~288px 宽），所以绝不能拿 frameHeight 当宽度 ——
+      // 那会把图横向压扁，并在切状态时宽度跳变。
+      const frameH = natural?.h ?? (Number(atlas?.frameHeight) || 256)
+      const frameW = natural?.w ??
+        (Number(entry?.frameWidth) > 0 ? Number(entry.frameWidth) : frameH)
+
+      // 图片加载后量真实尺寸。用 ref 记住"当前是哪张图"，避免旧图的 onLoad
+      // 覆盖新图的几何（切状态时两张图会竞争）。
+      const onImgLoad = event => {
+        const el = event.currentTarget
+        if (el?.naturalWidth > 0 && el.src === spriteUrl) {
+          const w = el.naturalWidth / frames
+          const h = el.naturalHeight
+          setNatural({ w, h })
+          setSize({
+            w: Math.round(w * scale),
+            h: Math.round(h * scale)
+          })
+        }
+      }
 
       const bubble = settings.bubble ? (snapshot?.bubble ?? null) : null
       const bubbleImage = settings.bubbleImages && bubble?.image
@@ -360,6 +380,23 @@ window.__ModuleLoader__.load({
         : null
 
       // 容器必须小（只包住宠物），否则会挡住界面 —— 见文件头约束 2。
+      //
+      // ── 精灵图必须有一个**裁剪视口**（这里最容易做错）────────────────────
+      //
+      // 条带图是 `frames × frameHeight` 宽的一整张。若把 `<img>` 直接放进容器，
+      // 浏览器会把**整条带子**铺开显示（33 帧并排 = 一条巨长的横条），而不是
+      // 只显示当前帧。所以必须：
+      //
+      //   1. 一个宽度 = **单帧宽** 的视口，`overflow:hidden` 裁掉其余帧；
+      //   2. `<img>` 绝对定位在其中，宽度 = 整条带；
+      //   3. 用 `steps(frames)` 把它逐帧左移。
+      //
+      // 位移用 `translateX(-100%)` 是**对的**：translateX 的百分比相对**元素自身**
+      // 宽度（= frames×帧宽），所以 -100% 正好等于 -frames×帧宽；配合 steps(frames)
+      // 落在 t=0,1/N,…,(N-1)/N，得到的位移正是 0, -1帧, -2帧, …, -(N-1)帧 —— 恰好 N 帧。
+      const viewW = Math.round(frameW * scale)
+      const viewH = Math.round(frameH * scale)
+
       return h('div', {
         className: 'zf-pet',
         'data-zf-pet-state': state,
@@ -382,8 +419,12 @@ window.__ModuleLoader__.load({
       }, [
         spriteUrl === null
           ? null
-          : h('img', {
-              key: 'sprite',
+          : h('div', {
+              key: 'view',
+              className: 'zf-pet__view',
+              // 单帧宽高的裁剪视口：只露出当前帧。
+              style: { width: `${viewW}px`, height: `${viewH}px` }
+            }, h('img', {
               ref: imgRef,
               className: 'zf-pet__sprite',
               src: spriteUrl,
@@ -391,14 +432,14 @@ window.__ModuleLoader__.load({
               draggable: false,
               onLoad: onImgLoad,
               style: {
-                height: `${Math.round((Number(atlas?.frameHeight) || 256) * scale)}px`,
-                // 条带横向播放：宽度 = 单帧宽 × 帧数。
-                width: `${Math.round(frameW * scale)}px`,
+                height: `${viewH}px`,
+                // 整条带的宽度 = 单帧宽 × 帧数。
+                width: `${viewW * frames}px`,
                 // steps() 让每帧硬切，不做插值 —— 否则会糊成一片。
                 animationDuration: `${frames * frameMs}ms`,
                 animationTimingFunction: `steps(${frames})`
               }
-            }),
+            })),
         bubble === null
           ? null
           : h('div', {
@@ -628,10 +669,22 @@ window.__ModuleLoader__.load({
 }
 .zf-pet[data-zf-pet-dragging="1"]{ cursor:grabbing; }
 
-/* 精灵条带：用 steps() 硬切帧，不做插值（插值会糊成一片）。
-   帧数由 JS 内联写在 style 上（每张图的帧数不同），这里给的是安全默认值。 */
+/* 裁剪视口：宽度 = **单帧宽**，overflow:hidden 裁掉条带里其余帧。
+   没有它的话，浏览器会把整条 33 帧的带子铺开成一条巨长的横条。 */
+.zf-pet__view{
+  position:relative;
+  overflow:hidden;
+  flex:0 0 auto;
+}
+
+/* 精灵条带：整条带作为一张图放进视口，靠 steps() 逐帧左移。
+   位移用 translateX(-100%) 是对的 —— 百分比相对**元素自身**宽度（= frames×帧宽），
+   配合 steps(frames) 恰好覆盖 N 帧。 */
 .zf-pet__sprite{
+  position:absolute;
+  top:0;left:0;
   display:block;
+  max-width:none;             /* 关键：否则会被视口的宽度约束压扁 */
   image-rendering:auto;
   animation-name:zf-pet-play;
   animation-iteration-count:infinite;

@@ -85,10 +85,17 @@ export function normalizeAtlas (raw) {
       if (!addFile(file)) continue
       const frames = Number.isFinite(entry.frames) && entry.frames > 0 ? Math.round(entry.frames) : 1
       const frameMs = Number.isFinite(entry.frameMs) && entry.frameMs > 0 ? Math.round(entry.frameMs) : 36
+      // 单帧宽度：**单帧不是方的**（实测 204~288px），所以必须显式带上，
+      // 否则客户端只能拿 frameHeight 当宽度 → 横向压扁 + 切状态时宽度跳变。
+      // 缺该字段时回落 frameHeight（旧清单仍可用，只是方形假设）。
+      const frameWidth = Number.isFinite(entry.frameWidth) && entry.frameWidth > 0
+        ? Math.round(entry.frameWidth)
+        : null
       out.states[state] = {
         file: file.replace(/\\/g, '/'),
         frames,
         frameMs,
+        frameWidth,
         anchorY: Number.isFinite(entry.anchorY) ? entry.anchorY : 1.0
       }
     }
@@ -137,7 +144,7 @@ export function normalizeAtlas (raw) {
   if (Object.keys(out.states).length === 0) {
     for (const [state, list] of Object.entries(out.variants)) {
       if (list.length === 0) continue
-      out.states[state] = { file: list[0], frames: 1, frameMs: 36, anchorY: 1.0 }
+      out.states[state] = { file: list[0], frames: 1, frameMs: 36, frameWidth: null, anchorY: 1.0 }
     }
   }
 
