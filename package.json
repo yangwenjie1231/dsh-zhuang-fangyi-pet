@@ -1,0 +1,56 @@
+{
+  "name": "dsh-zhuang-fangyi-pet",
+  "version": "0.1.0",
+  "description": "庄方宜桌宠 for DeepSeek Harness —— 真的浮在桌面上的桌宠：插件宿主经 ctx.subprocess 启动自带的 .NET Framework 4.8 无边框透明置顶窗口，alpha 点击穿透，表情随 agent 状态实时变化，气泡承载其余表情。零安装运行时，跨平台自动回落窗口内 overlay。官方素材，非官方同人作品。",
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "desktop-pet",
+    "桌宠",
+    "zhuang-fangyi",
+    "endfield",
+    "庄方宜",
+    "终末地"
+  ],
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "src",
+    "pet",
+    "art",
+    "locale",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale"
+      ]
+    }
+  },
+  "scripts": {
+    "check": "node --check index.js && node --check client.js",
+    "test": "node tools/test-pet-state.mjs && node tools/test-pet-route.mjs",
+    "art": "python tools/prepare-pet.py",
+    "build": "pwsh -File tools/build-pet.ps1"
+  }
+}

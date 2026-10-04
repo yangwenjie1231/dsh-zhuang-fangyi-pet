@@ -1,0 +1,11 @@
+# dsh-zhuang-fangyi-pet bundle patch: registers the plugin row so the package
+# appears in the Loader entries. client-modules scans `dsh.client` on the
+# package manifest and only then mounts the browser half into __DSH_BOOT__ and
+# serves it at /plugins/dsh-zhuang-fangyi-pet/client.js.
+#
+# 与主题插件 `dsh-zhuang-fangyi` 是**两个独立条目**：桌宠不依赖主题，主题也不
+# 依赖桌宠。两者可以各自启用/禁用。
+- insert:
+    - id: zhuang-fangyi-pet
+      name: 'dsh-zhuang-fangyi-pet'
+      config: {}
