@@ -1,10 +1,10 @@
 ﻿# 庄方宜桌宠 · 部署到 DSH profile
 #
-# 用法：
-#   pwsh -File tools/deploy.ps1                  # 部署到默认 profile（desktop）
-#   pwsh -File tools/deploy.ps1 -Profile web
-#   pwsh -File tools/deploy.ps1 -DryRun          # 只看会做什么
-#   pwsh -File tools/deploy.ps1 -SkipExe         # 不复制 bin/（还没构建 exe 时）
+# 用法（**注意：本机只有 Windows PowerShell 5.1，没有 pwsh 7**）：
+#   powershell -NoProfile -ExecutionPolicy Bypass -File tools\deploy.ps1
+#   powershell -NoProfile -File tools\deploy.ps1 -Profile web
+#   powershell -NoProfile -File tools\deploy.ps1 -DryRun          # 只看会做什么
+#   powershell -NoProfile -File tools\deploy.ps1 -SkipExe         # 不复制 bin/
 #
 # ── 为什么需要脚本而不是一句 Copy-Item ────────────────────────────────────
 #
@@ -89,11 +89,11 @@ if ($SkipExe) {
       Write-Host ("  {0,-10} {1}" -f 'bin\', ("$($exe.Name)  $([int]($exe.Length/1KB)) KB"))
     } else {
       Write-Host "  警告：bin\ 里没有 .exe —— 桌宠将回落窗口内 overlay" -ForegroundColor Yellow
-      Write-Host "        请先跑：pwsh -File tools/build-pet.ps1" -ForegroundColor Yellow
+      Write-Host "        请先跑：powershell -NoProfile -File tools\build-pet.ps1" -ForegroundColor Yellow
     }
   } else {
     Write-Host "  警告：bin\ 不存在 —— 桌宠将回落窗口内 overlay" -ForegroundColor Yellow
-    Write-Host "        请先跑：pwsh -File tools/build-pet.ps1" -ForegroundColor Yellow
+    Write-Host "        请先跑：powershell -NoProfile -File tools\build-pet.ps1" -ForegroundColor Yellow
   }
 }
 

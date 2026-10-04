@@ -63,15 +63,18 @@
 
 ## 三、安装
 
+> **本机只有 Windows PowerShell 5.1，没有 `pwsh` 7** —— 所以下面的命令一律用
+> `powershell -NoProfile -File ...`。用 `pwsh` 会报"无法将 pwsh 项识别为 cmdlet"。
+
 ```powershell
 # 1. 编译原生窗口（离线，只需系统自带的 .NET Framework 4.8）
-pwsh -File tools/build-pet.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\build-pet.ps1
 
 # 2. 装进 profile（与主题插件同样的做法）
 dsh plugin --profile desktop add <本目录的绝对路径>
 
 # 3. 部署（会一起搬运 exe 与素材）
-pwsh -File tools/deploy.ps1
+powershell -NoProfile -File tools\deploy.ps1
 
 # 4. 重载
 #    plugin_manager set_plugin target=include:zhuang-fangyi-pet enabled=false → true

@@ -49,8 +49,9 @@
   },
   "scripts": {
     "check": "node --check index.js && node --check client.js",
-    "test": "node tools/test-pet-state.mjs && node tools/test-pet-route.mjs",
+    "test": "node tools/test-pet-state.mjs && node tools/test-pet-route.mjs && node tools/test-pet-client.mjs && node tools/test-pet-e2e.mjs",
     "art": "python tools/prepare-pet.py",
-    "build": "pwsh -File tools/build-pet.ps1"
+    "build": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/build-pet.ps1",
+    "deploy": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/deploy.ps1"
   }
 }
