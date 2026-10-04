@@ -264,6 +264,13 @@ export function createHandler (deps) {
       }
 
       // ── 素材清单 ────────────────────────────────────────────────────────
+      //
+      // ⚠️ **必须带上 `files`**（每个文件自己的几何）。漏掉它的后果实测过：
+      // exe 通过 HTTP 拿到清单时会打日志「0 个 files 几何（来源 host）」，
+      // 于是退化成按 state 声明切变体 —— 而 24 个变体里有 14 个与声明不符，
+      // 会被拒收并回落 canonical。整个 `files` 机制**在真实链路上变成死代码**。
+      //
+      // 教训：只测「从磁盘读 pet.json」是不够的，**HTTP 这一跳也必须测**。
       if (route === '/atlas' && req.method === 'GET') {
         const atlas = deps.atlas()
         sendJson(res, 200, {
@@ -272,6 +279,7 @@ export function createHandler (deps) {
           frameHeight: atlas.frameHeight,
           states: atlas.states,
           variants: atlas.variants,
+          files: atlas.files,
           bubble: atlas.bubble,
           missing: atlas.missing,
           report: atlasReport(atlas)

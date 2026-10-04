@@ -230,6 +230,51 @@ await ok('GET /pet/atlas 返回清单 + 覆盖率报告', async () => {
   assert.ok(body.report, '应有 report')
 })
 
+await ok('⭐ /pet/atlas 必须带上 files 映射（否则 files 机制在 HTTP 链路上是死代码）', async () => {
+  // 这条断言对应一个**实测抓到的集成缺陷**：
+  // 路由原先漏发 `files`，exe 通过 HTTP 拿清单时打日志
+  // 「0 个 files 几何（来源 host）」，于是退化成按 state 声明切变体，
+  // 而 24 个变体里 14 个与声明不符 → 全被拒收 → files 支持等于没有。
+  //
+  // 教训：只测「从磁盘读 pet.json」不够，**HTTP 这一跳也必须测**。
+  const r = await get('/api/zhuang-fangyi/pet/atlas')
+  const body = JSON.parse(r.body)
+  assert.ok(body.files !== undefined, '/pet/atlas 必须包含 files 字段')
+  const onDisk = JSON.parse(fs.readFileSync(path.join(ART, 'pet.json'), 'utf8'))
+  const diskFiles = onDisk.files ?? {}
+  assert.equal(
+    Object.keys(body.files).length, Object.keys(diskFiles).length,
+    `HTTP 里的 files 条目数(${Object.keys(body.files).length}) 应与磁盘一致(${Object.keys(diskFiles).length})`
+  )
+  // 逐条比对，确保没有在传输中丢字段
+  for (const [file, geom] of Object.entries(diskFiles)) {
+    const got = body.files[file]
+    assert.ok(got !== undefined, `HTTP 清单缺 ${file}`)
+    assert.equal(got.frames, geom.frames, `${file} 的 frames 传输后不一致`)
+    assert.equal(got.frameWidth, geom.frameWidth, `${file} 的 frameWidth 传输后不一致`)
+  }
+})
+
+await ok('变体经 HTTP 清单拿到的是**自己的**几何，不是 state 的声明', async () => {
+  const r = await get('/api/zhuang-fangyi/pet/atlas')
+  const body = JSON.parse(r.body)
+  // 找一个几何与 state 声明确实不同的变体（真实素材里必然存在）
+  let checked = 0
+  for (const [state, list] of Object.entries(body.variants ?? {})) {
+    const decl = body.states[state]
+    for (const file of list) {
+      const geom = body.files?.[file]
+      if (geom === undefined || decl === undefined) continue
+      if (geom.frames !== decl.frames || geom.frameWidth !== decl.frameWidth) {
+        checked += 1
+        assert.ok(geom.frames > 0, `${file} 的 frames 应 > 0`)
+        assert.ok(geom.frameWidth > 0, `${file} 的 frameWidth 应 > 0`)
+      }
+    }
+  }
+  assert.ok(checked > 0, '真实素材里应至少有一个变体的几何与 state 声明不同（否则这条测试没意义）')
+})
+
 await ok('9 个状态全部有专属素材（覆盖率 9/9）', async () => {
   const r = await get('/api/zhuang-fangyi/pet/atlas')
   const body = JSON.parse(r.body)
