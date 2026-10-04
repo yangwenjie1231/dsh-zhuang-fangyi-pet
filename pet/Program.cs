@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -28,14 +28,70 @@ namespace DshZhuangFangyiPet
         [STAThread]
         public static int Main(string[] args)
         {
+            int code;
+            try
+            {
+                code = MainCore(args);
+            }
+            catch (Exception ex)
+            {
+                try { PetLog.Error("Main 未捕获异常: " + PetLog.Describe(ex)); } catch { }
+                code = ExitSelfTestFailed;
+            }
+
+            // 先把缓冲输出刷出去（宿主靠管道收 stdout，硬退出不会自动 Flush）。
+            try { Console.Out.Flush(); } catch { }
+            try { Console.Error.Flush(); } catch { }
+
+            // 硬退出：用 kernel32!TerminateProcess，**不走 Environment.Exit / ExitProcess**。
+            //
+            // 实测（本机 .NET Framework 4.8 + WPF + -target:winexe + stdout 为管道）：
+            //   * Environment.Exit(0)  在自检路径上永久阻塞、不返回；
+            //   * ExitProcess(0)       同样卡住（退出前会跑 DLL_PROCESS_DETACH，
+            //                          某个 WPF/Win32 DLL 的 detach 处理里阻塞了）；
+            //   * 对照实验：console 子系统的 WPF 程序能正常退出，winexe 的不能；
+            //     非 WPF 的 winexe 也能正常退出 → 是「WPF + winexe + 管道」的组合触发。
+            // 宿主（Node child_process / ctx.subprocess.spawn）必须能在 graceMs 内观测到退出，
+            // 否则契约 §5 的「t<10s 内非零退出则不自动重启」永远不生效。
+            //
+            // TerminateProcess 不跑 detach 处理，立即结束进程。前面已显式 Flush 过
+            // stdout/stderr，所以不会丢输出（Node 侧实测收到全部 ~5.8KB 自检输出，
+            // 退出码 0，耗时约 1.1s —— 远小于契约的 10s 窗口）。
+            try
+            {
+                TerminateProcess(GetCurrentProcess(), (uint)code);
+            }
+            catch { }
+            return code;   // 正常路径不会到这里
+        }
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr GetCurrentProcess();
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool TerminateProcess(IntPtr hProcess, uint uExitCode);
+
+        private static int MainCore(string[] args)
+        {
             TrySetUtf8Console();
 
             string err;
             PetOptions opt = PetOptions.Parse(args, out err);
             if (opt == null)
             {
-                Console.Error.WriteLine("参数错误: " + err);
-                Console.Error.WriteLine(PetOptions.Usage());
+                // 用 UTF-8 字节写 stderr（winexe 下 Console.Error 的编码不可靠，中文会乱码）
+                try
+                {
+                    byte[] b = System.Text.Encoding.UTF8.GetBytes(
+                        "参数错误: " + err + "\n" + PetOptions.Usage() + "\n");
+                    Stream es = Console.OpenStandardError();
+                    es.Write(b, 0, b.Length);
+                    es.Flush();
+                }
+                catch
+                {
+                    try { Console.Error.WriteLine("参数错误: " + err); } catch { }
+                }
                 return ExitBadArgs;
             }
 
@@ -44,7 +100,7 @@ namespace DshZhuangFangyiPet
 
             if (opt.Help)
             {
-                Console.Out.WriteLine(PetOptions.Usage());
+                PetLog.StdoutUtf8(PetOptions.Usage());
                 return ExitOk;
             }
 
@@ -106,6 +162,12 @@ namespace DshZhuangFangyiPet
             return dir;
         }
 
+        /// <summary>
+        /// 尽力把控制台编码设为 UTF-8。
+        /// 注意：本 exe 是 -target:winexe（无附加控制台），这个设置**不保证生效**，
+        /// 所以真正的输出路径是 PetLog.StdoutUtf8（直接写 UTF-8 字节）。
+        /// 这里只是让「从控制台手动运行」时观感正常一点。
+        /// </summary>
         private static void TrySetUtf8Console()
         {
             try { Console.OutputEncoding = new UTF8Encoding(false); } catch { }
@@ -254,6 +316,9 @@ namespace DshZhuangFangyiPet
 
             PetLog.Startup("消息循环结束，退出码 " + Program.ExitOk);
             Dispose();
+            // 托盘图标必须显式移除，否则会残留一个幽灵图标直到鼠标划过
+            try { if (_tray != null) _tray.Dispose(); } catch { }
+            PetLog.Startup("清理完成，进程即将退出");
             return Program.ExitOk;
         }
 

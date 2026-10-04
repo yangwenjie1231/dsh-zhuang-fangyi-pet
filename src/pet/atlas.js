@@ -36,10 +36,26 @@ export function emptyAtlas () {
     frameHeight: 0,
     states: {},
     variants: {},
+    /** 每个文件自己的几何（契约 §4 的 `files`）。见 `geometryFor()`。 */
+    files: {},
     bubble: [],
     missing: [],
     /** 白名单：相对 `art/pet/` 的路径集合，由清单派生。 */
-    files: new Set()
+    allowed: new Set()
+  }
+}
+
+/** 解析一条几何记录；非法时返回 null。 */
+function parseGeom (entry) {
+  if (entry === null || typeof entry !== 'object') return null
+  const frames = Number.isFinite(entry.frames) && entry.frames > 0 ? Math.round(entry.frames) : null
+  if (frames === null) return null
+  return {
+    frames,
+    frameWidth: Number.isFinite(entry.frameWidth) && entry.frameWidth > 0
+      ? Math.round(entry.frameWidth)
+      : null,
+    frameMs: Number.isFinite(entry.frameMs) && entry.frameMs > 0 ? Math.round(entry.frameMs) : 36
   }
 }
 
@@ -72,8 +88,20 @@ export function normalizeAtlas (raw) {
 
   const addFile = file => {
     if (!isSafeRel(file)) return false
-    out.files.add(file.replace(/\\/g, '/'))
+    out.allowed.add(file.replace(/\\/g, '/'))
     return true
+  }
+
+  // ── files：每个文件自己的几何（契约 §4）。**先解析**，这样 states/variants
+  //    可以引用它来修正自己的几何。 ────────────────────────────────────────
+  if (raw.files !== null && typeof raw.files === 'object' && !Array.isArray(raw.files)) {
+    for (const [file, entry] of Object.entries(raw.files)) {
+      if (!isSafeRel(file)) continue
+      const geom = parseGeom(entry)
+      if (geom === null) continue
+      out.files[file.replace(/\\/g, '/')] = geom
+      addFile(file)
+    }
   }
 
   // ── states：键必须是合法状态名，条目必须含合法文件名与帧数 ──────────────
@@ -83,25 +111,21 @@ export function normalizeAtlas (raw) {
       if (entry === null || typeof entry !== 'object') continue
       const file = entry.file
       if (!addFile(file)) continue
-      const frames = Number.isFinite(entry.frames) && entry.frames > 0 ? Math.round(entry.frames) : 1
-      const frameMs = Number.isFinite(entry.frameMs) && entry.frameMs > 0 ? Math.round(entry.frameMs) : 36
-      // 单帧宽度：**单帧不是方的**（实测 204~288px），所以必须显式带上，
-      // 否则客户端只能拿 frameHeight 当宽度 → 横向压扁 + 切状态时宽度跳变。
-      // 缺该字段时回落 frameHeight（旧清单仍可用，只是方形假设）。
-      const frameWidth = Number.isFinite(entry.frameWidth) && entry.frameWidth > 0
-        ? Math.round(entry.frameWidth)
-        : null
+      const key = file.replace(/\\/g, '/')
+      // 几何优先级：files[<文件名>] → states 自己的声明 → 默认值。
+      // 这样即使 states 的声明与文件实际不符（实测发生过），也能被 files 修正。
+      const geom = out.files[key] ?? parseGeom(entry) ?? { frames: 1, frameWidth: null, frameMs: 36 }
       out.states[state] = {
-        file: file.replace(/\\/g, '/'),
-        frames,
-        frameMs,
-        frameWidth,
+        file: key,
+        frames: geom.frames,
+        frameMs: geom.frameMs,
+        frameWidth: geom.frameWidth,
         anchorY: Number.isFinite(entry.anchorY) ? entry.anchorY : 1.0
       }
     }
   }
 
-  // ── variants：同状态多素材轮换。只保留既安全又真实存在于 states 里的 ─────
+  // ── variants：同状态多素材轮换。只保留既安全又真实存在的条目 ─────────────
   if (raw.variants !== null && typeof raw.variants === 'object') {
     for (const [state, list] of Object.entries(raw.variants)) {
       if (!VALID_STATES.includes(state)) continue
@@ -144,11 +168,50 @@ export function normalizeAtlas (raw) {
   if (Object.keys(out.states).length === 0) {
     for (const [state, list] of Object.entries(out.variants)) {
       if (list.length === 0) continue
-      out.states[state] = { file: list[0], frames: 1, frameMs: 36, frameWidth: null, anchorY: 1.0 }
+      const geom = out.files[list[0]] ?? { frames: 1, frameWidth: null, frameMs: 36 }
+      out.states[state] = {
+        file: list[0],
+        frames: geom.frames,
+        frameMs: geom.frameMs,
+        frameWidth: geom.frameWidth,
+        anchorY: 1.0
+      }
     }
   }
 
   return out
+}
+
+/**
+ * 取某个素材文件的几何。
+ *
+ * **这是几何的唯一解析入口**，优先级与契约 §4 一致：
+ *
+ * ```
+ * files[<文件名>]  →  states[<state>]（若该文件就是该状态的 canonical）  →  默认值
+ * ```
+ *
+ * 为什么需要它：`variants` 里的素材几何**差异极大**（实测 24 个变体里 14 个
+ * 与所属 state 的声明不符 —— 因为混了「静态 PNG 1 帧」与「动态 GIF N 帧」）。
+ * 按 state 声明的 `frames` 去切变体，会切出 7px 的**碎条**。
+ *
+ * @param {object} atlas
+ * @param {string} file - 相对 `art/pet/` 的路径
+ * @returns {{frames: number, frameWidth: number|null, frameMs: number}}
+ */
+export function geometryFor (atlas, file) {
+  const fallback = { frames: 1, frameWidth: null, frameMs: 36 }
+  if (atlas === null || atlas === undefined || typeof file !== 'string') return fallback
+  const key = file.replace(/\\/g, '/')
+  const fromFiles = atlas.files?.[key]
+  if (fromFiles !== undefined && fromFiles !== null) return fromFiles
+  // 该文件若是某状态的 canonical，用该状态的声明。
+  for (const entry of Object.values(atlas.states ?? {})) {
+    if (entry?.file === key) {
+      return { frames: entry.frames, frameWidth: entry.frameWidth, frameMs: entry.frameMs }
+    }
+  }
+  return fallback
 }
 
 /**
@@ -188,8 +251,8 @@ export function resolveArt (artDir, rel, atlas) {
   if (!isSafeRel(rel)) return null
   const normalized = String(rel).replace(/\\/g, '/')
   // 白名单优先：清单里没有的文件一律不服务。
-  if (atlas !== undefined && atlas !== null && atlas.files instanceof Set) {
-    if (!atlas.files.has(normalized)) return null
+  if (atlas !== undefined && atlas !== null && atlas.allowed instanceof Set) {
+    if (!atlas.allowed.has(normalized)) return null
   }
   const base = path.resolve(artDir)
   const abs = path.resolve(base, normalized)
@@ -202,6 +265,9 @@ export function resolveArt (artDir, rel, atlas) {
  *
  * 缺该状态时**回落 idle**；连 idle 都没有时返回 null
  * （客户端与 exe 都要能优雅处理"没有图"）。
+ *
+ * 调用方若要拿该文件的几何，用 {@link geometryFor} —— **不要**用 `states[state]`
+ * 的声明，因为轮换到的变体可能与之不符（实测 24 个变体里 14 个不符）。
  *
  * @param {object} atlas
  * @param {string} state
@@ -251,7 +317,9 @@ export function atlasReport (atlas) {
     version: atlas.version ?? 0,
     generatedAt: atlas.generatedAt ?? null,
     frameHeight: atlas.frameHeight ?? 0,
-    files: atlas.files instanceof Set ? atlas.files.size : 0,
+    files: atlas.allowed instanceof Set ? atlas.allowed.size : 0,
+    /** `files` 映射的条目数（每个文件自己的几何）。 */
+    fileGeometry: Object.keys(atlas.files ?? {}).length,
     bubbleCount: Array.isArray(atlas.bubble) ? atlas.bubble.length : 0,
     coveredStates: covered,
     uncoveredStates: uncovered,

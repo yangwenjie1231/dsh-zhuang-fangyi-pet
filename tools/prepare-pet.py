@@ -29,6 +29,10 @@
     宽度保纵横比」后单帧宽落在 239~288 之间。清单必须为每个状态写出 `frameWidth`
     （契约 §4 必需字段），否则两侧会拿 `frameHeight` 当帧宽，把图横向压扁。
     条带宽 = `frames × frameWidth`，**不是** `frames × frameHeight`。
+  · **几何按文件给出**：`variants` 是文件名数组，但变体之间帧数差异极大
+    （静态 PNG 1 帧 vs 动态 GIF 44 帧），套用 `states` 的 `frames` 去切会切出碎条。
+    所以顶层另有 `files` 映射，登记 **canonical + 全部 variants** 每个文件自己的
+    `frames`/`frameWidth`/`frameMs`（纯附加字段，旧消费者忽略也能跑）。
   · **清单是唯一契约**。`pet.json` 严格照契约 §4；`states` 的键只能取 §1 的 9 个状态名，
     缺状态时 Host 回落 `idle`，**缺失不得导致任何一方报错**。
   · **用户手动抠图自动纳入**。`art/pet/src/cutout/<状态名>.png` 会覆盖同名状态映射，
@@ -436,11 +440,16 @@ def prune_unreferenced(referenced, report):
     return removed
 
 
-def write_manifest(states, variants, bubbles, missing, report):
+def write_manifest(states, variants, bubbles, missing, files, report):
     """写 `art/pet/pet.json`（契约 §4 的唯一素材清单）。
 
     `generatedAt` 故意**不写真实时间**：它会让每次重跑产生不同字节、破坏幂等。
     这里写一个固定占位值，让「连跑两次结果一致」可被 sha256 验证。
+
+    `files` 是**每个文件自己的几何**（canonical + 全部 variants）：
+    `variants` 只是文件名数组，而变体之间帧数差异极大（静态 PNG 1 帧 vs 动态 GIF 44 帧），
+    拿 `states` 的 `frames` 去切变体会切出碎条 —— 所以几何必须按**文件**给出。
+    该字段是纯附加的，旧消费者忽略它也能跑。
     """
     manifest = {
         'version': MANIFEST_VERSION,
@@ -448,6 +457,7 @@ def write_manifest(states, variants, bubbles, missing, report):
         'frameHeight': FRAME_HEIGHT,
         'states': states,
         'variants': variants,
+        'files': files,
         'bubble': bubbles,
         'missing': missing,
     }
@@ -461,7 +471,8 @@ def write_manifest(states, variants, bubbles, missing, report):
 
 # ── 报告 ────────────────────────────────────────────────────────────────────
 
-def print_check(mapping, gif_rows, png_rows, dropped, bubbles, usable, states_light):
+def print_check(mapping, gif_rows, png_rows, dropped, bubbles, usable, states_light,
+                variant_geo):
     """`--check`：只报覆盖率与透明占比，**缺图只警告不报错**，退出码恒为 0。"""
     print('素材覆盖率报告（--check，只读，未写任何文件）')
     print('=' * 70)
@@ -495,6 +506,20 @@ def print_check(mapping, gif_rows, png_rows, dropped, bubbles, usable, states_li
                      len(mapping.get(s, []))))
         else:
             print('  [缺] %-10s → Host 回落 idle' % s)
+    print()
+    print('各变体几何（变体之间帧数差异极大：静态 PNG 1 帧 vs 动态 GIF 几十帧，')
+    print('必须按文件各自的几何切帧，不能套用 states 的 frames）：')
+    for s in PET_STATES:
+        if s not in states_light:
+            continue
+        rows = variant_geo.get(s, [])
+        if len(rows) <= 1:
+            continue
+        print('  %s:' % s)
+        for vfile, n, fw, fms in rows:
+            mark = '  ← canonical' if vfile == states_light[s]['file'] else ''
+            print('    %-18s %3d 帧 x %4dpx = %6dpx 宽  @%dms%s'
+                  % (vfile, n, fw, n * fw, fms, mark))
     print()
     print('气泡表情池：%d 张' % len(bubbles))
     covered = sum(1 for s in PET_STATES if s in states_light)
@@ -546,12 +571,16 @@ def main():
     if args.check:
         # 只读：不写任何文件。单帧尺寸走 render_tiles（与主流程同一函数），
         # 所以这里打印的就是产出条带的真实单帧宽高。
-        light = {}
+        light, variant_geo = {}, {}
         for state, items in mapping.items():
-            tiles, frame_ms = render_tiles(items[0])
-            light[state] = {'file': '%s.png' % state, 'frames': len(tiles),
-                            'frameWidth': max(t.width for t in tiles),
-                            'frameMs': frame_ms}
+            rows = []
+            for i, it in enumerate(items):
+                tiles, frame_ms = render_tiles(it)
+                rows.append((strip_name(state, i), len(tiles),
+                             max(t.width for t in tiles), frame_ms))
+            light[state] = {'file': rows[0][0], 'frames': rows[0][1],
+                            'frameWidth': rows[0][2], 'frameMs': rows[0][3]}
+            variant_geo[state] = rows
         gif_rows = [(u['name'], u['frames'], True, u['minT'])
                     for u in usable if u['kind'] == 'gif']
         # 被排除的 GIF 也列出来，让用户看清为什么被排除
@@ -568,7 +597,7 @@ def main():
                 if im.mode in ('RGBA', 'LA') else 0.0
             png_rows.append((os.path.basename(p), mt))
         return print_check(mapping, gif_rows, png_rows, dropped, bubble_items,
-                           usable, light)
+                           usable, light, variant_geo)
 
     ensure_dirs()
     if args.clean:
@@ -580,16 +609,22 @@ def main():
     report = {'made': []}
     stage_sources(usable, report)
 
-    states, variants, cache = {}, {}, {}
+    states, variants, files, cache = {}, {}, {}, {}
     for state, items in mapping.items():
         entries = [write_strip(state, it, i, report, cache)
                    for i, it in enumerate(items)]
         states[state] = entries[0]                       # 契约 §4：variants 必须含 states
         variants[state] = [e['file'] for e in entries]
         write_thumb(state, entries[0], report)
+        # `files`：每个文件自己的几何。同一素材被多个状态复用时文件名不同但几何相同，
+        # 逐个登记即可（键就是文件路径）。
+        for e in entries:
+            files[e['file']] = {'frames': e['frames'],
+                                'frameWidth': e['frameWidth'],
+                                'frameMs': e['frameMs']}
 
     bubbles = [write_bubble(u, report) for u in bubble_items]
-    manifest = write_manifest(states, variants, bubbles, missing, report)
+    manifest = write_manifest(states, variants, bubbles, missing, files, report)
 
     # 清掉不再被清单引用的旧产物（变体缩水时的高序号文件等）
     referenced = set()

@@ -44,6 +44,7 @@ import {
   artForState,
   bubbleArt,
   atlasReport,
+  geometryFor,
   VALID_STATES
 } from '../src/pet/atlas.js'
 
@@ -734,6 +735,116 @@ ok('frameWidth 非法值时回落 null，不崩', () => {
   }
 })
 
+/* ── files 映射：每个文件自己的几何 ────────────────────────────────────────
+ *
+ * 这组测试对应一个**实测到的真实缺陷**：`variants` 里混了「静态 PNG（1 帧）」
+ * 与「动态 GIF（N 帧）」，24 个变体里 **14 个**与所属 state 的声明不符。
+ * 若按 state 的 `frames` 去切变体，`happy-4.png`（239px）会被切成 7px 碎条。
+ * ────────────────────────────────────────────────────────────────────────── */
+
+ok('files 映射被解析（每个文件自己的几何）', () => {
+  const a = normalizeAtlas({
+    frameHeight: 256,
+    states: { happy: { file: 'happy.png', frames: 33, frameWidth: 256 } },
+    variants: { happy: ['happy.png', 'happy-2.png'] },
+    files: {
+      'happy.png': { frames: 33, frameWidth: 256, frameMs: 30 },
+      'happy-2.png': { frames: 1, frameWidth: 274, frameMs: 0 }
+    }
+  })
+  assert.equal(a.files['happy.png'].frames, 33)
+  assert.equal(a.files['happy-2.png'].frames, 1, '变体是静态图，只有 1 帧')
+  assert.equal(a.files['happy-2.png'].frameWidth, 274)
+})
+
+ok('geometryFor 按「文件」取几何，而不是按「状态」', () => {
+  const a = normalizeAtlas({
+    frameHeight: 256,
+    states: { happy: { file: 'happy.png', frames: 33, frameWidth: 256 } },
+    variants: { happy: ['happy.png', 'happy-2.png'] },
+    files: {
+      'happy.png': { frames: 33, frameWidth: 256, frameMs: 30 },
+      'happy-2.png': { frames: 1, frameWidth: 274, frameMs: 0 }
+    }
+  })
+  // 关键：同一个 state 的两个文件几何不同 —— 这正是 native-exe 报告的缺陷
+  assert.equal(geometryFor(a, 'happy.png').frames, 33)
+  assert.equal(geometryFor(a, 'happy-2.png').frames, 1, '变体不该被切成 33 段碎条')
+  assert.equal(geometryFor(a, 'happy-2.png').frameWidth, 274)
+})
+
+ok('files 优先于 states 声明（能修正错误的声明）', () => {
+  const a = normalizeAtlas({
+    frameHeight: 256,
+    // states 声明 33 帧，但 files 说这张图其实只有 1 帧
+    states: { happy: { file: 'happy.png', frames: 33, frameWidth: 256 } },
+    files: { 'happy.png': { frames: 1, frameWidth: 274, frameMs: 0 } }
+  })
+  assert.equal(a.states.happy.frames, 1, 'files 应覆盖 states 的错误声明')
+  assert.equal(a.states.happy.frameWidth, 274)
+})
+
+ok('缺 files 时回落到 states 声明（旧清单仍可用）', () => {
+  const a = normalizeAtlas({
+    frameHeight: 256,
+    states: { idle: { file: 'idle.png', frames: 4, frameWidth: 250, frameMs: 60 } },
+    variants: { idle: ['idle.png'] }
+  })
+  assert.equal(Object.keys(a.files).length, 0)
+  assert.equal(a.states.idle.frames, 4)
+  assert.equal(geometryFor(a, 'idle.png').frames, 4, '应回落到 states 声明')
+})
+
+ok('geometryFor 对未知文件回落安全默认值（不抛）', () => {
+  const a = normalizeAtlas({ states: { idle: { file: 'i.png', frames: 2 } } })
+  const g = geometryFor(a, 'nope.png')
+  assert.equal(g.frames, 1)
+  assert.equal(g.frameWidth, null)
+  assert.doesNotThrow(() => geometryFor(null, 'x.png'))
+  assert.doesNotThrow(() => geometryFor(a, undefined))
+})
+
+ok('files 里的遍历路径被丢弃', () => {
+  const a = normalizeAtlas({
+    states: { idle: { file: 'i.png', frames: 1 } },
+    files: { '../evil.png': { frames: 1, frameWidth: 10 } }
+  })
+  assert.equal(a.files['../evil.png'], undefined)
+  assert.equal(a.allowed.has('../evil.png'), false)
+})
+
+ok('files 里的非法几何条目被跳过', () => {
+  const a = normalizeAtlas({
+    states: { idle: { file: 'i.png', frames: 1 } },
+    files: {
+      'a.png': { frames: 0, frameWidth: 10 },
+      'b.png': { frames: 'x' },
+      'c.png': { frames: 2, frameWidth: 100 }
+    }
+  })
+  assert.equal(a.files['a.png'], undefined, 'frames=0 非法')
+  assert.equal(a.files['b.png'], undefined, 'frames 非数字非法')
+  assert.ok(a.files['c.png'], '合法条目应保留')
+})
+
+ok('files 里的文件也进白名单（变体图能被服务）', () => {
+  const a = normalizeAtlas({
+    states: { idle: { file: 'i.png', frames: 1 } },
+    variants: { idle: ['i.png', 'i-2.png'] },
+    files: { 'i-2.png': { frames: 1, frameWidth: 100 } }
+  })
+  assert.ok(a.allowed.has('i-2.png'), '变体应在白名单里')
+})
+
+ok('atlasReport 报出 files 几何条目数', () => {
+  const a = normalizeAtlas({
+    frameHeight: 256,
+    states: { idle: { file: 'i.png', frames: 1 } },
+    files: { 'i.png': { frames: 1, frameWidth: 100 } }
+  })
+  assert.equal(atlasReport(a).fileGeometry, 1)
+})
+
 ok('states 的键都在合法状态名内', () => {
   for (const k of Object.keys(goodAtlas.states)) {
     assert.ok(VALID_STATES.includes(k), `${k} 不是合法状态名`)
@@ -742,7 +853,7 @@ ok('states 的键都在合法状态名内', () => {
 
 ok('白名单包含 states/variants/bubble 里的全部文件', () => {
   for (const f of ['idle.png', 'working.png', 'idle-2.png', 'bubble/01.png']) {
-    assert.ok(goodAtlas.files.has(f), `白名单缺 ${f}`)
+    assert.ok(goodAtlas.allowed.has(f), `白名单缺 ${f}`)
   }
 })
 
@@ -766,7 +877,7 @@ ok('恶意清单里的遍历路径被丢弃', () => {
   assert.equal(evil.states.idle, undefined, '遍历路径不该进清单')
   assert.ok(evil.states.happy)
   assert.equal(evil.bubble.length, 0)
-  assert.equal(evil.files.has('../outside.png'), false)
+  assert.equal(evil.allowed.has('../outside.png'), false)
 })
 
 ok('resolveArt 拒绝白名单外的文件', () => {
@@ -787,10 +898,10 @@ ok('resolveArt 拒绝遍历（即使绕过白名单）', () => {
 })
 
 ok('空/损坏清单回落为空且不抛', () => {
-  assert.equal(normalizeAtlas(null).files.size, 0)
-  assert.equal(normalizeAtlas(undefined).files.size, 0)
-  assert.equal(normalizeAtlas('garbage').files.size, 0)
-  assert.equal(normalizeAtlas(42).files.size, 0)
+  assert.equal(normalizeAtlas(null).allowed.size, 0)
+  assert.equal(normalizeAtlas(undefined).allowed.size, 0)
+  assert.equal(normalizeAtlas('garbage').allowed.size, 0)
+  assert.equal(normalizeAtlas(42).allowed.size, 0)
   assert.equal(emptyAtlas().frameHeight, 0)
 })
 

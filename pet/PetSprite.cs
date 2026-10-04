@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Windows;
@@ -26,6 +26,8 @@ namespace DshZhuangFangyiPet
         public double AnchorY = 1.0;
         /// <summary>清单声明的单帧宽（0=未声明）。与 FrameW 不一致时以 FrameW（实测）为准。</summary>
         public int DeclaredFrameW;
+        /// <summary>几何来源："files" | "states"（诊断用）。</summary>
+        public string GeometrySource = "states";
 
         private CroppedBitmap[] _cropped;
 
@@ -184,6 +186,13 @@ namespace DshZhuangFangyiPet
         private readonly Dictionary<string, byte[]> _remoteCache = new Dictionary<string, byte[]>(StringComparer.Ordinal);
         private readonly Dictionary<string, DateTime> _negativeCache = new Dictionary<string, DateTime>(StringComparer.Ordinal);
         private const int NegativeCacheSeconds = 30;
+        /// <summary>
+        /// 已被判定「几何不可用」的变体文件名 → 判定时间。
+        /// 避免每次轮换到坏变体都重走一遍「下载 + 解码 + 告警」：
+        /// 实测合成素材里那个坏变体在每次 GetSheet 时都会重复告警两次（日志/HTTP 噪音）。
+        /// 清单重新加载（LoadAtlas）时清空。
+        /// </summary>
+        private readonly Dictionary<string, DateTime> _badVariants = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
 
         public string CacheDir { get { return _cacheDir; } }
         public PetJson.Atlas Atlas { get { return _atlas; } }
@@ -204,6 +213,7 @@ namespace DshZhuangFangyiPet
                 _bubbleCache.Clear();
                 _remoteCache.Clear();
                 _negativeCache.Clear();
+                _badVariants.Clear();
             }
         }
 
@@ -260,10 +270,17 @@ namespace DshZhuangFangyiPet
                 return false;
             }
 
-            lock (_gate) { _atlas = a; }
+            lock (_gate)
+            {
+                _atlas = a;
+                // 清单换了（可能新增了 files 几何）→ 之前的「坏变体」判定作废，重新给机会
+                _badVariants.Clear();
+                _sheets.Clear();
+            }
             AtlasError = null;
             PetLog.Startup("素材清单 OK: " + a.States.Count + " 状态 / " + a.Bubble.Count +
-                           " 气泡 / frameHeight=" + a.FrameHeight + " (来源 " + src + ")");
+                           " 气泡 / " + a.Files.Count + " 个 files 几何 / frameHeight=" + a.FrameHeight +
+                           " (来源 " + src + ")");
 
             if (src == "host")
             {
@@ -398,6 +415,10 @@ namespace DshZhuangFangyiPet
         /// <summary>
         /// 取得某状态的条带。必须在 UI 线程调用（解码 + 创建 CroppedBitmap）。
         /// 状态缺失时按契约 §4 回落 idle；再缺失则返回 null。
+        ///
+        /// 每次调用都会推进该状态的 variants 游标（契约 §4「同状态多素材轮换，防呆板」）。
+        /// 缓存按**文件名**而不是状态名：变体各有各的几何（可能帧数/帧宽都不同），
+        /// 若按状态缓存，第一次加载后永远命中同一个条带，variants 就等于没用。
         /// </summary>
         public SpriteSheet GetSheet(string state)
         {
@@ -409,14 +430,74 @@ namespace DshZhuangFangyiPet
             if (!a.States.ContainsKey(key) && a.States.ContainsKey("idle")) key = "idle";
             if (!a.States.ContainsKey(key)) return null;
 
-            lock (_gate)
-            {
-                SpriteSheet hit;
-                if (_sheets.TryGetValue(key, out hit)) return hit;
-            }
-
             PetJson.StateEntry e = a.States[key];
             string file = PickVariant(a, key, e.File);
+
+            // 几何来源优先级（契约 §4）：
+            //   files[<该文件名>]  →  states[state]  →  图片实测
+            // files 是「每个文件自己的几何」，变体靠它才能正确播放
+            // （实测真实素材：happy-4.png 是 1 帧 239px，而 happy 声明 33 帧 256px；
+            //  没有 files 时按 33 帧切会得到 239/33 = 7px 的碎条）。
+            //
+            // 只有当**既没有 files 条目、实测又与 states 声明不符**时才拒收变体并回落
+            // canonical —— 这是给旧清单（无 files）留的兜底。
+            SpriteSheet hit;
+            lock (_gate)
+            {
+                if (_sheets.TryGetValue(file, out hit)) return hit;
+            }
+
+            bool isVariant = !string.Equals(file, e.File, StringComparison.OrdinalIgnoreCase);
+
+            // 已判定坏掉的变体：直接跳过，不再重复「下载+解码+告警」
+            if (isVariant)
+            {
+                lock (_gate)
+                {
+                    if (_badVariants.ContainsKey(file))
+                    {
+                        if (_sheets.TryGetValue(e.File, out hit)) return hit;
+                        SpriteSheet canon = TryLoadSheet(key, e.File, e, a.GeomFor(e.File), false);
+                        if (canon != null) { lock (_gate) { _sheets[canon.File] = canon; } }
+                        return canon;
+                    }
+                }
+            }
+
+            SpriteSheet sh = TryLoadSheet(key, file, e, a.GeomFor(file), isVariant);
+            if (sh == null && isVariant)
+            {
+                PetLog.Warn("变体 " + file + " 不可用（无 files 几何且与声明不符，或取不到）→ 退回 canonical " + e.File);
+                lock (_gate) { _badVariants[file] = DateTime.UtcNow; }
+                lock (_gate)
+                {
+                    if (_sheets.TryGetValue(e.File, out hit)) return hit;
+                }
+                sh = TryLoadSheet(key, e.File, e, a.GeomFor(e.File), false);
+            }
+            if (sh == null) return null;
+
+            lock (_gate) { _sheets[sh.File] = sh; }
+            PetLog.Startup("条带 " + key + " ← " + sh.File + "  " + sh.Frames + " 帧 " +
+                           sh.FrameW + "x" + sh.FrameH + " @" + sh.FrameMs + "ms" +
+                           " [几何来源:" + sh.GeometrySource + "]");
+            return sh;
+        }
+
+        /// <summary>
+        /// 载入并校验一个条带文件。几何按 files → states → 实测 的优先级取。
+        ///
+        /// strict（仅对 variants 文件有意义）：
+        ///   - 有 files 几何 → 用 files 的 frames/frameWidth（**接受**，这正是新契约的用法）；
+        ///   - 无 files 几何且实测与 states 声明不符 → 返回 null，由调用方回落 canonical；
+        ///   - canonical 文件（strict=false）永远不拒收，声明不符时以实测为准
+        ///     （否则整只宠物会不显示）。
+        /// </summary>
+        private SpriteSheet TryLoadSheet(string key, string file, PetJson.StateEntry e,
+                                         PetJson.FileGeom geom, bool strict)
+        {
+            PetJson.Atlas a;
+            lock (_gate) { a = _atlas; }
 
             byte[] data = FetchBytes(file);
             if (data == null)
@@ -428,48 +509,93 @@ namespace DshZhuangFangyiPet
             BitmapSource strip = Decode(data, file);
             if (strip == null) return null;
 
-            // 优先用图片实测值推导单帧宽（契约 §4 要求 exe 不得假设固定值）。
-            int fw = strip.PixelWidth / e.Frames;
-            if (fw <= 0)
+            // ---- 1) files[file]：该文件自己的几何（最高优先级）----
+            int frames = 0;
+            int declaredFw = 0;
+            int frameMs = 0;
+            string src;
+            if (geom != null && geom.HasFrames)
             {
-                PetLog.Warn("条带 " + file + " 宽 " + strip.PixelWidth + " 不足 " + e.Frames + " 帧，按单帧处理");
-                fw = strip.PixelWidth;
+                frames = geom.Frames;
+                declaredFw = geom.FrameWidth;
+                frameMs = geom.HasFrameMs ? geom.FrameMs : e.FrameMs;
+                src = "files";
+            }
+            else
+            {
+                // ---- 2) states[state] 的声明 ----
+                frames = e.Frames;
+                declaredFw = e.FrameWidth;
+                frameMs = e.FrameMs;
+                src = "states";
+            }
+            if (frames < 1) frames = 1;
+
+            // ---- 3) 图片实测推导单帧宽（契约 §4：exe 不得假设固定值）----
+            int measuredFw = strip.PixelWidth / frames;
+            if (measuredFw <= 0)
+            {
+                PetLog.Warn("条带 " + file + " 宽 " + strip.PixelWidth + " 不足 " + frames + " 帧，按单帧处理");
+                measuredFw = strip.PixelWidth;
             }
 
-            // 自洽性校验：清单给了 frameWidth 就核对一下，不一致说明清单与素材不同步（很有价值的诊断）。
-            if (e.FrameWidth > 0 && e.FrameWidth != fw)
+            // 一致性：files/states 声明的 frameWidth 与实测不符时怎么处理
+            if (declaredFw > 0 && declaredFw != measuredFw)
             {
-                PetLog.Warn("清单与素材不一致：" + key + " 的 frameWidth=" + e.FrameWidth +
-                            "，但 " + file + " 实测单帧宽=" + fw +
-                            "（" + strip.PixelWidth + "px / " + e.Frames + " 帧）→ 以实测为准");
+                if (strict && src == "states")
+                {
+                    // 旧清单里的坏变体：无 files 条目，实测与声明不符 → 拒收，让调用方回落
+                    PetLog.Warn("几何不符（变体，无 files 条目）：" + file + " 声明 frameWidth=" + declaredFw +
+                                "，实测单帧宽=" + measuredFw + "（" + strip.PixelWidth + "px / " + frames +
+                                " 帧）→ 拒收该变体");
+                    return null;
+                }
+                if (strict && src == "files")
+                {
+                    // files 里给了几何但仍与实测不符 → 以 files 为准？还是实测？
+                    // 取实测（图片是最终事实），只告警。这样至少不会碎条。
+                    PetLog.Warn("清单与素材不一致：" + file + " 的 files.frameWidth=" + declaredFw +
+                                "，实测单帧宽=" + measuredFw + " → 以实测为准");
+                }
+                else
+                {
+                    PetLog.Warn("清单与素材不一致：" + key + " 声明 frameWidth=" + declaredFw +
+                                "，但 " + file + " 实测单帧宽=" + measuredFw +
+                                "（" + strip.PixelWidth + "px / " + frames + " 帧）→ 以实测为准");
+                }
             }
-            if (e.FrameWidth > 0 && strip.PixelHeight != a.FrameHeight)
+
+            if (a != null && a.FrameHeight > 0 && strip.PixelHeight != a.FrameHeight)
             {
-                PetLog.Warn("清单与素材不一致：" + key + " 的条带高 " + strip.PixelHeight +
-                            "px ≠ 清单 frameHeight=" + a.FrameHeight + "px");
+                if (strict && src == "states")
+                {
+                    PetLog.Warn("几何不符（变体，无 files 条目）：" + file + " 高 " + strip.PixelHeight +
+                                "px ≠ 清单 frameHeight=" + a.FrameHeight + "px → 拒收该变体");
+                    return null;
+                }
+                PetLog.Warn("清单与素材不一致：" + file + " 高 " + strip.PixelHeight +
+                            "px ≠ 清单 frameHeight=" + a.FrameHeight + "px → 以实测为准");
             }
 
             SpriteSheet sh = new SpriteSheet();
             sh.State = key;
             sh.File = file;
             sh.Strip = strip;
-            sh.FrameW = fw;
+            // 单帧宽以**实测**为准（图片是最终事实）；声明只用于校验与预排尺寸。
+            sh.FrameW = measuredFw;
             sh.FrameH = strip.PixelHeight;
-            sh.Frames = Math.Max(1, strip.PixelWidth / Math.Max(1, fw));
-            sh.FrameMs = e.FrameMs;
+            sh.Frames = Math.Max(1, strip.PixelWidth / Math.Max(1, measuredFw));
+            sh.FrameMs = frameMs;
             sh.AnchorY = e.AnchorY;
-            sh.DeclaredFrameW = e.FrameWidth;
-
-            lock (_gate) { _sheets[key] = sh; }
-            PetLog.Startup("条带 " + key + " ← " + file + "  " + sh.Frames + " 帧 " +
-                           sh.FrameW + "x" + sh.FrameH + " @" + sh.FrameMs + "ms" +
-                           (e.FrameWidth > 0 ? (" 清单 frameWidth=" + e.FrameWidth) : ""));
+            sh.DeclaredFrameW = declaredFw;
+            sh.GeometrySource = src;
             return sh;
         }
 
         /// <summary>
         /// 图片加载前的预估尺寸（契约 §4 frameWidth/frameHeight）。
         /// 命中则可用于「先摆好窗口再解码」，避免首帧尺寸闪动；未命中返回 false。
+        /// 几何来源与取帧一致：files[该文件] → states[state]。
         /// </summary>
         public bool TryGetDeclaredSize(string state, out int w, out int h)
         {
@@ -482,10 +608,40 @@ namespace DshZhuangFangyiPet
             if (!a.States.ContainsKey(key) && a.States.ContainsKey("idle")) key = "idle";
             PetJson.StateEntry e;
             if (!a.States.TryGetValue(key, out e) || e == null) return false;
-            if (e.FrameWidth <= 0 || a.FrameHeight <= 0) return false;
+            if (a.FrameHeight <= 0) return false;
+
+            // 先看 variants 里**下一个**要播的文件有没有 files 几何（它可能和 canonical 尺寸不同）
+            string next = PeekVariant(a, key, e.File);
+            PetJson.FileGeom g = a.GeomFor(next);
+            if (g != null && g.HasFrameWidth)
+            {
+                w = g.FrameWidth;
+                h = a.FrameHeight;
+                return true;
+            }
+            // 再看 canonical 自己的 files 几何
+            g = a.GeomFor(e.File);
+            if (g != null && g.HasFrameWidth)
+            {
+                w = g.FrameWidth;
+                h = a.FrameHeight;
+                return true;
+            }
+            // 最后回落到 states 声明
+            if (e.FrameWidth <= 0) return false;
             w = e.FrameWidth;
             h = a.FrameHeight;
             return true;
+        }
+
+        /// <summary>只看下一个变体是谁，不推进游标（供尺寸预估用）。</summary>
+        private string PeekVariant(PetJson.Atlas a, string state, string dflt)
+        {
+            List<string> vs;
+            if (!a.Variants.TryGetValue(state, out vs) || vs == null || vs.Count == 0) return dflt;
+            int cur;
+            lock (_gate) { _variantCursor.TryGetValue(state, out cur); }
+            return vs[Math.Abs(cur) % vs.Count];
         }
 
         private string PickVariant(PetJson.Atlas a, string state, string dflt)

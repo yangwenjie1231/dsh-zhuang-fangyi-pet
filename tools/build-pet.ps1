@@ -22,9 +22,13 @@
   编译前清空输出目录里的旧 exe。
 
 .EXAMPLE
-  pwsh -File tools/build-pet.ps1
+  powershell -NoProfile -ExecutionPolicy Bypass -File tools\build-pet.ps1
 .EXAMPLE
-  pwsh -File tools/build-pet.ps1 -OutDir D:\tmp\out -ForceCsc
+  powershell -NoProfile -ExecutionPolicy Bypass -File tools\build-pet.ps1 -OutDir D:\tmp\out -ForceCsc
+.NOTES
+  本机没有 pwsh 7，只有 Windows PowerShell 5.1，所以调用方式请用上面的 powershell.exe。
+  脚本在 5.1 与 7.x 下都能跑，但文件必须保持 **UTF-8 with BOM**，
+  否则 5.1 会按 ANSI/GBK 解码中文，直接语法错误。
 #>
 [CmdletBinding()]
 param(
@@ -36,6 +40,20 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# ---- BOM 自检（重要）----
+# Windows PowerShell 5.1 对**无 BOM** 的 .ps1 按 ANSI/GBK 解码，
+# 本脚本含中文，BOM 一丢就变成「意外的标记」语法错误（而且报错信息本身就是乱码，很难查）。
+# 这里显式检测并给出可操作的修复命令，而不是让人对着乱码猜。
+$selfPath = $MyInvocation.MyCommand.Path
+if ($selfPath -and (Test-Path -LiteralPath $selfPath)) {
+    $head = [System.IO.File]::ReadAllBytes($selfPath)
+    $hasBom = ($head.Length -ge 3 -and $head[0] -eq 0xEF -and $head[1] -eq 0xBB -and $head[2] -eq 0xBF)
+    if (-not $hasBom) {
+        Write-Warning ("build-pet.ps1 缺少 UTF-8 BOM；Windows PowerShell 5.1 可能已按 ANSI 解码中文。")
+        Write-Warning ("修复: `$t=[IO.File]::ReadAllText('$selfPath',(New-Object Text.UTF8Encoding(`$false))); [IO.File]::WriteAllText('$selfPath',`$t,(New-Object Text.UTF8Encoding(`$true)))")
+    }
+}
 
 $PkgRoot = Split-Path -Parent $PSScriptRoot
 $PetDir  = Join-Path $PkgRoot 'pet'
@@ -144,6 +162,10 @@ foreach ($a in @(
     '-nologo', '-noconfig', '-nostdlib+',
     '-target:winexe', '-optimize+', '-debug-',
     '-platform:anycpu',
+    # 显式 UTF-8：源码里的中文注释/字面量必须按 UTF-8 解码。
+    # 不写这一条时，csc 靠 BOM 猜编码；而 edit/write 工具容易把 BOM 弄丢，
+    # 一旦丢了，in-box C#5 编译器会按 ANSI 读，中文字面量就变乱码。
+    '-codepage:65001',
     ('-out:' + $OutExe)
 )) { $CommonArgs.Add($a) }
 if ($UseManifest) { $CommonArgs.Add('-win32manifest:' + $ManifestPath) }

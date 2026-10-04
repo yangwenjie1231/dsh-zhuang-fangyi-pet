@@ -91,6 +91,128 @@
       "w": 256
     }
   ],
+  "files": {
+    "error-2.png": {
+      "frameMs": 0,
+      "frameWidth": 218,
+      "frames": 1
+    },
+    "error.png": {
+      "frameMs": 30,
+      "frameWidth": 256,
+      "frames": 33
+    },
+    "happy-2.png": {
+      "frameMs": 0,
+      "frameWidth": 274,
+      "frames": 1
+    },
+    "happy-3.png": {
+      "frameMs": 60,
+      "frameWidth": 254,
+      "frames": 24
+    },
+    "happy-4.png": {
+      "frameMs": 0,
+      "frameWidth": 239,
+      "frames": 1
+    },
+    "happy-5.png": {
+      "frameMs": 30,
+      "frameWidth": 256,
+      "frames": 33
+    },
+    "happy.png": {
+      "frameMs": 30,
+      "frameWidth": 256,
+      "frames": 33
+    },
+    "idle-2.png": {
+      "frameMs": 60,
+      "frameWidth": 256,
+      "frames": 4
+    },
+    "idle-3.png": {
+      "frameMs": 60,
+      "frameWidth": 314,
+      "frames": 4
+    },
+    "idle.png": {
+      "frameMs": 0,
+      "frameWidth": 284,
+      "frames": 1
+    },
+    "listening-2.png": {
+      "frameMs": 30,
+      "frameWidth": 256,
+      "frames": 33
+    },
+    "listening.png": {
+      "frameMs": 0,
+      "frameWidth": 288,
+      "frames": 1
+    },
+    "sleeping-2.png": {
+      "frameMs": 0,
+      "frameWidth": 284,
+      "frames": 1
+    },
+    "sleeping.png": {
+      "frameMs": 60,
+      "frameWidth": 250,
+      "frames": 4
+    },
+    "thinking-2.png": {
+      "frameMs": 30,
+      "frameWidth": 256,
+      "frames": 44
+    },
+    "thinking-3.png": {
+      "frameMs": 60,
+      "frameWidth": 256,
+      "frames": 4
+    },
+    "thinking.png": {
+      "frameMs": 0,
+      "frameWidth": 241,
+      "frames": 1
+    },
+    "waiting-2.png": {
+      "frameMs": 30,
+      "frameWidth": 256,
+      "frames": 33
+    },
+    "waiting.png": {
+      "frameMs": 0,
+      "frameWidth": 256,
+      "frames": 1
+    },
+    "waking-2.png": {
+      "frameMs": 60,
+      "frameWidth": 254,
+      "frames": 24
+    },
+    "waking.png": {
+      "frameMs": 0,
+      "frameWidth": 239,
+      "frames": 1
+    },
+    "working-2.png": {
+      "frameMs": 60,
+      "frameWidth": 314,
+      "frames": 4
+    },
+    "working-3.png": {
+      "frameMs": 30,
+      "frameWidth": 256,
+      "frames": 33
+    },
+    "working.png": {
+      "frameMs": 0,
+      "frameWidth": 266,
+      "frames": 1
+    }
+  },
   "frameHeight": 256,
   "generatedAt": "1970-01-01T00:00:00.000Z",
   "missing": [

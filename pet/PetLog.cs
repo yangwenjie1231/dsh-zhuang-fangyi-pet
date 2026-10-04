@@ -71,11 +71,7 @@ namespace DshZhuangFangyiPet
             {
                 if (_mirror || force)
                 {
-                    try
-                    {
-                        Console.Out.WriteLine(line);
-                        Console.Out.Flush();
-                    }
+                    try { WriteStdoutUtf8(line); }
                     catch { }
                 }
                 if (string.IsNullOrEmpty(_logPath)) return;
@@ -85,6 +81,41 @@ namespace DshZhuangFangyiPet
                     File.AppendAllText(_logPath, line + Environment.NewLine, Encoding.UTF8);
                 }
                 catch { }
+            }
+        }
+
+        /// <summary>
+        /// 把一行以**确定的 UTF-8 字节**写到 stdout。
+        ///
+        /// 为什么不直接用 Console.Out.WriteLine：本 exe 是 -target:winexe（没有附加控制台），
+        /// 此时 Console.OutputEncoding 的设置不一定生效，写入会退回 ANSI/GBK 代码页 ——
+        /// 宿主（Node）按 UTF-8 解 stdout，中文就变成 � 乱码（实测复现过）。
+        /// 直接写 OpenStandardOutput() 的字节流可以完全绕开代码页问题。
+        /// 日志文件本来就用 Encoding.UTF8，所以文件侧一直是对的。
+        /// </summary>
+        private static void WriteStdoutUtf8(string line)
+        {
+            StdoutUtf8(line);
+        }
+
+        /// <summary>
+        /// 以确定的 UTF-8 字节写一行到 stdout（供日志与自检共用）。
+        /// 见 WriteStdoutUtf8 的说明：winexe 下不能依赖 Console.OutputEncoding。
+        /// </summary>
+        public static void StdoutUtf8(string line)
+        {
+            Stream s = null;
+            try
+            {
+                s = Console.OpenStandardOutput();
+                byte[] bytes = Encoding.UTF8.GetBytes(line + "\n");
+                s.Write(bytes, 0, bytes.Length);
+                s.Flush();
+            }
+            finally
+            {
+                // 不能 Dispose/Close 标准输出流（会关掉宿主读的那一端）。
+                // OpenStandardOutput 每次返回新的包装流，靠 GC 回收即可。
             }
         }
 

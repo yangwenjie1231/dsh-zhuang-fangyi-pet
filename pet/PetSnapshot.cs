@@ -108,11 +108,16 @@ namespace DshZhuangFangyiPet
     {
         public string Event = "message";
         public string Data;
+        /// <summary>
+        /// 契约 §2：服务端建议的重连间隔（`retry: 3000` 帧）。
+        /// 0 = 本帧没给，由调用方沿用上次的值/默认退避。
+        /// </summary>
         public int RetryMs;
 
         public override string ToString()
         {
-            return "event=" + Event + " data=" + (Data == null ? "(null)" : (Data.Length + "B"));
+            return "event=" + Event + " data=" + (Data == null ? "(null)" : (Data.Length + "B")) +
+                   (RetryMs > 0 ? (" retry=" + RetryMs) : "");
         }
     }
 }

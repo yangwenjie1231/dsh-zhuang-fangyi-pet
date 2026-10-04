@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -250,7 +250,10 @@ namespace DshZhuangFangyiPet
                         {
                             int rv;
                             if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out rv) && rv > 0)
+                            {
                                 retryMs = Math.Min(rv, 60000);
+                                frame.RetryMs = retryMs;   // 记在帧上，便于诊断
+                            }
                         }
                         else if (field == "data")
                         {

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -27,14 +27,28 @@ namespace DshZhuangFangyiPet
         private static int _fail;
         private static readonly StringBuilder Report = new StringBuilder();
 
+        /// <summary>
+        /// 以确定的 UTF-8 字节写 stdout（宿主 Node 按 UTF-8 解码）。
+        /// 不能直接用 Console.Out：-target:winexe 没有附加控制台，
+        /// Console.OutputEncoding 不一定生效，中文会按 ANSI/GBK 输出成乱码。
+        /// </summary>
+        internal static void Out(string line)
+        {
+            try { PetLog.StdoutUtf8(line); }
+            catch
+            {
+                try { Console.Out.WriteLine(line); } catch { }
+            }
+        }
+
         [DllImport("user32.dll")]
         private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
         public static int Run(PetOptions opt, string cacheDir)
         {
-            Console.Out.WriteLine("=== dsh-zhuang-fangyi-pet selftest ===");
-            Console.Out.WriteLine("时间 " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") +
-                                  "  pid=" + System.Diagnostics.Process.GetCurrentProcess().Id);
+            Out("=== dsh-zhuang-fangyi-pet selftest ===");
+            Out("时间 " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") +
+                "  pid=" + System.Diagnostics.Process.GetCurrentProcess().Id);
 
             string artDir = opt.ArtDir;
             bool synth = false;
@@ -62,6 +76,7 @@ namespace DshZhuangFangyiPet
                 PetJson.Atlas atlas = TestAtlas(artDir);
                 TestPriority();
                 SpriteSheet sheet = TestSprite(artDir, atlas);
+                TestFilesMapCompat();
                 TestClamp();
                 TestWindows(opt, artDir, cacheDir, sheet);
                 TestMutex();
@@ -72,12 +87,12 @@ namespace DshZhuangFangyiPet
                 Check(false, "自检过程中抛出未处理异常", PetLog.Describe(ex));
             }
 
-            Console.Out.WriteLine();
-            Console.Out.WriteLine(Report.ToString().TrimEnd());
-            Console.Out.WriteLine();
+            Out("");
+            Out(Report.ToString().TrimEnd());
+            Out("");
             string verdict = "=== 自检" + (_fail == 0 ? "全部通过" : "存在失败") +
                              " (" + _pass + " 通过 / " + _fail + " 失败) ===";
-            Console.Out.WriteLine(verdict);
+            Out(verdict);
             PetLog.Startup(verdict);
             return _fail == 0 ? Program.ExitOk : Program.ExitSelfTestFailed;
         }
@@ -90,7 +105,7 @@ namespace DshZhuangFangyiPet
             string line = (ok ? "[ok]  " : "[FAIL]") + " " + name;
             if (!string.IsNullOrEmpty(detail)) line += " — " + detail;
             Report.AppendLine(line);
-            Console.Out.WriteLine(line);
+            Out(line);
         }
 
         // ------------------------------------------------------------------
@@ -250,14 +265,151 @@ namespace DshZhuangFangyiPet
             Check(declared && dw == sh.FrameW && dh == sh.FrameH, "解码前预估尺寸（TryGetDeclaredSize）",
                   declared ? (dw + "x" + dh) : "未命中");
 
-            // happy 的清单 frameWidth 被故意写错(999) → 必须以实测为准且只 Warn 不崩
+            // canonical 文件的声明若与实测不符，应以实测为准（不能拒收，否则宠物不显示）。
+            // 合成素材里 happy 故意写错 frameWidth=999；真实素材里它是自洽的。
             SpriteSheet hp = store.GetSheet("happy");
-            Check(hp != null && hp.FrameW == 58 && hp.DeclaredFrameW == 999,
-                  "清单与素材不一致时以实测为准（仅 Warn）",
-                  hp == null ? "取不到" : ("实测=" + hp.FrameW + " 清单=" + hp.DeclaredFrameW));
+            PetJson.StateEntry he;
+            bool haveHappy = atlas.States.TryGetValue("happy", out he);
+            bool happyOk;
+            string happyDetail;
+            if (haveHappy && he.FrameWidth == 999)
+            {
+                happyOk = hp != null && hp.FrameW == 58 && hp.DeclaredFrameW == 999;
+                happyDetail = hp == null ? "取不到" : ("实测=" + hp.FrameW + " 声明=" + hp.DeclaredFrameW + "（声明错→以实测为准）");
+            }
+            else
+            {
+                happyOk = hp != null && haveHappy && hp.FrameW == he.FrameWidth;
+                happyDetail = hp == null ? "取不到" : ("实测=" + hp.FrameW + " 声明=" + (haveHappy ? he.FrameWidth : -1) + "（一致）");
+            }
+            Check(happyOk, "canonical 条带几何自洽/以实测为准", happyDetail);
+
+            // ---- 契约 §4 variants + files 的两条路径 ----
+            // (A) 反向用例：idle 的变体 idle-badvariant.png 几何不符，且 files 里**没有**它
+            //     → 必须被拒收并回落 canonical idle.png(4 帧 71px)。
+            //     若没做校验会按 4 帧切出 71/4 = 17px 的碎条。
+            List<string> idleVariants;
+            bool hasBadVariant = atlas.Variants.TryGetValue("idle", out idleVariants) &&
+                                 idleVariants != null && idleVariants.Count > 0 &&
+                                 idleVariants[0] == "idle-badvariant.png";
+            if (hasBadVariant)
+            {
+                // 游标会轮换：多取几次，确认**任何一次**都不会用到坏变体
+                bool sawBad = false;
+                bool sawCanonical = false;
+                for (int i = 0; i < 4; i++)
+                {
+                    SpriteSheet vs = store.GetSheet("idle");
+                    if (vs == null) continue;
+                    if (vs.File == "idle-badvariant.png") sawBad = true;
+                    if (vs.File == "idle.png" && vs.Frames == 4 && vs.FrameW == 71) sawCanonical = true;
+                }
+                Check(!sawBad && sawCanonical,
+                      "无 files 且几何不符的变体 → 拒收并回落 canonical（防碎条）",
+                      "用到坏变体=" + sawBad + "，用到 canonical(4 帧 71px)=" + sawCanonical);
+            }
+
+            // (B) 正向用例：working 的变体 working-var.png 几何与 states 声明**不同**
+            //     (声明 3 帧 66px，变体实为 2 帧 50px)，但 files 给了它自己的几何
+            //     → 必须被**接受**并按 2 帧 50px 播放（这是新契约的核心用法）。
+            List<string> workVariants;
+            bool hasFilesVariant = atlas.Variants.TryGetValue("working", out workVariants) &&
+                                   workVariants != null && workVariants.Count > 0 &&
+                                   workVariants[0] == "working-var.png";
+            if (hasFilesVariant && atlas.GeomFor("working-var.png") != null)
+            {
+                bool accepted = false;
+                string detail = "未取到";
+                for (int i = 0; i < 4 && !accepted; i++)
+                {
+                    SpriteSheet ws = store.GetSheet("working");
+                    if (ws == null) continue;
+                    if (ws.File == "working-var.png")
+                    {
+                        accepted = ws.Frames == 2 && ws.FrameW == 50 && ws.GeometrySource == "files";
+                        detail = "working-var.png " + ws.Frames + " 帧 " + ws.FrameW + "px 来源=" + ws.GeometrySource;
+                    }
+                    else
+                    {
+                        detail = "当前 " + ws.File + " " + ws.Frames + " 帧 " + ws.FrameW + "px（未轮到变体）";
+                    }
+                }
+                Check(accepted, "files 提供几何的变体 → 被接受并按自己的几何播放", detail);
+
+                // TryGetDeclaredSize 必须**预测 GetSheet 下一次会返回的条带**的尺寸
+                // （PetWindow.ReloadSprite 正是「先按它预摆窗口，再取帧」，两者必须一致）。
+                // 不能先手动轮换游标再断言固定值——那样测的是游标位置，不是这个不变式。
+                int vw, vh;
+                bool got = store.TryGetDeclaredSize("working", out vw, out vh);
+                SpriteSheet next = store.GetSheet("working");
+                bool predictOk = got && next != null && vw == next.FrameW && vh == next.FrameH;
+                Check(predictOk, "TryGetDeclaredSize 预测下一次取帧尺寸（认 files 几何）",
+                      (got && next != null)
+                        ? ("预估 " + vw + "x" + vh + "，实际 " + next.FrameW + "x" + next.FrameH +
+                           "（" + next.File + " 来源=" + next.GeometrySource + "）")
+                        : "未命中");
+            }
 
             store.Dispose();
             return sh;
+        }
+
+        /// <summary>
+        /// 契约 §4 向后兼容：顶层 `files` 是**附加字段**。
+        /// 这里用一份**不含 files** 的旧清单（合成素材的变体）跑一遍，
+        /// 证明旧清单仍然可用：无 files 时几何回落到 states 声明 + 图片实测，
+        /// 坏变体照样被拒收并回落 canonical。
+        /// </summary>
+        private static void TestFilesMapCompat()
+        {
+            string dir = Path.Combine(Path.GetTempPath(), "dsh-zhuang-fangyi-pet-nofiles");
+            try
+            {
+                if (Directory.Exists(dir)) Directory.Delete(dir, true);
+                Synth.Generate(dir, false);   // ← 不含 files 的旧清单
+
+                string json = File.ReadAllText(Path.Combine(dir, "pet.json"));
+                bool hasFilesKey = json.IndexOf("\"files\"", StringComparison.Ordinal) >= 0;
+                PetJson.Atlas a = PetJson.ParseAtlas(json);
+                Check(a != null && a.Files.Count == 0 && !hasFilesKey,
+                      "旧清单（无 files）解析：Files 为空且不报错",
+                      a == null ? "解析失败" : ("Files.Count=" + a.Files.Count + "，清单含 files 键=" + hasFilesKey));
+
+                PetOptions o = new PetOptions();
+                o.ArtDir = dir;
+                PetSpriteStore store = new PetSpriteStore(o, null,
+                    Path.Combine(Path.GetTempPath(), "dsh-zhuang-fangyi-pet-nofiles-cache"));
+                bool atlasOk = store.LoadAtlas();
+
+                // idle：坏变体（无 files 几何）必须被拒收 → 每次取都回落到 canonical
+                bool sawBad = false, sawGood = false;
+                for (int i = 0; i < 4; i++)
+                {
+                    SpriteSheet s = store.GetSheet("idle");
+                    if (s == null) continue;
+                    if (s.File == "idle-badvariant.png") sawBad = true;
+                    if (s.File == "idle.png" && s.Frames == 4 && s.FrameW == 71 && s.GeometrySource == "states") sawGood = true;
+                }
+                Check(atlasOk && !sawBad && sawGood,
+                      "旧清单（无 files）仍可正常取帧 + 坏变体兜底",
+                      "坏变体被用到=" + sawBad + "，回落到 canonical(4 帧 71px, 来源 states)=" + sawGood);
+
+                // working 的变体（无 files 时几何不符）→ 也应被拒收回落
+                bool wOk = false;
+                for (int i = 0; i < 4 && !wOk; i++)
+                {
+                    SpriteSheet s = store.GetSheet("working");
+                    if (s != null && s.File == "working.png" && s.Frames == 3 && s.FrameW == 66) wOk = true;
+                }
+                Check(wOk, "旧清单（无 files）：几何不符的变体同样被拒收回落",
+                      "working 最终用 canonical working.png(3 帧 66px)=" + wOk);
+
+                store.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Check(false, "旧清单向后兼容测试", PetLog.Describe(ex));
+            }
         }
 
         private static void TestClamp()
@@ -468,7 +620,14 @@ namespace DshZhuangFangyiPet
     /// </summary>
     internal static class Synth
     {
-        public static void Generate(string dir)
+        public static void Generate(string dir) { Generate(dir, true); }
+
+        /// <summary>
+        /// 生成合成素材。
+        /// includeFiles=true  → 含契约 §4 新增的顶层 `files` 映射（新清单）
+        /// includeFiles=false → **不含** files（旧清单），用于验证向后兼容回落
+        /// </summary>
+        public static void Generate(string dir, bool includeFiles)
         {
             Directory.CreateDirectory(dir);
             Directory.CreateDirectory(Path.Combine(dir, "bubble"));
@@ -480,6 +639,18 @@ namespace DshZhuangFangyiPet
             MakeStrip(Path.Combine(dir, "idle.png"), idleW, fh, 4, Color.FromArgb(255, 96, 152, 232));
             MakeStrip(Path.Combine(dir, "working.png"), workW, fh, 3, Color.FromArgb(255, 232, 152, 96));
             MakeStrip(Path.Combine(dir, "happy.png"), happyW, fh, 2, Color.FromArgb(255, 120, 210, 130));
+
+            // (A) 反向用例：几何不符的变体，**files 里没有它** → 必须拒收并回落 canonical。
+            //     idle 声明 4 帧 × 71px，这个变体只有 1 帧宽(71px)；
+            //     若不校验会按 4 帧切 → 71/4 = 17px 碎条。
+            MakeStrip(Path.Combine(dir, "idle-badvariant.png"), 71, fh, 1, Color.FromArgb(255, 200, 90, 90));
+
+            // (B) 正向用例：几何**与 states 声明不同**的变体，但 files 给了它自己的几何 → 必须被接受。
+            //     working 声明 3 帧 × 66px；这个变体是 2 帧 × 50px（100px 宽）。
+            //     没有 files 时它会被拒收；有 files 时应正常播放 2 帧 50px。
+            int varW = 50, varFrames = 2;
+            MakeStrip(Path.Combine(dir, "working-var.png"), varW, fh, varFrames, Color.FromArgb(255, 240, 200, 120));
+
             // 气泡图 1 张 96x96
             MakeBubble(Path.Combine(dir, "bubble", "01.png"), 96);
 
@@ -494,14 +665,26 @@ namespace DshZhuangFangyiPet
                           ", \"frameMs\": 40, \"anchorY\": 1.0 },");
             sb.AppendLine("    \"working\": { \"file\": \"working.png\", \"frames\": 3, \"frameWidth\": " + workW +
                           ", \"frameMs\": 50, \"anchorY\": 1.0 },");
-            // happy 故意写错 frameWidth（真实值 58），用来验证自洽性校验只 Warn 不崩
+            // happy 故意写错 frameWidth（真实值 58），且**不给 files 条目**，
+            // 用来验证 canonical 声明错时以实测为准（只 Warn 不崩）
             sb.AppendLine("    \"happy\":   { \"file\": \"happy.png\",   \"frames\": 2, \"frameWidth\": 999" +
                           ", \"frameMs\": 60, \"anchorY\": 1.0 },");
             sb.AppendLine("    \"bogus\":   { \"file\": \"nope.png\",    \"frames\": 2, \"frameMs\": 60, \"anchorY\": 1.0 }");
             sb.AppendLine("  },");
             sb.AppendLine("  \"variants\": {");
-            sb.AppendLine("    \"idle\": [\"idle.png\"]");
+            // idle 的第一个变体是几何不符的坏文件 → 无 files 条目 → 必须被拒收并回落 canonical
+            sb.AppendLine("    \"idle\": [\"idle-badvariant.png\", \"idle.png\"],");
+            // working 的第一个变体几何与声明不同，但 files 里有它的几何 → 必须被接受
+            sb.AppendLine("    \"working\": [\"working-var.png\", \"working.png\"]");
             sb.AppendLine("  },");
+            if (includeFiles)
+            {
+                sb.AppendLine("  \"files\": {");
+                sb.AppendLine("    \"working-var.png\": { \"frames\": " + varFrames + ", \"frameWidth\": " + varW +
+                              ", \"frameMs\": 30 },");
+                sb.AppendLine("    \"idle.png\":        { \"frames\": 4, \"frameWidth\": " + idleW + ", \"frameMs\": 40 }");
+                sb.AppendLine("  },");
+            }
             sb.AppendLine("  \"bubble\": [");
             sb.AppendLine("    { \"file\": \"bubble/01.png\", \"w\": 96, \"h\": 96 }");
             sb.AppendLine("  ],");

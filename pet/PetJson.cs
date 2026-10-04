@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
@@ -311,6 +311,25 @@ namespace DshZhuangFangyiPet
             public int H;
         }
 
+        /// <summary>
+        /// 契约 §4 新增：顶层 `files` 映射里**单个文件自己**的几何。
+        /// 这是解决「variants 里的文件与 states 声明几何不符」的正解：
+        /// 变体各有各的 frames/frameWidth，不再套用 canonical 的声明。
+        /// </summary>
+        public sealed class FileGeom
+        {
+            /// <summary>0 = 清单未给该文件的帧数（此时回落到 states 声明）。</summary>
+            public int Frames;
+            /// <summary>0 = 清单未给该文件的单帧宽（此时回落 states 声明，再回落图片实测）。</summary>
+            public int FrameWidth;
+            /// <summary>0 = 清单未给该文件的帧间隔（此时回落 states 声明）。</summary>
+            public int FrameMs;
+
+            public bool HasFrames { get { return Frames > 0; } }
+            public bool HasFrameWidth { get { return FrameWidth > 0; } }
+            public bool HasFrameMs { get { return FrameMs > 0; } }
+        }
+
         public sealed class MissingEntry
         {
             public string Name;
@@ -324,10 +343,16 @@ namespace DshZhuangFangyiPet
             public int FrameHeight = 256;
             public Dictionary<string, StateEntry> States = new Dictionary<string, StateEntry>(StringComparer.Ordinal);
             public Dictionary<string, List<string>> Variants = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+            /// <summary>
+            /// 契约 §4 新增（附加字段，向后兼容）：每个条带文件**自己**的几何。
+            /// 键是相对 art/pet 的文件名（与 states.file / variants 里的写法一致）。
+            /// 旧清单没有这个字段 → 字典为空，一切照旧走 states 声明 + 图片实测。
+            /// </summary>
+            public Dictionary<string, FileGeom> Files = new Dictionary<string, FileGeom>(StringComparer.OrdinalIgnoreCase);
             public List<BubbleEntry> Bubble = new List<BubbleEntry>();
             public List<MissingEntry> Missing = new List<MissingEntry>();
 
-            /// <summary>states 与 variants 中所有引用到的文件名（用于校验/缓存清单）。</summary>
+            /// <summary>states、variants、files 中所有引用到的文件名（用于校验/缓存清单）。</summary>
             public List<string> AllReferencedFiles()
             {
                 List<string> list = new List<string>();
@@ -346,12 +371,25 @@ namespace DshZhuangFangyiPet
                         if (!string.IsNullOrEmpty(f) && seen.Add(f)) list.Add(f);
                     }
                 }
+                foreach (KeyValuePair<string, FileGeom> kv in Files)
+                {
+                    if (!string.IsNullOrEmpty(kv.Key) && seen.Add(kv.Key)) list.Add(kv.Key);
+                }
                 for (int i = 0; i < Bubble.Count; i++)
                 {
                     if (Bubble[i] != null && !string.IsNullOrEmpty(Bubble[i].File) && seen.Add(Bubble[i].File))
                         list.Add(Bubble[i].File);
                 }
                 return list;
+            }
+
+            /// <summary>查某个文件自己的几何；没有则返回 null。</summary>
+            public FileGeom GeomFor(string file)
+            {
+                if (string.IsNullOrEmpty(file)) return null;
+                FileGeom g;
+                if (Files.TryGetValue(file, out g)) return g;
+                return null;
             }
         }
 
@@ -411,6 +449,31 @@ namespace DshZhuangFangyiPet
                         if (f != null && f.IsStr && !string.IsNullOrEmpty(f.StrVal)) files.Add(f.StrVal);
                     }
                     if (files.Count > 0) a.Variants[kv.Key] = files;
+                }
+            }
+
+            // 契约 §4 新增（附加字段，向后兼容）：顶层 files → 每个文件自己的几何。
+            // 旧清单没有这个键 → 跳过，Files 保持空字典。
+            JVal filesMap = root.Get("files");
+            if (filesMap != null && filesMap.IsObj)
+            {
+                foreach (KeyValuePair<string, JVal> kv in filesMap.Obj)
+                {
+                    string name = kv.Key;
+                    if (string.IsNullOrEmpty(name)) continue;
+                    JVal fv = kv.Value;
+                    if (fv == null || !fv.IsObj) continue;
+                    FileGeom g = new FileGeom();
+                    g.Frames = fv.Int("frames", 0);
+                    if (g.Frames < 0) g.Frames = 0;
+                    if (g.Frames > 4096) g.Frames = 4096;
+                    g.FrameWidth = fv.Int("frameWidth", 0);
+                    if (g.FrameWidth < 0) g.FrameWidth = 0;
+                    if (g.FrameWidth > 8192) g.FrameWidth = 8192;
+                    g.FrameMs = fv.Int("frameMs", 0);
+                    if (g.FrameMs < 0) g.FrameMs = 0;
+                    if (g.FrameMs > 600000) g.FrameMs = 600000;
+                    a.Files[name] = g;
                 }
             }
 

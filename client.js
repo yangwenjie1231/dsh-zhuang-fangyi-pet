@@ -261,14 +261,18 @@ window.__ModuleLoader__.load({
       /**
        * 从**图片本身**量出来的单帧几何。
        *
-       * 为什么不能假设方形：实测产出的条带单帧宽在 **204~288px** 之间（不是 256），
+       * 为什么不能假设方形：实测产出的条带单帧宽在 **239~288px** 之间（不是 256），
        * 因为素材内容 bbox 的纵横比各不相同（0.85~1.13）。若按 `frameHeight` 当宽度，
        * 图会被**横向压扁**，且切状态时宽度跳变。
        *
        * 所以以**图片实际尺寸**为准（`naturalWidth / frames`），清单里的
        * `frameWidth` 只作为加载前的占位值。
+       *
+       * **必须连同"是哪张图"一起记**：换状态/换变体时，上一张图的实测值
+       * 对新图是错的（帧数与宽度都可能不同），若不清掉会短暂用错几何。
        */
       const [natural, setNatural] = useState(null)
+      const naturalForRef = useRef(null)
 
       // 订阅宿主的运行时（快照/清单/设置都在同一个订阅里推过来）。
       useEffect(() => {
@@ -344,32 +348,52 @@ window.__ModuleLoader__.load({
       const state = snapshot?.petState ?? 'idle'
       const scale = Number(settings.scale) || 1
       const entry = atlas?.states?.[state] ?? atlas?.states?.idle ?? null
-      const spriteUrl = entry !== null && entry !== undefined
-        ? `${ROUTE}/art/${encodeURIComponent(entry.file)}`
+
+      /**
+       * 轮换到的素材文件。
+       *
+       * **几何必须按「文件」取，不能按「状态」取。** 因为 `variants` 里混了
+       * 静态 PNG（1 帧）与动态 GIF（N 帧），实测 24 个变体里 **14 个**与所属
+       * state 的声明不符。若按 state 的 `frames` 去切，`happy-4.png`（239px）
+       * 会被切成 `239/33 = 7px` 的碎条。
+       *
+       * 优先级与契约 §4 一致：`files[file]` → `states[state]` → 图片实测。
+       */
+      const seed = Number(snapshot?.variantSeed) || 0
+      const variantList = atlas?.variants?.[state]
+      const file = (Array.isArray(variantList) && variantList.length > 0)
+        ? variantList[Math.abs(Math.trunc(seed)) % variantList.length]
+        : (entry?.file ?? null)
+
+      const geom = file !== null && file !== undefined ? (atlas?.files?.[file] ?? null) : null
+      const spriteUrl = file !== null && file !== undefined
+        ? `${ROUTE}/art/${encodeURIComponent(file)}`
         : null
-      const frameMs = Number(entry?.frameMs) || 36
-      const frames = Math.max(1, Number(entry?.frames) || 1)
+      const frames = Math.max(1, Number(geom?.frames ?? entry?.frames) || 1)
+      const frameMs = Number(geom?.frameMs ?? entry?.frameMs) || 36
+
+      // 实测几何只对**它自己那张图**有效。换了文件就丢弃，回落到清单声明，
+      // 否则会拿上一张图的宽度去算新图的视口（切状态时肉眼可见地跳一下）。
+      const natural2 = naturalForRef.current === spriteUrl ? natural : null
 
       // 单帧几何：优先用**实测值**（图片加载后得到），加载前用清单里的
       // `frameWidth`，最后才回落到 frameHeight。
       //
-      // 单帧**不是方的**（实测 204~288px 宽），所以绝不能拿 frameHeight 当宽度 ——
+      // 单帧**不是方的**（实测 239~288px 宽），所以绝不能拿 frameHeight 当宽度 ——
       // 那会把图横向压扁，并在切状态时宽度跳变。
-      const frameH = natural?.h ?? (Number(atlas?.frameHeight) || 256)
-      const frameW = natural?.w ??
-        (Number(entry?.frameWidth) > 0 ? Number(entry.frameWidth) : frameH)
+      const declaredW = Number(geom?.frameWidth ?? entry?.frameWidth)
+      const frameH = natural2?.h ?? (Number(atlas?.frameHeight) || 256)
+      const frameW = natural2?.w ?? (declaredW > 0 ? declaredW : frameH)
 
-      // 图片加载后量真实尺寸。用 ref 记住"当前是哪张图"，避免旧图的 onLoad
-      // 覆盖新图的几何（切状态时两张图会竞争）。
+      // 图片加载后量真实尺寸，并记下它属于哪张图。
       const onImgLoad = event => {
         const el = event.currentTarget
         if (el?.naturalWidth > 0 && el.src === spriteUrl) {
-          const w = el.naturalWidth / frames
-          const h = el.naturalHeight
-          setNatural({ w, h })
+          naturalForRef.current = spriteUrl
+          setNatural({ w: el.naturalWidth / frames, h: el.naturalHeight })
           setSize({
-            w: Math.round(w * scale),
-            h: Math.round(h * scale)
+            w: Math.round((el.naturalWidth / frames) * scale),
+            h: Math.round(el.naturalHeight * scale)
           })
         }
       }

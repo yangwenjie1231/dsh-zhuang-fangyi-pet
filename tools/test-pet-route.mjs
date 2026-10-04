@@ -717,7 +717,7 @@ section('8. loadAtlas 容错（缺素材不该让插件瘫掉）')
 ok('pet.json 不存在时返回空清单且不抛', () => {
   const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'zf-pet-noatlas-'))
   const a = loadAtlas(empty, { warn () {} })
-  assert.equal(a.files.size, 0)
+  assert.equal(a.allowed.size, 0)
   assert.equal(a.frameHeight, 0)
 })
 
@@ -725,13 +725,13 @@ ok('pet.json 损坏时返回空清单且不抛', () => {
   const bad = fs.mkdtempSync(path.join(os.tmpdir(), 'zf-pet-badatlas-'))
   fs.writeFileSync(path.join(bad, 'pet.json'), '{ this is not json')
   const a = loadAtlas(bad, { warn () {} })
-  assert.equal(a.files.size, 0)
+  assert.equal(a.allowed.size, 0)
 })
 
 ok('真实清单能被加载并派生白名单', () => {
   const a = loadAtlas(artDir, { warn () {} })
-  assert.ok(a.files.has('idle.png'))
-  assert.ok(a.files.has('bubble/01.png'))
+  assert.ok(a.allowed.has('idle.png'))
+  assert.ok(a.allowed.has('bubble/01.png'))
 })
 
 /* ═════════════════════════════════════════════════════════════════════════ */
