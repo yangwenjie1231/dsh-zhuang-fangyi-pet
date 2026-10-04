@@ -232,6 +232,30 @@ namespace DshZhuangFangyiPet
             Check(w != null, "按状态懒加载 working", w == null ? "无" : (w.File + " " + w.Frames + " 帧"));
             Check(store.GetSheet("sleeping") != null || atlas.States.ContainsKey("sleeping") == false,
                   "缺失状态回落 idle", "sleeping 不在清单 → 回落 idle");
+
+            // 契约 §4：frameWidth 解析 + 非方形帧（单帧宽 ≠ 帧高）
+            PetJson.StateEntry ie;
+            bool haveIdle = atlas.States.TryGetValue("idle", out ie);
+            bool fwOk = haveIdle && ie.FrameWidth > 0;
+            Check(fwOk, "契约 §4 frameWidth 解析",
+                  fwOk ? ("idle.frameWidth=" + ie.FrameWidth + "（清单） vs 实测 " + sh.FrameW + "px") : "未解析到");
+            Check(sh.FrameW != sh.FrameH, "非方形帧：单帧宽 ≠ 帧高",
+                  "实测 " + sh.FrameW + "x" + sh.FrameH + "（宽≠高，验证没有拿 frameHeight 当宽度用）");
+            Check(haveIdle && ie.FrameWidth == sh.FrameW, "清单 frameWidth 与实测一致（自洽性校验）",
+                  haveIdle ? (ie.FrameWidth + " == " + sh.FrameW) : "-");
+
+            // TryGetDeclaredSize：解码前就能算窗口占位尺寸
+            int dw, dh;
+            bool declared = store.TryGetDeclaredSize("idle", out dw, out dh);
+            Check(declared && dw == sh.FrameW && dh == sh.FrameH, "解码前预估尺寸（TryGetDeclaredSize）",
+                  declared ? (dw + "x" + dh) : "未命中");
+
+            // happy 的清单 frameWidth 被故意写错(999) → 必须以实测为准且只 Warn 不崩
+            SpriteSheet hp = store.GetSheet("happy");
+            Check(hp != null && hp.FrameW == 58 && hp.DeclaredFrameW == 999,
+                  "清单与素材不一致时以实测为准（仅 Warn）",
+                  hp == null ? "取不到" : ("实测=" + hp.FrameW + " 清单=" + hp.DeclaredFrameW));
+
             store.Dispose();
             return sh;
         }
@@ -449,12 +473,13 @@ namespace DshZhuangFangyiPet
             Directory.CreateDirectory(dir);
             Directory.CreateDirectory(Path.Combine(dir, "bubble"));
 
-            // idle: 4 帧 64x64
-            MakeStrip(Path.Combine(dir, "idle.png"), 64, 4, Color.FromArgb(255, 96, 152, 232));
-            // working: 3 帧 64x64
-            MakeStrip(Path.Combine(dir, "working.png"), 64, 3, Color.FromArgb(255, 232, 152, 96));
-            // happy: 2 帧 64x64
-            MakeStrip(Path.Combine(dir, "happy.png"), 64, 2, Color.FromArgb(255, 120, 210, 130));
+            // 真实素材的单帧**不是方形**（实测宽 239~288、高统一 256），
+            // 所以合成素材也刻意用非方形帧宽，才能真正验证 frameWidth 这条路径。
+            int fh = 64;
+            int idleW = 71, workW = 66, happyW = 58;
+            MakeStrip(Path.Combine(dir, "idle.png"), idleW, fh, 4, Color.FromArgb(255, 96, 152, 232));
+            MakeStrip(Path.Combine(dir, "working.png"), workW, fh, 3, Color.FromArgb(255, 232, 152, 96));
+            MakeStrip(Path.Combine(dir, "happy.png"), happyW, fh, 2, Color.FromArgb(255, 120, 210, 130));
             // 气泡图 1 张 96x96
             MakeBubble(Path.Combine(dir, "bubble", "01.png"), 96);
 
@@ -463,11 +488,15 @@ namespace DshZhuangFangyiPet
             sb.AppendLine("  \"version\": 1,");
             sb.AppendLine("  \"generatedAt\": \"" + DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.000Z",
                           CultureInfo.InvariantCulture) + "\",");
-            sb.AppendLine("  \"frameHeight\": 64,");
+            sb.AppendLine("  \"frameHeight\": " + fh + ",");
             sb.AppendLine("  \"states\": {");
-            sb.AppendLine("    \"idle\":    { \"file\": \"idle.png\",    \"frames\": 4, \"frameMs\": 40, \"anchorY\": 1.0 },");
-            sb.AppendLine("    \"working\": { \"file\": \"working.png\", \"frames\": 3, \"frameMs\": 50, \"anchorY\": 1.0 },");
-            sb.AppendLine("    \"happy\":   { \"file\": \"happy.png\",   \"frames\": 2, \"frameMs\": 60, \"anchorY\": 1.0 },");
+            sb.AppendLine("    \"idle\":    { \"file\": \"idle.png\",    \"frames\": 4, \"frameWidth\": " + idleW +
+                          ", \"frameMs\": 40, \"anchorY\": 1.0 },");
+            sb.AppendLine("    \"working\": { \"file\": \"working.png\", \"frames\": 3, \"frameWidth\": " + workW +
+                          ", \"frameMs\": 50, \"anchorY\": 1.0 },");
+            // happy 故意写错 frameWidth（真实值 58），用来验证自洽性校验只 Warn 不崩
+            sb.AppendLine("    \"happy\":   { \"file\": \"happy.png\",   \"frames\": 2, \"frameWidth\": 999" +
+                          ", \"frameMs\": 60, \"anchorY\": 1.0 },");
             sb.AppendLine("    \"bogus\":   { \"file\": \"nope.png\",    \"frames\": 2, \"frameMs\": 60, \"anchorY\": 1.0 }");
             sb.AppendLine("  },");
             sb.AppendLine("  \"variants\": {");
@@ -483,9 +512,9 @@ namespace DshZhuangFangyiPet
             File.WriteAllText(Path.Combine(dir, "pet.json"), sb.ToString(), new UTF8Encoding(false));
         }
 
-        private static void MakeStrip(string path, int fh, int frames, Color color)
+        private static void MakeStrip(string path, int fw, int fh, int frames, Color color)
         {
-            int w = fh * frames;
+            int w = fw * frames;
             using (Bitmap bmp = new Bitmap(w, fh, PixelFormat.Format32bppArgb))
             {
                 using (Graphics g = Graphics.FromImage(bmp))
@@ -494,15 +523,16 @@ namespace DshZhuangFangyiPet
                     g.Clear(Color.Transparent);
                     for (int i = 0; i < frames; i++)
                     {
-                        int ox = i * fh;
+                        int ox = i * fw;
                         int shade = 20 * i;
                         // 显式 (int) 转换：否则 Math.Min(byte,byte) 与 Math.Min(int,int) 二义
                         Color c = Color.FromArgb(255,
                             Math.Min(255, (int)color.R + shade),
                             Math.Min(255, (int)color.G + shade),
                             Math.Min(255, (int)color.B));
+                        // 椭圆比帧小一圈 → 四周留透明边，供 alpha 穿透测试
                         using (SolidBrush b = new SolidBrush(c))
-                            g.FillEllipse(b, ox + 7, 7, fh - 15, fh - 15);
+                            g.FillEllipse(b, ox + 5, 5, fw - 11, fh - 11);
                     }
                 }
                 bmp.Save(path, ImageFormat.Png);

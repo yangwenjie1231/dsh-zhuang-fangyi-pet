@@ -8,7 +8,9 @@ using System.Windows.Media.Imaging;
 namespace DshZhuangFangyiPet
 {
     /// <summary>
-    /// 契约 §4/§6 的精灵条带：横向条带（frames × frameHeight 宽），
+    /// 契约 §4/§6 的精灵条带：**横向条带**，总宽 = frames × frameWidth，总高 = frameHeight。
+    /// 注意单帧**不是方形**（frameWidth ≠ frameHeight，实测单帧宽 239~288px、帧高统一 256px），
+    /// 所以绝不能拿 frameHeight 当宽度用，也绝不能用「总宽 / 帧数」之外的假设。
     /// 用 CroppedBitmap 取帧（v4.8 实测可用），懒加载（一次只解码当前状态那一张）。
     /// 同时构建 alpha 命中表供 WM_NCHITTEST 做点击穿透判定。
     /// </summary>
@@ -22,6 +24,8 @@ namespace DshZhuangFangyiPet
         public int Frames;
         public int FrameMs;
         public double AnchorY = 1.0;
+        /// <summary>清单声明的单帧宽（0=未声明）。与 FrameW 不一致时以 FrameW（实测）为准。</summary>
+        public int DeclaredFrameW;
 
         private CroppedBitmap[] _cropped;
 
@@ -424,12 +428,27 @@ namespace DshZhuangFangyiPet
             BitmapSource strip = Decode(data, file);
             if (strip == null) return null;
 
+            // 优先用图片实测值推导单帧宽（契约 §4 要求 exe 不得假设固定值）。
             int fw = strip.PixelWidth / e.Frames;
             if (fw <= 0)
             {
                 PetLog.Warn("条带 " + file + " 宽 " + strip.PixelWidth + " 不足 " + e.Frames + " 帧，按单帧处理");
                 fw = strip.PixelWidth;
             }
+
+            // 自洽性校验：清单给了 frameWidth 就核对一下，不一致说明清单与素材不同步（很有价值的诊断）。
+            if (e.FrameWidth > 0 && e.FrameWidth != fw)
+            {
+                PetLog.Warn("清单与素材不一致：" + key + " 的 frameWidth=" + e.FrameWidth +
+                            "，但 " + file + " 实测单帧宽=" + fw +
+                            "（" + strip.PixelWidth + "px / " + e.Frames + " 帧）→ 以实测为准");
+            }
+            if (e.FrameWidth > 0 && strip.PixelHeight != a.FrameHeight)
+            {
+                PetLog.Warn("清单与素材不一致：" + key + " 的条带高 " + strip.PixelHeight +
+                            "px ≠ 清单 frameHeight=" + a.FrameHeight + "px");
+            }
+
             SpriteSheet sh = new SpriteSheet();
             sh.State = key;
             sh.File = file;
@@ -439,11 +458,34 @@ namespace DshZhuangFangyiPet
             sh.Frames = Math.Max(1, strip.PixelWidth / Math.Max(1, fw));
             sh.FrameMs = e.FrameMs;
             sh.AnchorY = e.AnchorY;
+            sh.DeclaredFrameW = e.FrameWidth;
 
             lock (_gate) { _sheets[key] = sh; }
             PetLog.Startup("条带 " + key + " ← " + file + "  " + sh.Frames + " 帧 " +
-                           sh.FrameW + "x" + sh.FrameH + " @" + sh.FrameMs + "ms");
+                           sh.FrameW + "x" + sh.FrameH + " @" + sh.FrameMs + "ms" +
+                           (e.FrameWidth > 0 ? (" 清单 frameWidth=" + e.FrameWidth) : ""));
             return sh;
+        }
+
+        /// <summary>
+        /// 图片加载前的预估尺寸（契约 §4 frameWidth/frameHeight）。
+        /// 命中则可用于「先摆好窗口再解码」，避免首帧尺寸闪动；未命中返回 false。
+        /// </summary>
+        public bool TryGetDeclaredSize(string state, out int w, out int h)
+        {
+            w = h = 0;
+            PetJson.Atlas a;
+            lock (_gate) { a = _atlas; }
+            if (a == null) return false;
+
+            string key = PetJson.NormalizeState(state);
+            if (!a.States.ContainsKey(key) && a.States.ContainsKey("idle")) key = "idle";
+            PetJson.StateEntry e;
+            if (!a.States.TryGetValue(key, out e) || e == null) return false;
+            if (e.FrameWidth <= 0 || a.FrameHeight <= 0) return false;
+            w = e.FrameWidth;
+            h = a.FrameHeight;
+            return true;
         }
 
         private string PickVariant(PetJson.Atlas a, string state, string dflt)

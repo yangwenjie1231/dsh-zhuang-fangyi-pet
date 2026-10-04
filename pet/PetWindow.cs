@@ -186,6 +186,15 @@ namespace DshZhuangFangyiPet
         public void ReloadSprite()
         {
             string want = _state;
+
+            // 契约 §4：清单若已给出 frameWidth/frameHeight，先把窗口摆到目标尺寸再解码，
+            // 避免「先兜底尺寸、解码后再跳一下」的首帧闪动。
+            int dw, dh;
+            if (_store.TryGetDeclaredSize(want, out dw, out dh) && dw > 0 && dh > 0)
+            {
+                ApplyDipSizeFor(dw, dh);
+            }
+
             SpriteSheet sh = _store.GetSheet(want);
             if (sh == null && want != "idle") sh = _store.GetSheet("idle");
 
@@ -224,9 +233,16 @@ namespace DshZhuangFangyiPet
         private void ApplySizeForSheet()
         {
             if (_sheet == null) return;
+            ApplyDipSizeFor(_sheet.FrameW, _sheet.FrameH);
+        }
+
+        /// <summary>按物理像素帧尺寸 × 缩放，换算成当前 DPI 下的 DIP 尺寸。</summary>
+        private void ApplyDipSizeFor(int frameWpx, int frameHpx)
+        {
+            if (frameWpx <= 0 || frameHpx <= 0) return;
             double dpi = _hwnd == IntPtr.Zero ? 96.0 : PetNative.GetDpiForWindowSafe(_hwnd);
             double k = 96.0 / dpi;   // 物理像素 → DIP
-            SetDipSize(_sheet.FrameW * _opt.Scale * k, _sheet.FrameH * _opt.Scale * k);
+            SetDipSize(frameWpx * _opt.Scale * k, frameHpx * _opt.Scale * k);
         }
 
         private void SetDipSize(double w, double h)

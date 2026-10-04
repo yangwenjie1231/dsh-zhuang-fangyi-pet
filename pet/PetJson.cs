@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
@@ -295,6 +295,13 @@ namespace DshZhuangFangyiPet
             public int Frames = 1;
             public int FrameMs = 100;
             public double AnchorY = 1.0;
+            /// <summary>
+            /// 契约 §4：每状态单帧像素宽。0 = 清单未给（用图片实测推导）。
+            /// 用途：图片加载前即可算出正确窗口占位尺寸（避免首帧尺寸闪动），
+            /// 以及做自洽性校验（见 PetSprite.GetSheet）。
+            /// 注意：frameHeight 是**帧高**，不是帧宽——单帧非方形，条带宽 = frames × frameWidth。
+            /// </summary>
+            public int FrameWidth;
         }
 
         public sealed class BubbleEntry
@@ -381,6 +388,10 @@ namespace DshZhuangFangyiPet
                     e.AnchorY = sv.Num("anchorY", 1.0);
                     if (e.AnchorY < 0) e.AnchorY = 0;
                     if (e.AnchorY > 1) e.AnchorY = 1;
+                    // 契约 §4 新增：每状态单帧像素宽。0 = 未给，由图片实测推导。
+                    e.FrameWidth = sv.Int("frameWidth", 0);
+                    if (e.FrameWidth < 0) e.FrameWidth = 0;
+                    if (e.FrameWidth > 8192) e.FrameWidth = 8192;
                     a.States[kv.Key] = e;
                 }
             }
