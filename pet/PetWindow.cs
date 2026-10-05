@@ -522,14 +522,26 @@ namespace DshZhuangFangyiPet
                    dip.Y >= top && dip.Y <= top + bh;
         }
 
-        private bool HitTestDip(Point p)
+        /// <summary>自检诊断用：当前缩放。</summary>
+        public double DiagScale { get { return _opt.Scale; } }
+
+        /// <summary>自检诊断用：直接走一次滚轮缩放逻辑（不经窗口消息）。</summary>
+        public void DiagApplyWheel(int delta)
         {
-            // task-7：按钮区永远算实体（桌宠透明角落是 HTTRANSPARENT，按钮必须点得到）
+            double ns = PetOptions.StepScale(_opt.Scale, delta);
+            if (Math.Abs(ns - _opt.Scale) < 0.001) return;
+            SetScale(ns);
+            ScaleAdjusted(ns);
+        }
+
+        private bool HitTestDip(Point p)
+        {            // ✎ 按钮区永远算实体（桌宠透明角落是 HTTRANSPARENT，按钮必须点得到）
             if (IsOverSendButton(p)) return true;
-            if (!_clickThrough) return true;
+            // 逐像素 alpha 命中：**与 clickThrough 无关**。
+            // 透明处必须穿透（鼠标落到身后的桌面图标/窗口），否则桌宠会挡住一整块矩形。
             if (_sheet == null)
             {
-                // 兜底块：整个矩形都算实体
+                // 兜底块（还没加载素材）：整个矩形都算实体，否则没法拖动
                 return p.X >= 0 && p.Y >= 0 && p.X <= ActualWidth && p.Y <= ActualHeight;
             }
             double u = ActualWidth <= 0 ? 0 : p.X / ActualWidth;
@@ -637,18 +649,24 @@ namespace DshZhuangFangyiPet
                         int sx = unchecked((short)(lParam.ToInt64() & 0xFFFF));
                         int sy = unchecked((short)((lParam.ToInt64() >> 16) & 0xFFFF));
                         Point client = PointFromScreen(new Point(sx, sy));
-                        double dpi = _hwnd == IntPtr.Zero ? 1.0 : PetNative.GetDpiForWindowSafe(_hwnd) / 96.0;
-                        if (dpi <= 0) dpi = 1.0;
                         Point dip = new Point(client.X, client.Y);
 
-                        if (!_clickThrough)
-                        {
-                            // 穿透关闭：整窗可点可拖（无边框窗用 HTCAPTION 换取系统拖动）
-                            handled = true;
-                            return new IntPtr(PetNative.HTCAPTION);
-                        }
-
-                        if (HitTestDip(dip))
+                        // ⚠️ 这里**绝不能返回 HTCAPTION**（曾经这么干过，后果严重）：
+                        // HTCAPTION 把整窗伪装成"标题栏"，Windows 便按标题栏语义处理鼠标 ——
+                        // 拖动确实能用（系统帮着拖），但**滚轮消息不再派发给 WPF**，
+                        // 于是 MouseWheel 永不触发（"大小调不了"），
+                        // 点击/双击/悬停也一并被标题栏语义吞掉（"没法交互"）。
+                        //
+                        // 正确做法：返回 HTCLIENT 让 WPF 收到正常鼠标消息，
+                        // 拖动由 OnMouseLeftButtonDown + CaptureMouse + OnMouseMove 自己做
+                        //（那套逻辑本来就在，只是过去被 HTCAPTION 架空、从未执行）。
+                        //
+                        // 穿透语义分两层：
+                        //   · **透明像素始终穿透**（HTTRANSPARENT）—— 核心体验，与设置无关；
+                        //   · `clickThrough: true` = **连不透明处也穿透**（整窗纯装饰，不接收任何鼠标）。
+                        // 两者都不能靠 HTCAPTION 实现（那会吞掉滚轮与点击，见上面的说明）。
+                        bool solid = !_clickThrough && HitTestDip(dip);
+                        if (solid)
                         {
                             handled = true;
                             return new IntPtr(PetNative.HTCLIENT);

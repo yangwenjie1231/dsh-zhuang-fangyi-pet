@@ -61,6 +61,30 @@ if ($DryRun) {
   exit 0
 }
 
+# ── 0. 先让正在运行的桌宠退出 ────────────────────────────────────────────
+#
+# 为什么必须：桌宠 exe 在跑时**文件被占用**，删除/覆盖 `bin\` 会 "Access denied"。
+# 而删除是"先删后建"的第一步 —— 一旦在这里失败，目标目录就留下**半成品**
+#（bin 被删掉、新的没建回来）。这正是真机上"桌宠不出现、日志只报 started=false"
+# 的历史成因：部署时桌宠正在跑。
+#
+# 处理：检测到就结束它。桌宠是纯展示进程，退出不丢任何状态；
+# 宿主会在下次启动时按 settings 重新拉起（或重启 DSH 即可）。
+if (-not $SkipExe) {
+  $running = Get-Process -Name 'dsh-zhuang-fangyi-pet' -ErrorAction SilentlyContinue
+  if ($running) {
+    Write-Host ("  停止正在运行的桌宠（{0} 个进程）—— 否则 exe 被占用，删除会失败" -f @($running).Count)
+    foreach ($p in $running) {
+      try { $p.Kill(); $p.WaitForExit(3000) | Out-Null } catch { }
+    }
+    Start-Sleep -Milliseconds 400   # 等文件句柄真正释放
+    $still = Get-Process -Name 'dsh-zhuang-fangyi-pet' -ErrorAction SilentlyContinue
+    if ($still) {
+      Write-Host "  ⚠️ 仍有桌宠进程未退出，删除 bin\ 可能失败" -ForegroundColor Yellow
+    }
+  }
+}
+
 # ── 1. 目录：先删后建，避免嵌套与残留 ─────────────────────────────────────
 #
 # 注意 `art` 整体复制 —— 它包含 `art/pet/src/cutout/`（用户手动抠的图）。

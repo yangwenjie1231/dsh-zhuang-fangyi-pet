@@ -861,7 +861,11 @@ namespace DshZhuangFangyiPet
             o.Token = opt.Token;
             o.Scale = 1.0;
             o.Opacity = 0.0;          // 自检窗口不可见
-            o.ClickThrough = true;
+            // ⚠️ 必须 false：命中测试的语义是
+            //   透明像素 → HTTRANSPARENT（始终穿透）
+            //   不透明像素 → HTCLIENT（可点/可拖/可滚轮），**仅当 clickThrough=false**
+            // 设 true 会让整窗纯穿透，那就测不出"不透明处可点"了（曾经因此误报失败）。
+            o.ClickThrough = false;
             o.Topmost = false;
             o.HasPos = false;
             o.State = "idle";
@@ -935,10 +939,16 @@ namespace DshZhuangFangyiPet
                 int x, y, w, hh;
                 win.GetScreenRect(out x, out y, out w, out hh);
 
+                // ⚠️ WM_NCHITTEST 的 lParam 是**物理屏幕像素**，而窗口内布局是 DIP。
+                // 取窗口中心的物理坐标 = 左上角物理 + 物理尺寸的一半（GetScreenRect 给的都是物理）。
+                // 曾经这里写错过单位：把物理中心当 DIP 用，命中落到 0.75/0.75（帧间透明区），
+                // 于是误报"中心不可点"。产品代码没问题，是断言自己算错了坐标。
+                int cxPhys = x + w / 2;
+                int cyPhys = y + hh / 2;
                 IntPtr corner = SendMessage(h, PetNative.WM_NCHITTEST, IntPtr.Zero,
                     MakeLParam(x + 2, y + 2));
                 IntPtr center = SendMessage(h, PetNative.WM_NCHITTEST, IntPtr.Zero,
-                    MakeLParam(x + w / 2, y + hh / 2));
+                    MakeLParam(cxPhys, cyPhys));
 
                 bool alphaOk = corner.ToInt32() == PetNative.HTTRANSPARENT &&
                                center.ToInt32() == PetNative.HTCLIENT;
@@ -949,6 +959,25 @@ namespace DshZhuangFangyiPet
                 Check(alphaOk, "本体窗：透明处穿透 / 不透明处可点",
                       "角落(" + (x + 2) + "," + (y + 2) + ")=" + corner.ToInt32() +
                       " 期望 -1；中心(" + (x + w / 2) + "," + (y + hh / 2) + ")=" + center.ToInt32() + " 期望 1");
+
+                // ⭐ 不透明处必须返回 HTCLIENT，**不能是 HTCAPTION**。
+                // 这是一条被真实事故换来的断言：曾经这里返回 HTCAPTION（"把窗口伪装成标题栏
+                // 换取系统拖动"），后果是 Windows 按标题栏语义处理鼠标 ——
+                // **滚轮消息不再派发给 WPF**（滚轮缩放彻底失效），点击/双击/悬停也一并被吞。
+                // HTCAPTION=2, HTCLIENT=1, HTTRANSPARENT=-1。
+                bool notCaption = center.ToInt32() != 2;
+                Check(notCaption, "本体窗：不透明处不用 HTCAPTION（否则滚轮/点击被系统吞掉）",
+                      "中心返回 " + center.ToInt32() + (notCaption ? "（=HTCLIENT，滚轮可达）" : "（=HTCAPTION，滚轮必失效）"));
+
+                // ⭐ 滚轮缩放链路：StepScale 必须真的改变 scale（不依赖窗口消息，纯逻辑断言）。
+                double s0 = win.DiagScale;
+                win.DiagApplyWheel(120);
+                double s1 = win.DiagScale;
+                win.DiagApplyWheel(-120);
+                double s2 = win.DiagScale;
+                bool wheelOk = s1 > s0 && Math.Abs(s2 - s0) < 0.001;
+                Check(wheelOk, "滚轮缩放：上滚变大、下滚复原",
+                      s0.ToString("0.##") + " → " + s1.ToString("0.##") + " → " + s2.ToString("0.##"));
 
                 // 150% DPI：窗口 DIP 尺寸 × dpi/96 必须等于精灵的物理像素帧尺寸
                 double dpi = PetNative.GetDpiForWindowSafe(h);
