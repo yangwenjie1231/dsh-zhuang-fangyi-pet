@@ -30,6 +30,8 @@ namespace DshZhuangFangyiPet
         public Action<double> SetScale = delegate { };
         public Action ResetPosition = delegate { };
         public Action FocusDsh = delegate { };
+        /// <summary>打开表情包画廊（托盘入口）。</summary>
+        public Action OpenGallery = delegate { };
         public Action Quit = delegate { };
         public Func<bool> IsVisible = delegate { return true; };
         public Func<bool> GetClickThrough = delegate { return true; };
@@ -115,6 +117,10 @@ namespace DshZhuangFangyiPet
                 theme.DropDownItems.Add(it);
             }
             _menu.Items.Add(theme);
+
+            ToolStripMenuItem gallery = new ToolStripMenuItem("表情包…(&G)");
+            gallery.Click += delegate { OpenGallery(); };
+            _menu.Items.Add(gallery);
 
             ToolStripMenuItem focus = new ToolStripMenuItem("打开 DSH 窗口(&D)");
             focus.Click += delegate { FocusDsh(); };

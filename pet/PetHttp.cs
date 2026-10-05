@@ -437,6 +437,64 @@ namespace DshZhuangFangyiPet
             return new UTF8Encoding(false).GetString(b);
         }
 
+        /// <summary>取一张素材的原始字节（画廊缩略图用）。失败返回 null，绝不抛。</summary>
+        public byte[] GetArtBytes(string rel)
+        {
+            if (string.IsNullOrEmpty(rel)) return null;
+            try
+            {
+                byte[] b;
+                int code = GetRaw("/api/zhuang-fangyi/pet/art/" + Uri.EscapeDataString(rel), 15000, out b);
+                if (code != 200 || b == null || b.Length == 0) return null;
+                return b;
+            }
+            catch { return null; }
+        }
+
+        /// <summary>
+        /// 拉表情清单（GET /pet/gallery）→ 回调（线程池线程上被调，UI 侧要自己切回来）。
+        ///
+        /// 失败时 items=null 且 error 给出原因 —— 画廊要能显示"为什么是空的"，
+        /// 而不是给用户一个白框。
+        /// </summary>
+        public void GetGallery(Action<List<PetGalleryItem>, string> done)
+        {
+            if (done == null) return;
+            if (_disposed) { done(null, "http 已释放"); return; }
+            string url = _base + "/api/zhuang-fangyi/pet/gallery";
+            string token = _token;
+            ThreadPool.QueueUserWorkItem(delegate(object _)
+            {
+                try
+                {
+                    HttpWebRequest req = (HttpWebRequest)WebRequest.Create(url);
+                    req.Method = "GET";
+                    req.Timeout = 15000;
+                    req.ReadWriteTimeout = 15000;
+                    req.Proxy = null;
+                    req.KeepAlive = false;
+                    req.Headers["Authorization"] = "Bearer " + token;
+                    using (HttpWebResponse resp = (HttpWebResponse)req.GetResponse())
+                    {
+                        int code = (int)resp.StatusCode;
+                        if (IsAuthRejected(code)) Interlocked.Increment(ref _consecutive401);
+                        else if (code >= 200 && code < 300) Interlocked.Exchange(ref _consecutive401, 0);
+                        using (Stream st = resp.GetResponseStream())
+                        {
+                            string body = new UTF8Encoding(false).GetString(ReadAll(st, 4 * 1024 * 1024));
+                            List<PetGalleryItem> items = PetJson.ParseGallery(body);
+                            done(items, items == null ? "响应不是合法清单" : null);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    done(null, PetLog.Describe(ex));
+                }
+            });
+        }
+
+
         private static byte[] ReadAll(Stream st, int cap)
         {
             using (MemoryStream ms = new MemoryStream())

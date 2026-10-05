@@ -40,7 +40,8 @@ import { defaultSettings, normalizeSettings, SETTINGS_VERSION } from './src/sett
 import { createPetState, DEFAULT_BUBBLE_STATES } from './src/pet/state.js'
 import { activityConfig } from './src/pet/activity.js'
 import { bridgeHostEvents } from './src/pet/events.js'
-import { loadAtlas, artForState, bubbleArt, atlasReport } from './src/pet/atlas.js'
+import { loadAtlas, artForState, bubbleArt, bubbleArtByFile, atlasReport } from './src/pet/atlas.js'
+import { pickEmoteFile, EMOTE_BY_KEY } from './src/pet/emotes.js'
 import { createHub } from './src/pet/hub.js'
 import { createHandler, newToken, ROUTE_PREFIX } from './src/pet/routes.js'
 import { createLauncher } from './src/pet/launcher.js'
@@ -297,6 +298,9 @@ export function apply (ctx, config) {
     }
   }
 
+  /** 上一张按状态挑出来的表情（下次尽量不重复）。 */
+  let lastEmoteFile = null
+
   const machine = createPetState({
     config: machineConfig(),
     pickBubbleImage: (key, seed) => {
@@ -304,7 +308,25 @@ export function apply (ctx, config) {
       // 返回**整条记录**（含 `hasText`）而不只是路径：状态机需要知道这张图
       // 是否已经把文字画进去了，才决定要不要叠 Host 文案 ——
       // 自带中文的贴纸再叠一句，屏幕上会出现两段互相打架的文字（契约 §4）。
-      return bubbleArt(atlas, seed)
+      //
+      // ⭐ 表情**结合状态**：先按 key 查语义映射（出错配生气、完成配庆祝），
+      // 映射里没有这个 key 才回落到全池轮换。
+      // 曾经这里是纯 `bubbleArt(atlas, seed)`（按索引取模、忽略 key），
+      // 于是"刚报错就弹好耶""刚完成就弹庄一直哭"——用户直接反馈过。
+      const emote = pickEmoteFile(key, seed, lastEmoteFile)
+      if (emote !== null) {
+        const rec = bubbleArtByFile(atlas, emote)
+        if (rec !== null) {
+          lastEmoteFile = rec.file
+          return rec
+        }
+        // 映射里的文件在清单里不存在（素材被换过）→ 不要静默变成"没表情"，
+        // 记一笔并回落到全池，免得整个状态哑掉。
+        logger?.debug?.(`zhuang-fangyi-pet: 映射里的表情不在清单里：${emote}`)
+      }
+      const fallback = bubbleArt(atlas, seed)
+      if (fallback !== null) lastEmoteFile = fallback.file
+      return fallback
     }
   })
 
@@ -520,6 +542,33 @@ export function apply (ctx, config) {
     return list
   }
 
+  /**
+   * 画廊数据（右键「表情包…」用）。
+   *
+   * 返回**清单里的全部气泡** + 每张的语义分组，让用户能主动看全 ——
+   * 在此之前 41 张只能靠"状态变化时随机撒"，用户反馈"这么久都没看全"。
+   *
+   * 只发渲染方需要的最小字段（file/hasText/opaque/fileDark + 分组名），
+   * 不带几何（那是气泡定位用的，画廊按网格排版）。
+   */
+  const gallery = () => {
+    const pool = Array.isArray(atlas?.bubble) ? atlas.bubble : []
+    const groupOf = new Map()
+    for (const [key, files] of Object.entries(EMOTE_BY_KEY)) {
+      for (const f of files) {
+        // 同一张图可能属于多个情境，保留第一个（列表顺序即"主要情境"）
+        if (!groupOf.has(f)) groupOf.set(f, key)
+      }
+    }
+    return pool.map(entry => ({
+      file: entry.file,
+      hasText: entry.hasText === true,
+      opaque: entry.opaque === true,
+      fileDark: typeof entry.fileDark === 'string' ? entry.fileDark : null,
+      /** 主要情境（用于画廊分组与说明）；未归类的为 null。 */
+      group: groupOf.get(entry.file) ?? null
+    }))
+  }
   /** 快照 + 设置 = 广播帧（exe 与 overlay 共用同一帧）。 */
   const withSettings = snap => ({
     ...snap,
@@ -681,6 +730,7 @@ export function apply (ctx, config) {
     // `/pet/state` 与 SSE 帧必须**同构**（都带 settings）：exe 断线降级轮询时
     // 拿到的设置不能和 SSE 推的不一样，否则轮询回退会把 scale 拉回旧值。
     snapshot: () => withSettings(machine.snapshot()),
+    gallery,
     atlas: () => atlas,
     artDir: ART_DIR,
     token,

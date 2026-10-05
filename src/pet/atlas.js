@@ -321,6 +321,29 @@ export function bubbleArt (atlas, seed = 0) {
 }
 
 /**
+ * 按**文件路径**取气泡记录（用于"表情结合状态"：映射给出文件，这里取回整条记录）。
+ *
+ * 为什么要这个：`bubbleArt` 只能按下标取，而状态→表情的映射是按**文件**写的
+ * （可读、可评审）。返回整条记录而不是只回文件名，是因为调用方还需要
+ * `hasText`（决定要不要叠文案）与 `opaque`/`fileDark`（决定呈现与深色变体）。
+ *
+ * 找不到返回 null（**不抛**）：素材被换掉时应当回落到全池，而不是让气泡哑掉。
+ *
+ * @param {object} atlas
+ * @param {string} file - 相对 `art/pet/` 的路径
+ * @returns {{file: string, w: number, h: number, hasText: boolean}|null}
+ */
+export function bubbleArtByFile (atlas, file) {
+  const pool = atlas?.bubble
+  if (!Array.isArray(pool) || typeof file !== 'string' || file === '') return null
+  const key = file.replace(/\\/g, '/')
+  for (const entry of pool) {
+    if (entry?.file === key) return entry
+  }
+  return null
+}
+
+/**
  * 取某张气泡图是否**自带文字**。
  *
  * 素材里有一整类「中文已经印在图上」的聊天贴纸（实测 16 张，如「好耶！」「工作中…」）。

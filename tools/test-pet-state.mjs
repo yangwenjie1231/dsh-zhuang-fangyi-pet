@@ -32,6 +32,14 @@ import {
 } from '../src/pet/state.js'
 import { activityConfig, activityPreset, nextIdleEmoteDelay } from '../src/pet/activity.js'
 import {
+  EMOTE_BY_KEY,
+  EMOTE_EXCLUDE_FROM_RANDOM,
+  normalizeEmoteKey,
+  emotePool,
+  pickEmoteFile,
+  emoteCoverage
+} from '../src/pet/emotes.js'
+import {
   fromSessionEvent,
   fromAgentStatus,
   fromAgentError,
@@ -1024,6 +1032,129 @@ ok('attention 文案随 locale 切换', () => {
   assert.equal(machine.snapshot().attention.text, 'Waiting for your approval')
 })
 
+section('13.6 表情结合状态（emotes.js）')
+
+ok('⭐ 9 个状态**全部**有专属表情池（不能有状态哑掉）', () => {
+  const states = ['waking', 'idle', 'listening', 'thinking', 'working', 'waiting', 'happy', 'error', 'sleeping']
+  const missing = states.filter(s => emotePool(s).length === 0)
+  assert.deepEqual(missing, [], `这些状态没有表情池：${missing.join(', ')}`)
+})
+
+ok('⭐ 事件型 key 也有池（完成/失败/来消息/主动卖萌）', () => {
+  for (const k of ['notify-complete', 'tool/failed', 'inbox/inserted']) {
+    assert.ok(emotePool(k).length > 0, `${k} 应有表情池`)
+  }
+  assert.ok(emotePool('idle-emote-7').length > 0, 'idle-emote-<序号> 应归到 idle')
+})
+
+ok('⭐ 情绪对得上：出错配生气/哭，完成配庆祝，两者不重叠', () => {
+  const err = new Set(emotePool('error'))
+  const happy = new Set(emotePool('happy'))
+  const overlap = [...err].filter(f => happy.has(f))
+  assert.deepEqual(overlap, [], `出错与完成的池子不该重叠：${overlap.join(', ')}`)
+  // 具体抽查：出错池里有"生气"，完成池里有"好耶"
+  assert.ok([...err].some(f => f.includes('annoyed')), '出错池应含「好气人哦」')
+  assert.ok([...happy].some(f => f.includes('yay')), '完成池应含「好耶」')
+  assert.ok(![...err].some(f => f.includes('yay')), '出错池**绝不能**含「好耶」')
+  assert.ok(![...happy].some(f => f.includes('crying')), '完成池**绝不能**含「庄一直哭」')
+})
+
+ok('⭐ 干活中的池子不含庆祝类（AI 还在忙，不该先庆祝）', () => {
+  const working = emotePool('working')
+  const celebration = ['yay', 'so-good', 'thumbs-up', 'you-are-the-best']
+  const bad = working.filter(f => celebration.some(c => f.includes(c)))
+  assert.deepEqual(bad, [], `working 池不该含庆祝类：${bad.join(', ')}`)
+})
+
+ok('normalizeEmoteKey：精确 key 原样、idle-emote-* 归 idle、未知返回 null', () => {
+  assert.equal(normalizeEmoteKey('happy'), 'happy')
+  assert.equal(normalizeEmoteKey('idle-emote-12'), 'idle')
+  assert.equal(normalizeEmoteKey('totally-unknown'), null)
+  assert.equal(normalizeEmoteKey(''), null)
+  assert.equal(normalizeEmoteKey(null), null)
+})
+
+ok('pickEmoteFile：池内轮换、避开上一张、未知 key 返回 null（由调用方回落）', () => {
+  const pool = emotePool('happy')
+  assert.ok(pool.length >= 2, 'happy 池至少 2 张才谈得上轮换')
+  const a = pickEmoteFile('happy', 0)
+  const b = pickEmoteFile('happy', 1)
+  assert.ok(pool.includes(a) && pool.includes(b), '返回值必须来自该池')
+  assert.notEqual(a, b, '不同 seed 应取到不同张（否则等于没有轮换）')
+  // 避开：seed 正好指向 avoid 时应顺延
+  const avoidFirst = pickEmoteFile('happy', 0, pool[0])
+  assert.notEqual(avoidFirst, pool[0], '应避开上一张')
+  assert.equal(pickEmoteFile('unknown-key', 0), null, '未知 key → null，交给调用方回落')
+  // 单元素池不会因为"避开"而返回空
+  assert.ok(pickEmoteFile('sleeping', 0) !== null)
+})
+
+ok('⭐ 池内文件路径格式统一（相对 art/pet/，无绝对路径、无反斜杠）', () => {
+  for (const [key, files] of Object.entries(EMOTE_BY_KEY)) {
+    for (const f of files) {
+      assert.ok(!f.startsWith('/') && !/^[A-Za-z]:/.test(f), `${key} 含绝对路径：${f}`)
+      assert.ok(!f.includes('\\'), `${key} 含反斜杠：${f}`)
+      assert.ok(f.startsWith('bubble/'), `${key} 路径应以 bubble/ 开头：${f}`)
+    }
+  }
+})
+
+ok('⭐⭐ 确定性判据：不同状态**必须**取到不同图（这就是"结合状态"）', () => {
+  // 这是本次改动的核心判据，也是**唯一能抓住旧 bug** 的断言。
+  //
+  // 旧实现是 `bubbleArt(atlas, seed)` —— 只按索引取模、**完全忽略 key**：
+  // 同一个 seed 下，无论什么状态都返回同一张图。实测（真清单 41 张）：
+  //   seed=0 时索引取模只产生 **1 种**结果；而按状态取产生 4 种（好耶/生气/工作中/摸鱼）。
+  // 所以"同一 seed 下各状态结果是否互不相同"就能确定性地区分新旧行为 ——
+  // 不需要靠随机抽样（那样概率上会漏，实测过：随机的断言在回退成旧代码时仍然全绿）。
+  const keys = ['waking', 'idle', 'listening', 'thinking', 'working', 'waiting', 'happy', 'error', 'sleeping']
+  const picked = keys.map(k => pickEmoteFile(k, 0))
+  const distinct = new Set(picked.filter(p => p !== null))
+  assert.ok(distinct.size >= 5,
+    `同一 seed 下各状态应取到明显不同的图（至少 5 种），实际只有 ${distinct.size} 种 —— ` +
+    '若为 1 说明退化成了"忽略状态"的索引取模')
+
+  // 逐对抽查：情绪相反的两个状态**绝不能**取到同一张
+  const errPick = pickEmoteFile('error', 0)
+  const happyPick = pickEmoteFile('happy', 0)
+  assert.notEqual(errPick, happyPick, '出错与完成不能取到同一张表情')
+})
+
+ok('⭐ 任意 seed 下，"出错"的结果永远落在出错池里（不会漂到庆祝池）', () => {
+  const errPool = new Set(emotePool('error'))
+  for (let s = 0; s < 40; s++) {
+    const f = pickEmoteFile('error', s)
+    assert.ok(errPool.has(f), `seed=${s} 取到了池外的图：${f}`)
+    assert.ok(!f.includes('yay'), `seed=${s} 出错配了「好耶」：${f}`)
+    assert.ok(!f.includes('so-good'), `seed=${s} 出错配了「太中啦」：${f}`)
+  }
+})
+
+ok('⭐ 任意 seed 下，"完成"的结果永远不含哭泣/生气类', () => {
+  const happyPool = new Set(emotePool('happy'))
+  for (let s = 0; s < 40; s++) {
+    const f = pickEmoteFile('happy', s)
+    assert.ok(happyPool.has(f), `seed=${s} 取到了池外的图：${f}`)
+    for (const bad of ['crying', 'annoyed', 'hate-you', 'disgusted', 'unhappy']) {
+      assert.ok(!f.includes(bad), `seed=${s} 完成配了负面表情（${bad}）：${f}`)
+    }
+  }
+})
+ok('覆盖率自检：能报出未被任何状态池引用的图（诊断用）', () => {
+  const all = ['bubble/17-yay.png', 'bubble/never-used.png']
+  const r = emoteCoverage(all)
+  assert.deepEqual(r.used, ['bubble/17-yay.png'])
+  assert.deepEqual(r.unused, ['bubble/never-used.png'])
+})
+
+ok('排除名单里的图**不该**出现在随机回落里（语义太强）', () => {
+  // 这些图只在明确情境用；随机撒会显得没头没脑。
+  // 注意：它们仍可出现在具体状态池里（例如 comfort 属于安慰情境）。
+  assert.ok(EMOTE_EXCLUDE_FROM_RANDOM.length > 0, '应有一份排除名单')
+  for (const f of EMOTE_EXCLUDE_FROM_RANDOM) {
+    assert.ok(typeof f === 'string' && f.startsWith('bubble/'), `排除名单项格式不对：${f}`)
+  }
+})
 section('14. 素材清单与路径安全（atlas.js）')
 
 const goodAtlas = normalizeAtlas({

@@ -335,6 +335,7 @@ namespace DshZhuangFangyiPet
             };
             _tray.ResetPosition = delegate { _win.ReclampPosition(true); };
             _tray.FocusDsh = delegate { OnFocusDsh(); };
+            _tray.OpenGallery = delegate { OpenGallery(); };
             _tray.Quit = delegate { Quit(); };
 
             _win.Show();
@@ -864,6 +865,42 @@ namespace DshZhuangFangyiPet
 
         private ContextMenu _petMenu;
 
+        /// <summary>画廊窗口（懒建，关闭后置 null）。</summary>
+        private PetGallery _gallery;
+
+        /// <summary>打开表情包画廊（右键菜单 / 托盘共用）。</summary>
+        private void OpenGallery()
+        {
+            try
+            {
+                if (_gallery == null)
+                {
+                    _gallery = new PetGallery(_http);
+                    _gallery.Pick = delegate(string file)
+                    {
+                        // 点一张 → 立刻用它当气泡（本地假 id，不与 Host 的 bubble.id 撞）。
+                        try
+                        {
+                            PetBubbleInfo b = new PetBubbleInfo();
+                            b.Id = -DateTime.Now.Ticks;
+                            b.Kind = "image";
+                            b.Image = file;
+                            b.DurationMs = 4000;
+                            b.Priority = 95;
+                            BitmapSource img = _store.GetBubbleImage(file);
+                            _bubble.Show(b, img);
+                        }
+                        catch (Exception ex) { PetLog.Warn("画廊选图失败: " + PetLog.Describe(ex)); }
+                    };
+                    _gallery.Closed2 = delegate { _gallery = null; };
+                    _gallery.ApplyTheme(PetTheme.ResolveIsDark(_opt.DarkOverride, _settingsTheme));
+                }
+                int x, y, w, h;
+                _win.GetScreenRect(out x, out y, out w, out h);
+                _gallery.OpenNear(x, y, w, h);
+            }
+            catch (Exception ex) { PetLog.Warn("打开画廊失败: " + PetLog.Describe(ex)); }
+        }
         private void OnPetContextMenu(PetWindow w, MouseButtonEventArgs e)
         {
             if (_petMenu == null) _petMenu = BuildPetMenu();
@@ -905,6 +942,13 @@ namespace DshZhuangFangyiPet
             next.Header = "切换表情预览(_N)";
             next.Click += delegate { CycleEmote(); };   // task-6：与双击 emote 共用同一机制
             m.Items.Add(next);
+
+            // ⭐ 表情包画廊：主动看全 41 张（此前只能靠状态变化被动随机撒，
+            // 用户反馈"这么久都没看全"）。点一张立刻用它当气泡。
+            MenuItem gallery = new MenuItem();
+            gallery.Header = "表情包…(_G)";
+            gallery.Click += delegate { OpenGallery(); };
+            m.Items.Add(gallery);
 
             MenuItem focus = new MenuItem();
             focus.Header = "打开 DSH 窗口(_D)";

@@ -415,6 +415,16 @@ export function createHandler (deps) {
         return
       }
 
+      // ── 画廊（契约 §3）：清单里的全部气泡，供「表情包…」主动浏览 ──────
+      if (route === '/gallery' && req.method === 'GET') {
+        try {
+          const items = deps.gallery?.() ?? []
+          sendJson(res, 200, { items })
+        } catch (error) {
+          sendJson(res, 500, { error: 'gallery-failed', message: String(error?.message ?? error) })
+        }
+        return
+      }
       // ── 命令 ────────────────────────────────────────────────────────────
       if (route === '/command' && (req.method === 'POST' || req.method === 'PUT')) {
         let parsed

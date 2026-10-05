@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
@@ -394,6 +394,40 @@ namespace DshZhuangFangyiPet
         }
 
         /// <summary>解析 pet.json。返回 null 表示不是合法 JSON 对象。</summary>
+        /// <summary>
+        /// 解析 `GET /pet/gallery` 的响应 → 表情清单。
+        ///
+        /// **绝不抛**：任何异常/形状不符都返回 null，由调用方显示"清单不合法"。
+        /// 画廊是浏览入口，宁可少显示也不能崩。
+        /// </summary>
+        public static List<PetGalleryItem> ParseGallery(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return null;
+            try
+            {
+                JVal root = Parse(text);
+                if (root == null || !root.IsObj) return null;
+                JVal arr = root.Get("items");
+                if (arr == null || !arr.IsArr) return null;
+                List<PetGalleryItem> list = new List<PetGalleryItem>();
+                for (int i = 0; i < arr.Arr.Count; i++)
+                {
+                    JVal v = arr.Arr[i];
+                    if (v == null || !v.IsObj) continue;
+                    string file = v.Str("file", null);
+                    if (string.IsNullOrEmpty(file)) continue;
+                    PetGalleryItem it = new PetGalleryItem();
+                    it.File = file;
+                    it.HasText = v.Bool("hasText", false);
+                    it.Opaque = v.Bool("opaque", false);
+                    it.FileDark = v.Str("fileDark", null);
+                    it.Group = v.Str("group", null);
+                    list.Add(it);
+                }
+                return list;
+            }
+            catch { return null; }
+        }
         public static Atlas ParseAtlas(string text)
         {
             JVal root = Parse(text);

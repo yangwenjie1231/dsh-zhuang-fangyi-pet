@@ -711,6 +711,31 @@ namespace DshZhuangFangyiPet
             Check(freshOk, "新建气泡就有正常外观（图片上限/内边距不为 0）",
                   "图片上限=" + freshImgH.ToString("0") + "（期望 >100）  内边距=" + freshPadX.ToString("0") + "（期望 >5）");
             try { freshBubble.ForceClose(); } catch { }
+            // ⭐ 画廊清单解析（GET /pet/gallery）：能读、能容错、缺字段不崩。
+            // 这是"主动看全 41 张表情"的数据入口，解析坏了用户看到的就是白框。
+            List<PetGalleryItem> gal = PetJson.ParseGallery(
+                "{\"items\":[" +
+                "{\"file\":\"bubble/17-yay.png\",\"hasText\":true,\"opaque\":false,\"fileDark\":null,\"group\":\"happy\"}," +
+                "{\"file\":\"bubble/new/13-so-good.png\",\"hasText\":true,\"opaque\":true,\"group\":\"happy\"}," +
+                "{\"file\":\"bubble/gif-24.png\"}," +          // 缺字段 → 全默认
+                "{\"noFile\":1}]}");                          // 没有 file → 跳过
+            bool galOk = gal != null && gal.Count == 3 &&
+                gal[0].File == "bubble/17-yay.png" && gal[0].HasText && !gal[0].Opaque && gal[0].Group == "happy" &&
+                gal[1].Opaque && gal[2].File == "bubble/gif-24.png" && !gal[2].HasText;
+            Check(galOk, "画廊清单解析（缺字段/无 file 项都不崩）",
+                  gal == null ? "返回 null" : ("解析出 " + gal.Count + " 项（期望 3）"));
+            // 坏输入必须返回 null 而不是抛
+            bool galBad = PetJson.ParseGallery("not json") == null &&
+                          PetJson.ParseGallery("{}") == null &&
+                          PetJson.ParseGallery(null) == null;
+            Check(galBad, "画廊清单：坏输入返回 null（不抛）", galBad ? "三种坏输入都安全返回 null" : "有输入导致异常");
+
+            // ⭐ 画廊缩略图标题：`bubble/new/13-so-good.png` → `13-so-good`
+            bool nameOk = PetGallery.ShortName("bubble/new/13-so-good.png") == "13-so-good" &&
+                          PetGallery.ShortName("bubble/17-yay.png") == "17-yay" &&
+                          PetGallery.ShortName("") == "";
+            Check(nameOk, "画廊缩略图标题取文件名主干（去目录与扩展名）",
+                  nameOk ? "bubble/new/13-so-good.png → 13-so-good" : "取名不符");
             PetInput picker = new PetInput(new PetHttp("http://127.0.0.1:1/", "t"));
             List<PetSessionChoice> chs = new List<PetSessionChoice>();
             PetSessionChoice c1 = new PetSessionChoice(); c1.SessionId = "s-a"; c1.Title = "甲"; c1.Running = true;

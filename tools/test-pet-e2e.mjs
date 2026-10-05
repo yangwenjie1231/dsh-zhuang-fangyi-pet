@@ -361,6 +361,24 @@ await ok('⭐ 有 sessionController 时：list() 的标题进快照，指定会�
   // 必须关掉这个桩 webServer：它真的在 listen，不关会让测试进程挂着不退出。
   await ws.close()
 })
+/* ── 画廊（读操作，无副作用）────────────────────────────────────────────── */
+
+await ok('⭐ GET /pet/gallery 返回全部表情（能主动看全，不再靠随机撒）', async () => {
+  const r = await get('/api/zhuang-fangyi/pet/gallery')
+  assert.equal(r.status, 200)
+  const body = JSON.parse(r.body)
+  assert.ok(Array.isArray(body.items), 'items 必须是数组')
+  const atlas = JSON.parse((await get('/api/zhuang-fangyi/pet/atlas')).body)
+  assert.equal(body.items.length, atlas.bubble.length,
+    `画廊数量应等于清单气泡数（${body.items.length} vs ${atlas.bubble.length}）`)
+  for (const it of body.items) {
+    assert.equal(typeof it.file, 'string')
+    assert.equal(typeof it.hasText, 'boolean')
+    assert.ok(it.file.startsWith('bubble/'), `路径异常：${it.file}`)
+  }
+  assert.ok(body.items.some(it => typeof it.group === 'string' && it.group !== ''),
+    '应有表情带情境分组（"结合状态"的落地证据）')
+})
 await ok('⭐ POST /pet/settings 是合并语义：裸 {scale} 不许抹掉其它设置', async () => {
   // 对应一个实测抓到的数据丢失缺陷：exe 滚轮缩放只 POST {"scale": n}，
   // 若 Host 按整体替换处理（按默认值归一化），用户的透明度/穿透/主题/双击会被全抹回默认。
