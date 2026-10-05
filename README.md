@@ -83,7 +83,31 @@ powershell -NoProfile -File tools\deploy.ps1
 ```
 
 **没有 exe 也能用**：桌宠会自动回落到窗口内悬浮层（`shell.overlay`），
-功能完整，只是不浮在桌面上。`/api/zhuang-fangyi/pet/diag` 会给出确切原因。
+`/api/zhuang-fangyi/pet/diag` 会给出确切原因。
+
+> ### ⚠️ v2：窗口内 overlay 已**冻结**，不再补新功能
+>
+> 起因是**维护成本实测**：历史上 **12 次提交**是"两半边必须同步"的税，
+> 而 overlay 这半边还要额外维护 464 行 CSS、自己判断主题、自己存位置，
+> 以及一堆 DSH 内部知识（`position:fixed` 绕 grid 自动放置、
+> `pointer-events:auto` 陷阱、`z-index:20` 上限）。
+> 最严重的一次真机事故（客户端整片崩溃、设置页空白**且不报错**）
+> **只可能发生在 overlay 上** —— 原生窗根本没有 slot 机制可崩。
+>
+> 决定性事实：**DSH 的 webServer 只绑 loopback**（实测 `127.0.0.1:19387`），
+> 所以"用网页版"的用户 DSH 也在本地跑，exe 永远连得上。
+>
+> 所以 `mode` 的默认值从 `auto` 改为 `native`（语义不变：**优先**桌面窗，
+> exe 不可用时**仍回落** overlay —— 逃生舱留着，否则非 Windows 或
+> exe 被杀软拦的机器上，用户会看到"什么都没有，也不报错"）。
+> 旧设置文件里的 `auto` 会**自动归一化成 `native`**，不会丢配置。
+>
+> **overlay 从此只修 bug、不加功能。** 它缺的这四项是有意为之：
+>
+> | 功能 | 桌面窗 | 窗口内 overlay |
+> |---|---|---|
+> | 滚轮缩放 / 右键菜单 / 表情包画廊 / 托盘 | ✓ | **✗ 冻结** |
+> | 拖动 / 穿透 / 气泡 / 状态文字 / ✎ 发消息 / 双击 | ✓ | ✓ |
 
 ---
 
@@ -236,7 +260,7 @@ working(90) > waiting(80) > thinking(70) > error(60)
 | 键 | 默认 | 说明 |
 |---|---|---|
 | `enabled` | `true` | 总开关 |
-| `mode` | `'auto'` | `auto`（优先桌面窗）/ `native` / `overlay` |
+| `mode` | `'native'` | `native`（桌面窗为主，exe 不可用时回落）/ `overlay`（只在窗口内） |
 | `scale` | `1.0` | 大小，0.3~3.0（设置页滑杆、滚轮缩放、exe 三处同范围） |
 | `opacity` | `1.0` | 不透明度，0.3~1.0 |
 | `topmost` | `true` | 总在最前 |
@@ -305,11 +329,11 @@ tools/build-pet.ps1   离线编译 exe
 ```powershell
 node tools/test-pet-state.mjs    # 状态机 + 事件翻译 + 素材清单（156 项）
 node tools/test-pet-route.mjs    # 路由 + 三道安全围栏 + SSE 帧格式（61 项）
-node tools/test-pet-client.mjs   # 浏览器半边 + 渲染约束 + 外壳真实 props（77 项）
-node tools/test-pet-e2e.mjs      # 真实装配端到端（37 项）
+node tools/test-pet-client.mjs   # 浏览器半边 + 渲染约束 + 外壳真实 props（81 项）
+node tools/test-pet-e2e.mjs      # 真实装配端到端（40 项）
 ```
 
-四套共 **331 项断言**，无框架依赖（纯 `node:assert`）。
+四套共 **338 项断言**，无框架依赖（纯 `node:assert`）。
 端到端那套用**真实** `apply()` + **真实** `pet.json` + 真读 SSE 帧，
 验证「宿主事件 → 状态机 → 推送」整条链路。
 

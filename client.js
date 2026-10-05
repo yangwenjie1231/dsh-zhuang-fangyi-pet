@@ -144,9 +144,10 @@ window.__ModuleLoader__.load({
         groupGeneral: '常规',
         enabled: '启用桌宠',
         mode: '显示方式',
-        modeAuto: '自动（优先桌面窗口）',
-        modeNative: '只用桌面窗口',
-        modeOverlay: '只用窗口内悬浮',
+        modeNative: '桌面窗口（推荐）',
+        modeNativeHint: '真的浮在桌面上。窗口内悬浮只在它不可用时作为兜底出现',
+        modeOverlay: '只用窗口内悬浮（功能较少，兼容用）',
+        modeOverlayHint: '仅在 DSH 窗口内显示。没有滚轮缩放/右键菜单/表情包画廊/托盘 —— 它只是兜底，不再补新功能',
         scale: '大小',
         opacity: '不透明度',
         groupWindow: '窗口',
@@ -201,9 +202,10 @@ window.__ModuleLoader__.load({
         groupGeneral: 'General',
         enabled: 'Enable pet',
         mode: 'Display mode',
-        modeAuto: 'Auto (prefer desktop window)',
-        modeNative: 'Desktop window only',
-        modeOverlay: 'In-window overlay only',
+        modeNative: 'Desktop window (recommended)',
+        modeNativeHint: 'Truly floats on your desktop. The in-window overlay appears only as a fallback when it is unavailable',
+        modeOverlay: 'In-window overlay only (fewer features, compatibility)',
+        modeOverlayHint: 'Shows inside the DSH window only. No wheel zoom, right-click menu, emote gallery or tray — it is a fallback and gets no new features',
         scale: 'Size',
         opacity: 'Opacity',
         groupWindow: 'Window',
@@ -288,7 +290,12 @@ window.__ModuleLoader__.load({
     function normalizePet (input) {
       const base = {
         enabled: true,
-        mode: 'auto',
+        /**
+         * 默认 `native`（v2 起，`auto` 已并入它）—— 与 Host 的
+         * `src/settings.js` 同值。overlay 现在是**冻结的兼容兜底**，
+         * 见那边 `PET_MODES` 的说明。
+         */
+        mode: 'native',
         scale: 1,
         opacity: 1,
         clickThrough: false,
@@ -320,7 +327,9 @@ window.__ModuleLoader__.load({
       if (input === null || typeof input !== 'object') return base
       const out = { ...base }
       if (typeof input.enabled === 'boolean') out.enabled = input.enabled
-      if (['auto', 'native', 'overlay'].includes(input.mode)) out.mode = input.mode
+      // `auto` 是 v1 旧值 → 归一化成 `native`（与 Host 的 settings.js 同规则）。
+      if (input.mode === 'auto') out.mode = 'native'
+      else if (['native', 'overlay'].includes(input.mode)) out.mode = input.mode
       // 0.3~3.0：与 Host 的 settings.js、exe 的滚轮缩放同一个范围（三处必须一致）。
       if (Number.isFinite(input.scale)) out.scale = Math.min(3, Math.max(0.3, input.scale))
       if (Number.isFinite(input.opacity)) out.opacity = Math.min(1, Math.max(0.3, input.opacity))
@@ -665,7 +674,7 @@ window.__ModuleLoader__.load({
       const viewH = Math.round(frameH * scale)
 
       /**
-       * **让位**：原生窗口在跑时，overlay 必须完全不渲染。
+       * **让位**：桌面窗口在跑时，overlay 必须完全不渲染。
        *
        * 否则屏幕上会有**两只桌宠**（一只在桌面、一只在 DSH 窗口里），
        * 而且它们各自记位置、各自响应拖动 —— 看起来就是坏了。
@@ -674,19 +683,18 @@ window.__ModuleLoader__.load({
        * 三种情况让位：
        *   · `enabled === false` —— 总开关关掉。宿主**不会**启动 exe，
        *     但 overlay 是纯前端渲染，必须自己停，否则"关了还在"；
-       *   · `mode === 'native'` —— 用户明确只要桌面窗口；
-       *   · `mode === 'auto'` 且 `nativeAvailable === true` —— exe 真的在跑。
+       *   · `mode === 'native'`（**默认值**）—— 桌面窗为主。注意 exe
+       *     **不可用**时它仍然要渲染，那正是逃生舱的意义（否则插件会变成
+       *     一个"什么都没发生"的空壳）；
+       *   · `nativeAvailable === true` —— exe 真的在跑，让给它。
        *
        * ⚠️ **`mode === 'overlay'` 不让位**，哪怕 `nativeAvailable` 是 true。
-       * 原因：宿主只在**启动时**按 mode 决定起不起 exe（`index.js` 的
-       * `mode !== 'overlay'`），改设置**不会**停掉已经在跑的 exe。所以
-       * "从 auto 切到 overlay"之后 `nativeAvailable` 可能仍是 true ——
-       * 这时让位就等于"用户选了窗口内，结果什么都不显示"。
-       * 用户显式选的 mode 优先于探测到的状态。
+       * 原因：宿主按 mode 决定起不起 exe，但"从 native 切到 overlay"时
+       * 已经在跑的 exe 要等设置变化把宿主停掉；这个窗口期内让位就等于
+       * "用户选了窗口内，结果什么都不显示"。用户显式选的 mode 优先于探测到的状态。
        */
       const nativeRunning = snapshot?.nativeAvailable === true
       const shouldYield = settings.enabled === false ||
-        settings.mode === 'native' ||
         (settings.mode !== 'overlay' && nativeRunning)
       if (shouldYield) return null
 
@@ -915,10 +923,12 @@ window.__ModuleLoader__.load({
             value: settings.mode,
             onChange: e => set({ mode: e.target.value })
           }, [
-            h('option', { key: 'auto', value: 'auto' }, t('modeAuto')),
             h('option', { key: 'native', value: 'native' }, t('modeNative')),
             h('option', { key: 'overlay', value: 'overlay' }, t('modeOverlay'))
-          ])
+          ]),
+          // 选中项的解释随选择变化 —— 用户不该靠猜"这两种有什么区别"。
+          h('span', { key: 'h', className: 'zf-pet-row__hint' },
+            settings.mode === 'overlay' ? t('modeOverlayHint') : t('modeNativeHint'))
         ]),
         h(Slider, {
           key: 'scale',

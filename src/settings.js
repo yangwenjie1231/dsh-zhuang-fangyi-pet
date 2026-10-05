@@ -12,8 +12,35 @@
  * 用户改坏一个字段不该让其余设置一起失效。
  */
 
-/** 桌宠运行模式。`auto` = 能开原生窗就开，否则回落窗口内 overlay。 */
-export const PET_MODES = ['auto', 'native', 'overlay']
+/**
+ * 桌宠运行模式。
+ *
+ * ⚠️ **v2 起 `auto` 已并入 `native`，overlay 被冻结为兼容兜底。**
+ *
+ * 起因：`auto` 与 `native` 的差别只是"exe 不可用时要不要回落 overlay"，
+ * 而 overlay 半边要额外维护 464 行 CSS、自己判断主题、自己存位置，
+ * 还要吃透一堆 DSH 内部知识（`position:fixed` 绕 grid、`pointer-events:auto`、
+ * `z-index` 上限）。历史上 **12 次提交**是"两半边必须同步"的税。
+ *
+ * 关键事实：**DSH 的 webServer 只绑 loopback**（实测 `127.0.0.1:19387`），
+ * 所以"用网页版"的用户 DSH 也在本地跑，exe 永远连得上 ——
+ * overlay 的"跨平台"价值只剩下非 Windows 与 exe 被杀软拦两种边缘情况。
+ *
+ * 所以现在的语义是：
+ *   · `native`（**默认**）—— 桌面窗为主；exe **不可用**时仍回落 overlay
+ *     （逃生舱留着，否则插件会变成一个"什么都没发生"的空壳）；
+ *   · `overlay` —— 用户显式强制窗口内悬浮。
+ *
+ * `auto` 作为**旧值别名**继续接受，归一化成 `native`（行为与从前完全一致，
+ * 因为从前 auto 就是"优先桌面窗"）。
+ *
+ * **overlay 从此不再补功能**：它缺滚轮缩放/右键菜单/画廊/托盘，
+ * 这是有意为之，不是待办。
+ */
+export const PET_MODES = ['native', 'overlay']
+
+/** 旧值别名 → 新值。用于兼容已落盘的设置文件。 */
+export const PET_MODE_ALIASES = { auto: 'native' }
 
 /**
  * 缩放范围（托盘档位与滚轮缩放共用）。
@@ -59,7 +86,11 @@ export function defaultSettings () {
   return {
     version: SETTINGS_VERSION,
     enabled: true,
-    mode: 'auto',
+    /**
+     * 默认 `native`（v2 起）。`auto` 已并入它 —— 见 `PET_MODES` 的说明。
+     * 语义没变：**优先桌面窗，exe 不可用时回落 overlay**。
+     */
+    mode: 'native',
     scale: 1.0,
     opacity: 1.0,
     /** 整窗穿透：开启后桌宠变成纯装饰，鼠标完全穿过（含不透明区域）。 */
@@ -130,7 +161,10 @@ export function normalizeSettings (input) {
   const out = { ...base }
 
   if (typeof input.enabled === 'boolean') out.enabled = input.enabled
+  // `auto` 是 v1 的旧值，语义与 `native` 相同（都是"优先桌面窗"）——
+  // 归一化成 `native`，这样已落盘的旧设置文件不会突然失效。
   if (PET_MODES.includes(input.mode)) out.mode = input.mode
+  else if (PET_MODE_ALIASES[input.mode] !== undefined) out.mode = PET_MODE_ALIASES[input.mode]
   out.scale = clamp(input.scale, SCALE_MIN, SCALE_MAX, base.scale)
   out.opacity = clamp(input.opacity, OPACITY_MIN, OPACITY_MAX, base.opacity)
 

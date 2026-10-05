@@ -389,7 +389,7 @@ section('5. 设置归一化')
 ok('null/垃圾输入回落默认值', () => {
   const d = normalizePet(null)
   assert.equal(d.enabled, true)
-  assert.equal(d.mode, 'auto')
+  assert.equal(d.mode, 'native', 'v2 起默认 native（auto 已并入它）')
   assert.equal(d.scale, 1)
   assert.equal(d.bubble, true)
 })
@@ -438,10 +438,14 @@ ok('opacity 被夹到 0.3~1', () => {
   assert.equal(normalizePet({ opacity: 0 }).opacity, 0.3)
 })
 
-ok('mode 只接受三个合法值', () => {
+ok('mode 只接受两个合法值，且旧值 auto 归一化成 native', () => {
   assert.equal(normalizePet({ mode: 'overlay' }).mode, 'overlay')
   assert.equal(normalizePet({ mode: 'native' }).mode, 'native')
-  assert.equal(normalizePet({ mode: 'hack' }).mode, 'auto')
+  assert.equal(normalizePet({ mode: 'hack' }).mode, 'native', '非法值回落默认')
+  // ⭐ 兼容：v1 的设置文件里写的是 auto，语义与 native 相同。
+  // 若不归一化，老用户升级后 mode 会变成非法值而被回落 —— 虽然结果一样，
+  // 但设置页会显示成"native"，用户以为自己的选择丢了。归一化让它是**同一个值**。
+  assert.equal(normalizePet({ mode: 'auto' }).mode, 'native', 'auto 是 v1 旧值 → native')
 })
 
 ok('布尔字段逐个回落', () => {
@@ -1191,9 +1195,17 @@ ok('⭐ 原生窗口在跑时 overlay 让位（否则屏幕上两只桌宠）', 
   assert.equal(tree, null, 'nativeAvailable=true 时不该渲染任何东西')
 })
 
-ok('⭐ mode=native 时 overlay 不渲染（用户只要桌面窗口）', () => {
+ok('⭐ 桌面窗为主时，exe 不可用必须回落 overlay（逃生舱）', () => {
+  // ⚠️ 这条断言的方向在 v2 改过，理由是"别让插件变成空壳"：
+  //
+  // 如果 `mode: 'native'` 在 exe 不可用时什么都不渲染，那么在
+  // **非 Windows**（没有 net48）或 **exe 被杀软拦掉**的机器上，
+  // 用户装完插件会看到"什么都没有，也不报错" —— 正是我们一直在打的那种
+  // 静默失败。所以 native 的语义是"**优先**桌面窗"，不是"只允许桌面窗"。
+  //
+  // 想要"只在桌面窗、绝不回落"的用户不存在；想要"只在窗口内"的用 overlay。
   const tree = renderPetWith({ nativeAvailable: false }, { mode: 'native' })
-  assert.equal(tree, null, 'mode=native 时 overlay 应让位')
+  assert.ok(tree !== null, 'exe 不可用时 overlay 必须接管，否则插件形同不存在')
 })
 
 ok('⭐ 总开关关掉时 overlay 不渲染（宿主不启 exe，overlay 也得停）', () => {
@@ -1201,15 +1213,10 @@ ok('⭐ 总开关关掉时 overlay 不渲染（宿主不启 exe，overlay 也得
   assert.equal(tree, null, 'enabled=false 时应停')
 })
 
-ok('⭐ 原生窗不可用时 overlay 必须接管（这正是兜底的意义）', () => {
-  const tree = renderPetWith({ nativeAvailable: false }, { mode: 'auto' })
-  assert.ok(tree !== null, 'auto + exe 没起来 → overlay 必须渲染')
-})
-
 ok('mode=overlay 时不让位（用户显式选的 mode 优先于探测到的 exe 状态）', () => {
-  // 宿主只在**启动时**按 mode 决定起不起 exe，改设置不会停掉已在跑的 exe。
-  // 所以"从 auto 切到 overlay"后 nativeAvailable 可能仍是 true ——
-  // 这时让位就等于"用户选了窗口内，结果什么都不显示"。
+  // 宿主按 mode 决定起不起 exe，但"从 native 切到 overlay"时已在跑的 exe
+  // 要等设置变化把宿主停掉；这个窗口期内让位就等于
+  // "用户选了窗口内，结果什么都不显示"。
   const tree = renderPetWith({ nativeAvailable: true }, { mode: 'overlay' })
   assert.ok(tree !== null, 'mode=overlay 是用户显式选择，应当渲染')
 })
