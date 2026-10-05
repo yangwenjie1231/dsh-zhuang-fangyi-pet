@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -69,6 +69,25 @@ namespace DshZhuangFangyiPet
 
         [DllImport("user32.dll")]
         public static extern IntPtr GetForegroundWindow();
+
+        /// <summary>
+        /// 读某个虚拟键当前是否按下（异步、无焦点要求）。
+        ///
+        /// 用途：整窗穿透（`clickThrough`）时给用户一个**临时恢复交互**的出口 ——
+        /// 按住 Ctrl 悬停即可拖/点/滚轮，否则只能去托盘里关掉穿透。
+        /// 高位（0x8000）表示当前按下。
+        /// </summary>
+        [DllImport("user32.dll")]
+        public static extern short GetAsyncKeyState(int vKey);
+
+        public const int VK_CONTROL = 0x11;
+
+        /// <summary>Ctrl 当前是否按住（任一 Ctrl）。</summary>
+        public static bool IsCtrlDown()
+        {
+            try { return (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0; }
+            catch { return false; }
+        }
 
         [DllImport("user32.dll")]
         public static extern uint GetCurrentThreadId();

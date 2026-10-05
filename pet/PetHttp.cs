@@ -540,6 +540,20 @@ namespace DshZhuangFangyiPet
         }
 
         /// <summary>
+        /// 托盘里换主题后回报宿主持久化（POST /pet/settings，body 只带 theme）。
+        ///
+        /// **合并语义**：宿主侧 `/pet/settings` 是合并补丁（不是整体替换），
+        /// 所以只带一个字段不会抹掉其它设置（这条曾经踩过，见 Host 的注释）。
+        /// theme 只可能是 auto/light/dark 三个常量，直接拼进 JSON 是安全的；
+        /// 仍然过一遍白名单，避免将来误传别的值。
+        /// </summary>
+        public void PostSettingsTheme(string theme)
+        {
+            string t = theme == "light" || theme == "dark" ? theme : "auto";
+            PostJson("/api/zhuang-fangyi/pet/settings", "{\"theme\":\"" + t + "\"}");
+        }
+
+        /// <summary>
         /// 契约 §3 新增：GET /pet/settings → {"settings":{…}}。
         /// 原生 exe 目前不用它（位置走 POST /pet/position），但保留读取入口，
         /// 供将来「宿主侧持久化缩放/穿透」使用；失败一律返回 null，绝不抛。

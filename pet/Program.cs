@@ -291,6 +291,16 @@ namespace DshZhuangFangyiPet
             _tray.GetClickThrough = delegate { return _win.ClickThrough; };
             _tray.GetScale = delegate { return _opt.Scale; };
             _tray.GetBubble = delegate { return _bubbleOn; };
+            _tray.GetTheme = delegate { return _settingsTheme; };
+            _tray.SetTheme = delegate(string key)
+            {
+                // 托盘里换主题：**本地立即生效**（贴纸 + 气泡外壳），并回报宿主持久化。
+                _settingsTheme = string.IsNullOrEmpty(key) ? "auto" : key;
+                bool darkNow = PetTheme.ResolveIsDark(_opt.DarkOverride, _settingsTheme);
+                try { _bubble.ApplyTheme(darkNow); } catch { }
+                try { _http.PostSettingsTheme(_settingsTheme); } catch (Exception ex) { PetLog.Warn("主题回报失败: " + PetLog.Describe(ex)); }
+                PetLog.Info("托盘：主题 → " + _settingsTheme + "（生效深色=" + (darkNow ? "1" : "0") + "）");
+            };
             _tray.ToggleVisible = delegate { _win.ToggleVisible(); };
             _tray.SetClickThrough = delegate(bool on) { _win.SetClickThrough(on); };
             _tray.SetTopmost = delegate(bool on) { _win.SetTopmost(on); _tray.SetTopmostCheck(on); };
@@ -375,6 +385,9 @@ namespace DshZhuangFangyiPet
             // task-6：先应用 snapshot.settings（可能改尺寸/穿透/主题，气泡定位要用新尺寸）。
             // 逐字段 diff，值没变就不动（避免每帧重复 SetScale 抖动）。
             ApplySettings(snap.Settings);
+            // 首帧就把气泡外壳配色对齐（ApplySettings 只在**变化**时才换色；
+            // 启动时主题没变过的话，气泡会用构造期的浅色默认值）。
+            try { _bubble.ApplyTheme(PetTheme.ResolveIsDark(_opt.DarkOverride, _settingsTheme)); } catch { }
 
             // task-7：send 能力位（available=false 或块缺失 → 不显示 ✎）
             ApplySendInfo(snap.Send);
@@ -492,8 +505,11 @@ namespace DshZhuangFangyiPet
             if (st.HasTheme && st.Theme != _settingsTheme)
             {
                 _settingsTheme = st.Theme;
-                PetLog.Info("settings: theme → " + _settingsTheme + "（生效深色=" +
-                            (PetTheme.ResolveIsDark(_opt.DarkOverride, _settingsTheme) ? "1" : "0") + "）");
+                bool darkNow = PetTheme.ResolveIsDark(_opt.DarkOverride, _settingsTheme);
+                PetLog.Info("settings: theme → " + _settingsTheme + "（生效深色=" + (darkNow ? "1" : "0") + "）");
+                // 气泡外壳也跟着换色（原先只换贴纸图，白框在深色桌面上很刺眼）。
+                // 正在显示的气泡立即换色，不必等下一次弹出。
+                try { _bubble.ApplyTheme(darkNow); } catch (Exception ex) { PetLog.Warn("气泡换色失败: " + PetLog.Describe(ex)); }
                 changed = true;
             }
 

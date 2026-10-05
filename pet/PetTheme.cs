@@ -86,5 +86,46 @@ namespace DshZhuangFangyiPet
             if (dark && !string.IsNullOrEmpty(imageDark)) return imageDark;
             return string.IsNullOrEmpty(image) ? null : image;
         }
+
+        /// <summary>
+        /// 气泡外壳配色（深/浅两套）。
+        ///
+        /// **为什么需要**：气泡原来把颜色写死成浅色（白底 + 深灰字）。用户的桌面是深色时，
+        /// 那个白框会非常刺眼 —— 而设置里明明有"贴纸深浅色"，它却只管贴纸图、不管气泡壳。
+        /// 这里让气泡外壳也跟随同一个 `theme` 判定（argv &gt; settings.theme &gt; 注册表）。
+        ///
+        /// 深色用**深灰蓝**而不是纯黑：纯黑浮在深色桌面上会像一块洞，灰蓝更像"卡片"。
+        /// </summary>
+        internal sealed class BubblePalette
+        {
+            /// <summary>气泡底（浅色：近白；深色：深灰蓝）。</summary>
+            public byte BgA, BgR, BgG, BgB;
+            /// <summary>气泡边框。</summary>
+            public byte BdA, BdR, BdG, BdB;
+            /// <summary>正文颜色。</summary>
+            public byte FgR, FgG, FgB;
+            /// <summary>普通气泡用的强调描边（attention 另有专用橙色）。</summary>
+            public byte AccR, AccG, AccB;
+
+            public static BubblePalette For(bool dark)
+            {
+                BubblePalette p = new BubblePalette();
+                if (dark)
+                {
+                    p.BgA = 238; p.BgR = 38; p.BgG = 44; p.BgB = 58;      // 深灰蓝卡片
+                    p.BdA = 200; p.BdR = 86; p.BdG = 104; p.BdB = 140;    // 冷灰蓝边框
+                    p.FgR = 232; p.FgG = 236; p.FgB = 244;                // 近白字
+                    p.AccR = 120; p.AccG = 170; p.AccB = 255;
+                }
+                else
+                {
+                    p.BgA = 238; p.BgR = 255; p.BgG = 255; p.BgB = 255;   // 近白卡片
+                    p.BdA = 210; p.BdR = 120; p.BdG = 160; p.BdB = 220;
+                    p.FgR = 28; p.FgG = 34; p.FgB = 48;                   // 深灰字
+                    p.AccR = 62; p.AccG = 108; p.AccB = 200;
+                }
+                return p;
+            }
+        }
     }
 }

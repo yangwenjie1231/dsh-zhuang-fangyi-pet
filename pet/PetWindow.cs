@@ -41,10 +41,12 @@ namespace DshZhuangFangyiPet
         private readonly Border _fallback;
         private readonly TextBlock _fallbackText;
 
-        // task-7：悬停 ✎ 发消息入口（默认隐藏；MouseEnter 出现 / MouseLeave 隐藏）
+        // task-7：悬停 ✎ 发消息入口（默认隐藏；鼠标进入桌宠出现，离开后**延迟**隐藏）
         private readonly Border _sendBtn;
         private bool _sendAvailable;
         private bool _sendOpen;
+        /// <summary>延迟隐藏计时器：让用户有时间把鼠标从精灵移到按钮上。</summary>
+        private DispatcherTimer _sendHideTimer;
 
         /// <summary>
         /// 位置上报回调（物理像素 x,y）。回响环修复：**不含 scale** —— 缩放走
@@ -104,8 +106,15 @@ namespace DshZhuangFangyiPet
             _fallback.Visibility = Visibility.Collapsed;
             _root.Children.Add(_fallback);
 
-            // task-7：悬停 ✎ 按钮 —— 小、半透明、贴右上角，尺寸随 scale。
-            // 放在 _root 最上层；命中测试在 HitTestDip/WndProc 里给按钮区放行。
+            // task-7：悬停 ✎ 按钮。
+            //
+            // ⚠️ 两个曾让按钮"点不到"的坑（都踩过）：
+            //  1. **绝不能放到窗口外**。原先用负 Margin（-7,-7）把按钮往右上角外伸，
+            //     而 Windows 只把鼠标消息投给**窗口矩形之内**的像素 —— 伸出去的那部分
+            //     看得见、点不着。现在完全放在窗口内（右上角内缩）。
+            //  2. **移开桌宠不能立刻隐藏**。原先 MouseLeave 立刻 Collapsed，
+            //     而鼠标要移到按钮必然先离开精灵 → 按钮在手到达之前就消失了。
+            //     现在留一个宽限期（见 HideSendBtnSoon）。
             TextBlock pen = new TextBlock();
             pen.Text = "✎";
             pen.FontSize = 13;
@@ -118,9 +127,10 @@ namespace DshZhuangFangyiPet
             _sendBtn.Height = 22;
             _sendBtn.HorizontalAlignment = HorizontalAlignment.Right;
             _sendBtn.VerticalAlignment = VerticalAlignment.Top;
-            _sendBtn.Margin = new Thickness(0, -7, -7, 0);
-            _sendBtn.Background = new SolidColorBrush(Color.FromArgb(150, 60, 90, 150));
-            _sendBtn.BorderBrush = new SolidColorBrush(Color.FromArgb(180, 190, 215, 250));
+            // 贴右上角但**整体留在窗口内**（内缩 1px，避免被裁掉半个像素）
+            _sendBtn.Margin = new Thickness(0, 1, 1, 0);
+            _sendBtn.Background = new SolidColorBrush(Color.FromArgb(190, 60, 90, 150));
+            _sendBtn.BorderBrush = new SolidColorBrush(Color.FromArgb(220, 190, 215, 250));
             _sendBtn.BorderThickness = new Thickness(1);
             _sendBtn.Cursor = Cursors.Hand;
             _sendBtn.Visibility = Visibility.Collapsed;
@@ -132,11 +142,16 @@ namespace DshZhuangFangyiPet
             _sendBtn.MouseLeftButtonUp += delegate(object s, MouseButtonEventArgs e)
             {
                 e.Handled = true;
+                CancelSendBtnHide();          // 已经点到按钮了，别再安排隐藏
                 Action h = SendButtonClicked;
                 if (h != null) h();
             };
-            _sendBtn.MouseEnter += delegate { _sendBtn.Opacity = 1; };
-            _sendBtn.MouseLeave += delegate { _sendBtn.Opacity = 0.78; };
+            _sendBtn.MouseEnter += delegate
+            {
+                CancelSendBtnHide();          // 手进到按钮上 → 取消隐藏，保证点得稳
+                _sendBtn.Opacity = 1;
+            };
+            _sendBtn.MouseLeave += delegate { _sendBtn.Opacity = 0.85; };
             _root.Children.Add(_sendBtn);
 
             Content = _root;
@@ -144,13 +159,30 @@ namespace DshZhuangFangyiPet
             _timer = new DispatcherTimer(DispatcherPriority.Render);
             _timer.Tick += OnTick;
 
+            // 隐藏宽限期计时器（一次性）
+            _sendHideTimer = new DispatcherTimer(DispatcherPriority.Background);
+            _sendHideTimer.Interval = TimeSpan.FromMilliseconds(450);
+            _sendHideTimer.Tick += delegate
+            {
+                _sendHideTimer.Stop();
+                UpdateSendBtnVisibility(IsMouseOver);
+            };
+
             MouseLeftButtonDown += OnMouseLeftButtonDown;
             MouseMove += OnMouseMove;
             MouseLeftButtonUp += OnMouseLeftButtonUp;
             MouseRightButtonUp += OnMouseRightButtonUp;
             MouseWheel += OnMouseWheel;   // task-6：悬停滚轮缩放
-            MouseEnter += delegate(object s, MouseEventArgs e) { UpdateSendBtnVisibility(true); };
-            MouseLeave += delegate(object s, MouseEventArgs e) { UpdateSendBtnVisibility(false); };
+            MouseEnter += delegate(object s, MouseEventArgs e)
+            {
+                CancelSendBtnHide();
+                UpdateSendBtnVisibility(true);
+            };
+            MouseLeave += delegate(object s, MouseEventArgs e)
+            {
+                // 不立刻隐藏：给用户把手移到按钮上的时间（450ms 宽限）。
+                HideSendBtnSoon();
+            };
 
             Loaded += OnLoaded;
             Closing += OnClosing;
@@ -173,10 +205,10 @@ namespace DshZhuangFangyiPet
             UpdateSendBtnVisibility(open);
         }
 
-        /// <summary>悬停显隐：能力可用 + （鼠标在本体上 或 输入窗开着）→ 显示。</summary>
+        /// <summary>悬停显隐：能力可用 + （鼠标在本体上 或 输入窗开着 或 鼠标在按钮上）→ 显示。</summary>
         private void UpdateSendBtnVisibility(bool overPet)
         {
-            bool show = _sendAvailable && (overPet || _sendOpen);
+            bool show = _sendAvailable && (overPet || _sendOpen || _sendBtn.IsMouseOver);
             // 尺寸随 scale 缩放（22 DIP 基准，最小 16、最大 40，别在大尺寸下成小点）
             double s = PetOptions.ClampScale(_opt.Scale);
             double sz = Math.Max(16, Math.Min(40, 22 * s));
@@ -185,6 +217,20 @@ namespace DshZhuangFangyiPet
             TextBlock tb = _sendBtn.Child as TextBlock;
             if (tb != null) tb.FontSize = Math.Max(10, Math.Min(26, 13 * s));
             _sendBtn.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        /// <summary>安排一次延迟隐藏（鼠标离开桌宠后给用户移动到按钮的时间）。</summary>
+        private void HideSendBtnSoon()
+        {
+            if (_sendHideTimer == null) return;
+            _sendHideTimer.Stop();
+            _sendHideTimer.Start();
+        }
+
+        /// <summary>取消待执行的隐藏（手回到桌宠/按钮上）。</summary>
+        private void CancelSendBtnHide()
+        {
+            if (_sendHideTimer != null) _sendHideTimer.Stop();
         }
 
         public string CurrentState { get { return _state; } }
@@ -510,16 +556,24 @@ namespace DshZhuangFangyiPet
         // 命中测试 / 拖动
         // ------------------------------------------------------------------
 
-        /// <summary>task-7：✎ 按钮的 DIP 矩形（按钮在 _root 里贴右上角，负 margin 外扩 7）。</summary>
+        /// <summary>
+        /// ✎ 按钮在窗口内的 DIP 矩形（用于 WM_NCHITTEST 放行）。
+        ///
+        /// 按钮现在**完全在窗口内**（右上角内缩 1px）。给一点容差（2 DIP）让边缘更好点，
+        /// 但**不能超出窗口矩形** —— 窗口外的像素收不到鼠标消息，放行也没用。
+        /// </summary>
         private bool IsOverSendButton(Point dip)
         {
             if (_sendBtn == null || _sendBtn.Visibility != Visibility.Visible) return false;
             double bw = _sendBtn.Width, bh = _sendBtn.Height;
             if (bw <= 0 || bh <= 0) return false;
-            double left = ActualWidth - bw - _sendBtn.Margin.Right;
-            double top = -_sendBtn.Margin.Top;
-            return dip.X >= left && dip.X <= ActualWidth &&
-                   dip.Y >= top && dip.Y <= top + bh;
+            double right = ActualWidth - _sendBtn.Margin.Right;
+            double top = _sendBtn.Margin.Top;
+            double left = right - bw;
+            double bottom = top + bh;
+            const double pad = 2;
+            return dip.X >= left - pad && dip.X <= right + pad &&
+                   dip.Y >= top - pad && dip.Y <= bottom + pad;
         }
 
         /// <summary>自检诊断用：当前缩放。</summary>
@@ -532,6 +586,32 @@ namespace DshZhuangFangyiPet
             if (Math.Abs(ns - _opt.Scale) < 0.001) return;
             SetScale(ns);
             ScaleAdjusted(ns);
+        }
+        /// <summary>自检诊断用：✎ 按钮矩形是否完全落在窗口内（越界就点不到）。</summary>
+        public bool DiagSendBtnInsideWindow()
+        {
+            if (_sendBtn == null) return false;
+            double bw = _sendBtn.Width, bh = _sendBtn.Height;
+            double right = ActualWidth - _sendBtn.Margin.Right;
+            double top = _sendBtn.Margin.Top;
+            return top >= 0 && right <= ActualWidth + 0.01 &&
+                   right - bw >= -0.01 && top + bh <= ActualHeight + 0.01;
+        }
+
+        /// <summary>自检诊断用：鼠标离开后是否存在隐藏宽限期（而不是立即隐藏）。</summary>
+        public bool DiagSendBtnLingers()
+        {
+            if (_sendHideTimer == null) return false;
+            // 触发一次"离开"路径，看它是否只是**安排**隐藏（计时器在跑）而不是马上收起。
+            _sendAvailable = true;
+            UpdateSendBtnVisibility(true);
+            bool visibleBefore = _sendBtn.Visibility == Visibility.Visible;
+            HideSendBtnSoon();
+            bool timerArmed = _sendHideTimer.IsEnabled;
+            bool stillVisible = _sendBtn.Visibility == Visibility.Visible;
+            _sendHideTimer.Stop();
+            UpdateSendBtnVisibility(false);
+            return visibleBefore && timerArmed && stillVisible;
         }
 
         private bool HitTestDip(Point p)
@@ -665,7 +745,11 @@ namespace DshZhuangFangyiPet
                         //   · **透明像素始终穿透**（HTTRANSPARENT）—— 核心体验，与设置无关；
                         //   · `clickThrough: true` = **连不透明处也穿透**（整窗纯装饰，不接收任何鼠标）。
                         // 两者都不能靠 HTCAPTION 实现（那会吞掉滚轮与点击，见上面的说明）。
-                        bool solid = !_clickThrough && HitTestDip(dip);
+                        //
+                        // ⭐ 穿透时的**逃生门**：按住 Ctrl 悬停 → 临时恢复交互（可拖/可点/可滚轮）。
+                        // 没有它，开了穿透就只能去托盘里改设置，用户会觉得自己被锁在外面。
+                        bool escaped = _clickThrough && PetNative.IsCtrlDown();
+                        bool solid = (!_clickThrough || escaped) && HitTestDip(dip);
                         if (solid)
                         {
                             handled = true;

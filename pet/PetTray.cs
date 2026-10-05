@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -22,6 +22,7 @@ namespace DshZhuangFangyiPet
         private ToolStripMenuItem _miTopmost;
         private ToolStripMenuItem _miBubble;
         private readonly List<ToolStripMenuItem> _scaleItems = new List<ToolStripMenuItem>();
+        private readonly List<ToolStripMenuItem> _themeItems = new List<ToolStripMenuItem>();
 
         public Action ToggleVisible = delegate { };
         public Action<bool> SetClickThrough = delegate { };
@@ -33,6 +34,9 @@ namespace DshZhuangFangyiPet
         public Func<bool> IsVisible = delegate { return true; };
         public Func<bool> GetClickThrough = delegate { return true; };
         public Func<double> GetScale = delegate { return 1.0; };
+        /// <summary>深浅色主题（'auto' | 'light' | 'dark'）；贴纸与气泡外壳一起换。</summary>
+        public Action<string> SetTheme = delegate { };
+        public Func<string> GetTheme = delegate { return "auto"; };
 
         public bool BubbleToggleEnabled = true;
         public Action<bool> SetBubble = delegate { };
@@ -89,6 +93,29 @@ namespace DshZhuangFangyiPet
             reset.Click += delegate { ResetPosition(); };
             _menu.Items.Add(reset);
 
+            // 深浅色主题：贴纸 + **气泡外壳**一起换。
+            // 为什么放托盘：开着"点击穿透"时桌宠收不到任何鼠标，托盘是唯一入口 ——
+            // 换主题不该逼用户先去关穿透、再开设置页。
+            ToolStripMenuItem theme = new ToolStripMenuItem("深浅色主题(&C)");
+            string[] themeKeys = new string[] { "auto", "light", "dark" };
+            string[] themeNames = new string[] { "自动跟随系统", "浅色（白底）", "深色（黑底）" };
+            for (int i = 0; i < themeKeys.Length; i++)
+            {
+                string key = themeKeys[i];
+                ToolStripMenuItem it = new ToolStripMenuItem(themeNames[i]);
+                it.Tag = key;
+                it.Click += delegate(object sender, EventArgs e)
+                {
+                    ToolStripMenuItem mi = sender as ToolStripMenuItem;
+                    if (mi == null) return;
+                    SetTheme((string)mi.Tag);
+                    Refresh();
+                };
+                _themeItems.Add(it);
+                theme.DropDownItems.Add(it);
+            }
+            _menu.Items.Add(theme);
+
             ToolStripMenuItem focus = new ToolStripMenuItem("打开 DSH 窗口(&D)");
             focus.Click += delegate { FocusDsh(); };
             _menu.Items.Add(focus);
@@ -135,6 +162,12 @@ namespace DshZhuangFangyiPet
                 {
                     double s = (double)_scaleItems[i].Tag;
                     _scaleItems[i].Checked = Math.Abs(s - cur) < 0.001;
+                }
+                string th = GetTheme();
+                for (int i = 0; i < _themeItems.Count; i++)
+                {
+                    string k = _themeItems[i].Tag as string;
+                    _themeItems[i].Checked = string.Equals(k, th, StringComparison.Ordinal);
                 }
             }
             catch { }

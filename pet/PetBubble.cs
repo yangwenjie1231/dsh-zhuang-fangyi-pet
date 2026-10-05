@@ -40,6 +40,8 @@ namespace DshZhuangFangyiPet
         private bool _reallyClosing;
 
         private long _currentId = -1;
+        /// <summary>当前显示的气泡类型（attention 换主题时只换底/字，保留橙色描边）。</summary>
+        private string _currentKind;
         private int _currentPriority = int.MinValue;
 
         // 透明抠图气泡的默认外观（契约 §4 opaque=false 的呈现，保持历史值不动）
@@ -47,8 +49,10 @@ namespace DshZhuangFangyiPet
         private static readonly Thickness DefaultBorderWidth = new Thickness(1);
         private const double DefaultImageMaxH = 160;
         private const double DefaultImageMaxW = 200;
-        private readonly Brush _defaultBackground;
-        private readonly Brush _defaultBorderBrush;
+        private Brush _defaultBackground;
+        private Brush _defaultBorderBrush;
+        /// <summary>当前配色（ApplyTheme 时更新）。</summary>
+        private PetTheme.BubblePalette _palette;
 
         // 契约 §4 opaque=true：不透明满幅贴纸本身就是整张卡片（含文字），
         // 160px 高度下 baked-in 中文读不清 → 放宽到 240（窗口 SizeToContent 自适应）。
@@ -342,6 +346,9 @@ namespace DshZhuangFangyiPet
             }
 
             _currentId = b.Id;
+
+
+            _currentKind = b.Kind;
             _currentPriority = b.Priority;
             Showing = true;
 
@@ -416,6 +423,35 @@ namespace DshZhuangFangyiPet
             _border.CornerRadius = new CornerRadius(9);
             _image.MaxHeight = DefaultImageMaxH;
             _image.MaxWidth = DefaultImageMaxW;
+        }
+
+        /// <summary>
+        /// 套用深/浅配色（契约 §4 `theme`：argv &gt; settings.theme &gt; 注册表）。
+        ///
+        /// 气泡外壳原来把颜色写死成浅色，深色桌面上会是一块刺眼的白框；
+        /// 这里让外壳跟随同一个主题判定。已经显示中的气泡也会立即换色
+        ///（换主题不该等下一次弹气泡才生效）。
+        /// </summary>
+        public void ApplyTheme(bool dark)
+        {
+            PetTheme.BubblePalette p = PetTheme.BubblePalette.For(dark);
+            _defaultBackground = new SolidColorBrush(Color.FromArgb(p.BgA, p.BgR, p.BgG, p.BgB));
+            _defaultBorderBrush = new SolidColorBrush(Color.FromArgb(p.BdA, p.BdR, p.BdG, p.BdB));
+            _text.Foreground = new SolidColorBrush(Color.FromRgb(p.FgR, p.FgG, p.FgB));
+            _palette = p;
+            // 正在显示的普通气泡立即换色；attention 有自己的橙色描边（只换底与字）。
+            if (Showing)
+            {
+                if (_currentKind == "attention")
+                {
+                    _border.Background = _defaultBackground;
+                    _text.Foreground = new SolidColorBrush(Color.FromRgb(p.FgR, p.FgG, p.FgB));
+                }
+                else
+                {
+                    ApplyDefaultChrome();
+                }
+            }
         }
 
         // ------------------------------------------------------------------

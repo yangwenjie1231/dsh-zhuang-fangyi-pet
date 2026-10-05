@@ -978,6 +978,36 @@ namespace DshZhuangFangyiPet
                 bool wheelOk = s1 > s0 && Math.Abs(s2 - s0) < 0.001;
                 Check(wheelOk, "滚轮缩放：上滚变大、下滚复原",
                       s0.ToString("0.##") + " → " + s1.ToString("0.##") + " → " + s2.ToString("0.##"));
+                // ⭐ ✎ 按钮必须**完全落在窗口内**（伸到窗口外的像素收不到鼠标消息，
+                // 看得见点不着 —— 曾经用负 Margin 往右上角外伸，就是这个毛病）。
+                // 同时：鼠标离开桌宠后**不能立刻隐藏**（否则手还没移到按钮上它就消失了）。
+                bool btnInside = win.DiagSendBtnInsideWindow();
+                Check(btnInside, "✎ 按钮完全在窗口内（窗口外的像素点不到）",
+                      btnInside ? "按钮矩形未越界" : "按钮越出窗口矩形 → 必然点不到");
+                bool btnLingers = win.DiagSendBtnLingers();
+                Check(btnLingers, "✎ 按钮离开桌宠后延迟隐藏（给手移到按钮的时间）",
+                      btnLingers ? "有隐藏宽限期" : "MouseLeave 立即隐藏 → 够不着");
+
+                // ⭐ 深浅色主题：气泡外壳必须真的换色（原先只换贴纸图，白框在深色桌面上刺眼）。
+                PetTheme.BubblePalette darkPal = PetTheme.BubblePalette.For(true);
+                PetTheme.BubblePalette lightPal = PetTheme.BubblePalette.For(false);
+                bool paletteDiffers = darkPal.BgR != lightPal.BgR || darkPal.BgG != lightPal.BgG ||
+                                      darkPal.BgB != lightPal.BgB;
+                bool darkIsDark = darkPal.BgR < 90 && darkPal.FgR > 180;   // 深底浅字
+                bool lightIsLight = lightPal.BgR > 200 && lightPal.FgR < 90; // 浅底深字
+                Check(paletteDiffers && darkIsDark && lightIsLight, "主题配色：深色是深底浅字、浅色是浅底深字",
+                      "深色底 rgb(" + darkPal.BgR + "," + darkPal.BgG + "," + darkPal.BgB + ") 字 " + darkPal.FgR +
+                      " / 浅色底 rgb(" + lightPal.BgR + "," + lightPal.BgG + "," + lightPal.BgB + ") 字 " + lightPal.FgR);
+
+                // 主题优先级矩阵（argv > settings.theme > 注册表）
+                bool prioOk =
+                    PetTheme.ResolveIsDark(true, "light") &&      // argv 压过 settings
+                    !PetTheme.ResolveIsDark(false, "dark") &&
+                    PetTheme.ResolveIsDark(null, "dark") &&
+                    !PetTheme.ResolveIsDark(null, "light") &&
+                    PetTheme.ResolveIsDark(null, "auto") == PetTheme.SystemPrefersDark();
+                Check(prioOk, "主题优先级：argv > settings.theme > 注册表",
+                      "argv/settings/registry 三级都按预期");
 
                 // 150% DPI：窗口 DIP 尺寸 × dpi/96 必须等于精灵的物理像素帧尺寸
                 double dpi = PetNative.GetDpiForWindowSafe(h);
