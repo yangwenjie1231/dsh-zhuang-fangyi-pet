@@ -286,14 +286,18 @@ export function createPetState (options = {}) {
   function requestBubble (key, at, extra = {}) {
     const priority = extra.priority ?? priorityOf(extra.state ?? key)
 
-    // 挑图。`pickBubbleImage` 现在返回 `{file, hasText}`（或 null）——
-    // 因为**素材里有一类中文已经印在图上**的聊天贴纸，必须知道这件事才能决定
-    // 要不要叠文字（见下面 `kind` 的推导）。
+    // 挑图。`pickBubbleImage` 现在返回 `{file, hasText, opaque, fileDark}`（或 null）——
+    // 必须知道这些才能：决定要不要叠文字（hasText）、要不要套气泡底（opaque）、
+    // 深色模式下用哪个文件（fileDark，由渲染方按自己的主题挑）。
     const picked = extra.image !== undefined ? extra.image : pickBubbleImage(key, variantSeed)
     const image = picked === null || picked === undefined
       ? null
       : (typeof picked === 'string' ? picked : (picked.file ?? null))
     const imageHasText = typeof picked === 'object' && picked !== null && picked.hasText === true
+    const imageOpaque = typeof picked === 'object' && picked !== null && picked.opaque === true
+    const imageDark = typeof picked === 'object' && picked !== null && typeof picked.fileDark === 'string'
+      ? picked.fileDark
+      : null
 
     // ⭐ 图自带文字时**不叠 Host 文案**：否则屏幕上会出现两段互相打架的文字
     //（例如贴纸写着「好耶！」，气泡又写「完成啦」）。
@@ -316,6 +320,10 @@ export function createPetState (options = {}) {
       text: text ?? null,
       /** 该图是否自带文字（透传给客户端，便于诊断与样式微调）。 */
       imageHasText,
+      /** 该图是否不透明满幅（自带底色，渲染方不该再套气泡底）。 */
+      imageOpaque: imageOpaque,
+      /** 深色模式变体路径（渲染方按自己的主题挑；null 表示没有变体）。 */
+      imageDark,
       durationMs: extra.durationMs ?? cfg.bubbleMs,
       priority,
       state: extra.state ?? null,
@@ -542,6 +550,10 @@ export function createPetState (options = {}) {
             text: bubble.text,
             /** 该图是否自带文字（`kind === 'image'` 时通常为 true）。 */
             imageHasText: bubble.imageHasText === true,
+            /** 该图是否不透明满幅（自带底色，渲染方不该再套气泡底）。 */
+            imageOpaque: bubble.imageOpaque === true,
+            /** 深色模式变体路径（渲染方按自己的主题挑；null 表示没有）。 */
+            imageDark: bubble.imageDark ?? null,
             durationMs: bubble.durationMs,
             priority: bubble.priority
           },

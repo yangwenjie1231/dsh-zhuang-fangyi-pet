@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -360,16 +360,35 @@ namespace DshZhuangFangyiPet
             {
                 _lastBubbleId = snap.Bubble.Id;
                 BitmapSource img = null;
-                if (snap.Bubble.WantsImage && !string.IsNullOrEmpty(snap.Bubble.Image))
+
+                // 契约 §4 fileDark：只有渲染方知道实际主题 → exe 读系统深色模式选图。
+                // 深色且 snapshot.bubble.imageDark 非空 → 用变体；否则用 image。URL 拼法不变。
+                bool dark = PetTheme.IsDark(_opt.DarkOverride);
+                string rel = PetTheme.SelectBubbleImageRel(
+                    snap.Bubble.WantsImage, snap.Bubble.Image, snap.Bubble.ImageDark, dark);
+
+                if (rel != null)
                 {
-                    try { img = _store.GetBubbleImage(snap.Bubble.Image); }
+                    try { img = _store.GetBubbleImage(rel); }
                     catch (Exception ex) { PetLog.Warn("气泡图加载失败: " + PetLog.Describe(ex)); }
+
+                    // 深色变体取不到（404/断网）→ 回落浅色原图，尽量还显示"这句话"；
+                    // 再不行才走随机气泡池（原有兜底，保持不变）。
+                    if (img == null && rel != snap.Bubble.Image && !string.IsNullOrEmpty(snap.Bubble.Image))
+                    {
+                        PetLog.Warn("深色变体取图失败，回落浅色原图: " + rel);
+                        try { img = _store.GetBubbleImage(snap.Bubble.Image); } catch { }
+                    }
                     if (img == null)
                     {
                         string alt = _store.RandomBubbleFile();
                         if (alt != null) img = _store.GetBubbleImage(alt);
                     }
+                    PetLog.Info("气泡取图 rel=" + rel + " dark=" + (dark ? "1" : "0") +
+                                (img != null ? " → 解码成功" : " → 解码失败（走兜底）") +
+                                " opaque=" + (snap.Bubble.Opaque ? "1" : "0"));
                 }
+
                 try { _bubble.Show(snap.Bubble, img); }
                 catch (Exception ex) { PetLog.Warn("气泡显示失败: " + PetLog.Describe(ex)); }
             }

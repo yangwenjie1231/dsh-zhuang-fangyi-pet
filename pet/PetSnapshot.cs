@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 
@@ -14,6 +14,10 @@ namespace DshZhuangFangyiPet
         public string Kind = "text";     // 'image' | 'text' | 'both'
         public string Image;             // 相对 /pet/art/ 的路径；kind 含 image 时必有
         public string Text;
+        /// <summary>契约 §4：不透明满幅贴纸（imageOpaque === true）。缺字段 = false（透明抠图，保持原呈现）。</summary>
+        public bool Opaque;
+        /// <summary>契约 §4：深色模式变体（imageDark，相对 /pet/art/ 的路径）。缺字段 = null（用原图）。</summary>
+        public string ImageDark;
         public int DurationMs = 4000;
         public int Priority;
 
@@ -61,6 +65,11 @@ namespace DshZhuangFangyiPet
                 bi.Kind = b.Str("kind", "text");
                 bi.Image = b.Str("image", null);
                 bi.Text = b.Str("text", null);
+                // 契约 §4 新增（附加字段，向后兼容）：缺字段按 Opaque=false / ImageDark=null，
+                // 旧快照（Host 旧版本）不含这两个键 → 一切照旧。
+                bi.Opaque = b.Bool("imageOpaque", false);
+                bi.ImageDark = b.Str("imageDark", null);
+                if (string.IsNullOrEmpty(bi.ImageDark)) bi.ImageDark = null;
                 bi.DurationMs = b.Int("durationMs", 4000);
                 if (bi.DurationMs < 500) bi.DurationMs = 500;
                 if (bi.DurationMs > 600000) bi.DurationMs = 600000;

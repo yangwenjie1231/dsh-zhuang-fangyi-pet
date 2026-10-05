@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -32,11 +32,41 @@ namespace DshZhuangFangyiPet
         private long _currentId = -1;
         private int _currentPriority = int.MinValue;
 
+        // 透明抠图气泡的默认外观（契约 §4 opaque=false 的呈现，保持历史值不动）
+        private static readonly Thickness DefaultPadding = new Thickness(10, 7, 10, 7);
+        private static readonly Thickness DefaultBorderWidth = new Thickness(1);
+        private const double DefaultImageMaxH = 160;
+        private const double DefaultImageMaxW = 200;
+        private readonly Brush _defaultBackground;
+        private readonly Brush _defaultBorderBrush;
+
+        // 契约 §4 opaque=true：不透明满幅贴纸本身就是整张卡片（含文字），
+        // 160px 高度下 baked-in 中文读不清 → 放宽到 240（窗口 SizeToContent 自适应）。
+        private const double OpaqueImageMaxH = 240;
+        private const double OpaqueImageMaxW = 240;
+
         /// <summary>取本体窗的屏幕矩形（物理像素），由 Program 注入。</summary>
         public Func<int[]> PetRectProvider;
 
         public long CurrentId { get { return _currentId; } }
         public bool Showing { get; private set; }
+
+        /// <summary>
+        /// 自检用：当前是否处于「不透明满幅」呈现
+        /// （背景透明 / 边框厚 0 / 无内边距 / 图片上限放宽到 240）。
+        /// </summary>
+        internal bool IsOpaquePresentation
+        {
+            get
+            {
+                return _border != null
+                    && object.ReferenceEquals(_border.Background, Brushes.Transparent)
+                    && _border.BorderThickness.Left == 0
+                    && _border.Padding.Left == 0
+                    && _image.MaxHeight == OpaqueImageMaxH
+                    && _image.MaxWidth == OpaqueImageMaxW;
+            }
+        }
 
         public PetBubble()
         {
@@ -64,8 +94,8 @@ namespace DshZhuangFangyiPet
 
             _image = new Image();
             _image.Stretch = Stretch.Uniform;
-            _image.MaxHeight = 160;
-            _image.MaxWidth = 200;
+            _image.MaxHeight = DefaultImageMaxH;
+            _image.MaxWidth = DefaultImageMaxW;
             _image.HorizontalAlignment = HorizontalAlignment.Center;
             RenderOptions.SetBitmapScalingMode(_image, BitmapScalingMode.HighQuality);
             _image.Visibility = Visibility.Collapsed;
@@ -75,12 +105,13 @@ namespace DshZhuangFangyiPet
             _stack.Children.Add(_image);
             _stack.Children.Add(_text);
 
+            // 默认外观值先留底（opaque 呈现后要能恢复回去；气泡窗是长生命周期对象）
+            _defaultBackground = new SolidColorBrush(Color.FromArgb(238, 255, 255, 255));
+            _defaultBorderBrush = new SolidColorBrush(Color.FromArgb(210, 120, 160, 220));
+
             _border = new Border();
             _border.CornerRadius = new CornerRadius(9);
-            _border.Padding = new Thickness(10, 7, 10, 7);
-            _border.Background = new SolidColorBrush(Color.FromArgb(238, 255, 255, 255));
-            _border.BorderBrush = new SolidColorBrush(Color.FromArgb(210, 120, 160, 220));
-            _border.BorderThickness = new Thickness(1);
+            ApplyDefaultChrome();
             try
             {
                 DropShadowEffect sh = new DropShadowEffect();
@@ -88,7 +119,7 @@ namespace DshZhuangFangyiPet
                 sh.ShadowDepth = 2;
                 sh.Opacity = 0.35;
                 sh.Color = Colors.Black;
-                _border.Effect = sh;
+                _border.Effect = sh;      // 投影两种模式都保留（opaque 贴纸要从桌面浮起来）
             }
             catch { }
             _border.Child = _stack;
@@ -168,6 +199,11 @@ namespace DshZhuangFangyiPet
             _text.Text = hasText ? b.Text : "";
             _text.Visibility = hasText ? Visibility.Visible : Visibility.Collapsed;
 
+            // 契约 §4 opaque：不透明满幅贴纸图本身就是一张卡片，
+            // 再画气泡自己的底/边框/内边距会出现「白纸贴在浅色框里」的双层边框 → 全部去掉。
+            // 透明抠图（缺省/显式 false）保持原有呈现不变。
+            ApplyBubbleChrome(hasImg && b.Opaque);
+
             _currentId = b.Id;
             _currentPriority = b.Priority;
             Showing = true;
@@ -197,6 +233,41 @@ namespace DshZhuangFangyiPet
         {
             _hideTimer.Stop();
             FadeOut();
+        }
+
+        /// <summary>
+        /// 按 opaque 切换气泡外壳。每次 Show 都会调用（气泡窗复用，
+        /// 上一条 opaque 贴纸留下的样式必须能完全恢复）。
+        /// 投影（_border.Effect）两种模式共用，不在切换范围。
+        /// </summary>
+        private void ApplyBubbleChrome(bool opaque)
+        {
+            if (opaque)
+            {
+                _border.Background = Brushes.Transparent;
+                _border.BorderBrush = Brushes.Transparent;
+                _border.BorderThickness = new Thickness(0);
+                _border.Padding = new Thickness(0);
+                _border.CornerRadius = new CornerRadius(0);
+                _image.MaxHeight = OpaqueImageMaxH;
+                _image.MaxWidth = OpaqueImageMaxW;
+            }
+            else
+            {
+                ApplyDefaultChrome();
+            }
+        }
+
+        /// <summary>透明抠图气泡的默认外壳（背景/边框/圆角 9/内边距/图片上限 160x200）。</summary>
+        private void ApplyDefaultChrome()
+        {
+            _border.Background = _defaultBackground;
+            _border.BorderBrush = _defaultBorderBrush;
+            _border.BorderThickness = DefaultBorderWidth;
+            _border.Padding = DefaultPadding;
+            _border.CornerRadius = new CornerRadius(9);
+            _image.MaxHeight = DefaultImageMaxH;
+            _image.MaxWidth = DefaultImageMaxW;
         }
 
         public void HideNow()

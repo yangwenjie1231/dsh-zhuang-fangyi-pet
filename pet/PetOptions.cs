@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
@@ -26,6 +26,13 @@ namespace DshZhuangFangyiPet
         public bool Verbose;               // --verbose（未在契约中，纯诊断；默认不额外输出）
         public bool Help;                  // --help
 
+        /// <summary>
+        /// --dark auto|0|1：深色模式覆盖（契约 §4 fileDark 的测试注入点）。
+        /// null = auto（读注册表，见 PetTheme）；true/false = 强制深色/浅色。
+        /// Host 不会传这个参数；只用于测试与排障。
+        /// </summary>
+        public bool? DarkOverride;
+
         // 未在契约 §5 中、但为「不依赖素材管线也能跑通」而设的本地兜底路径。
         // Host 永远不会传；只在 --url 缺省（离线）时有意义。
         public string ArtDir;
@@ -42,7 +49,7 @@ namespace DshZhuangFangyiPet
             sb.AppendLine("dsh-zhuang-fangyi-pet — 庄方宜桌宠原生窗口");
             sb.AppendLine("用法: dsh-zhuang-fangyi-pet.exe [--url <base>] [--token <hex>] [--state <name>]");
             sb.AppendLine("        [--scale <0.5~2.0>] [--opacity <0.3~1.0>] [--x <int>] [--y <int>]");
-            sb.AppendLine("        [--topmost 0|1] [--click-through 0|1] [--bubble 0|1]");
+            sb.AppendLine("        [--topmost 0|1] [--click-through 0|1] [--bubble 0|1] [--dark auto|0|1]");
             sb.AppendLine("        [--art-dir <dir>] [--art-url <url>] [--selftest] [--verbose]");
             return sb.ToString();
         }
@@ -119,6 +126,9 @@ namespace DshZhuangFangyiPet
                     case "--bubble":
                         if (!TryBool(val, out o.BubbleEnabled)) { err = "--bubble 只能是 0/1: " + val; return null; }
                         break;
+                    case "--dark":
+                        if (!TryDark(val, out o.DarkOverride)) { err = "--dark 只能是 auto/0/1: " + val; return null; }
+                        break;
                     case "--art-dir":
                         o.ArtDir = val;
                         break;
@@ -180,6 +190,20 @@ namespace DshZhuangFangyiPet
             }
         }
 
+        /// <summary>解析 --dark：auto → DarkOverride=null（跟随注册表）；0/1 → 强制浅色/深色。</summary>
+        private static bool TryDark(string s, out bool? v)
+        {
+            v = null;
+            if (s == null) return false;
+            switch (s.Trim())
+            {
+                case "auto": return true;   // v 保持 null = auto
+                case "1": v = true; return true;
+                case "0": v = false; return true;
+                default: return false;
+            }
+        }
+
         /// <summary>HTTP 基址下的完整 URL（契约 §3 前缀）。</summary>
         public string Route(string rel)
         {
@@ -199,6 +223,7 @@ namespace DshZhuangFangyiPet
             d["topmost"] = Topmost ? "1" : "0";
             d["clickThrough"] = ClickThrough ? "1" : "0";
             d["bubble"] = BubbleEnabled ? "1" : "0";
+            d["dark"] = DarkOverride == null ? "auto" : (DarkOverride.Value ? "1" : "0");
             d["selftest"] = SelfTest ? "1" : "0";
             return d;
         }

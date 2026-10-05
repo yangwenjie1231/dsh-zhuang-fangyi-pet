@@ -49,6 +49,30 @@ window.__ModuleLoader__.load({
     const ROUTE = '/api/zhuang-fangyi/pet'
     const OVERLAY_ID = 'zhuang-fangyi-pet'
 
+    /**
+     * 判断**当前要不要用深色变体**（契约 §4 `fileDark`）。
+     *
+     * overlay 是渲染方，必须由它自己判断 —— Host 在服务端无从知晓浏览器主题。
+     * 优先读外壳 presenter 设置的 `data-ds-theme-source`（DSH 主题可能是
+     * system/light/dark 任一，用户也可能是强制深色）；读不到再退回系统
+     * `prefers-color-scheme`。两处都拿不到时按浅色处理（安全侧：绝大多数贴纸
+     * 的浅色版是原始素材，不会丢信息）。
+     *
+     * @returns {boolean}
+     */
+    function prefersDarkNow () {
+      try {
+        const root = typeof document !== 'undefined' ? document.documentElement : null
+        const src = root?.getAttribute?.('data-ds-theme-source')
+        if (src === 'dark') return true
+        if (src === 'light') return false
+        if (typeof matchMedia === 'function') {
+          return matchMedia('(prefers-color-scheme: dark)').matches === true
+        }
+      } catch (_) { /* 环境不可用就按浅色 */ }
+      return false
+    }
+
     /** 状态 → 兜底文案（清单没给出 label 时用）。与 Host 的 STATE_TEXT 同 key 集。 */
     const STATE_TEXT = {
       zh: {
@@ -298,6 +322,28 @@ window.__ModuleLoader__.load({
         return () => window.removeEventListener('resize', onResize)
       }, [size.w, size.h])
 
+      // ── 深色模式：overlay 是**渲染方**，由它自己判断实际主题（契约 §4 `fileDark`）──
+      // 优先看外壳 presenter 设置的 `data-ds-theme-source`（DSH 主题可能是
+      // system/light/dark 任一，用户也可能是强制深色）；读不到再退回系统
+      // `prefers-color-scheme`。监听两处变化，主题切换**不重载页面**也能生效。
+      const [dark, setDark] = useState(() => prefersDarkNow())
+      useEffect(() => {
+        const mq = typeof matchMedia === 'function'
+          ? matchMedia('(prefers-color-scheme: dark)')
+          : null
+        const sync = () => setDark(prefersDarkNow())
+        if (mq) { mq.addEventListener?.('change', sync); sync() }
+        const root = typeof document !== 'undefined' ? document.documentElement : null
+        const mo = (typeof MutationObserver === 'function' && root)
+          ? new MutationObserver(sync)
+          : null
+        mo?.observe(root, { attributes: true, attributeFilter: ['data-ds-theme-source'] })
+        return () => {
+          if (mq) mq.removeEventListener?.('change', sync)
+          mo?.disconnect()
+        }
+      }, [])
+
       /* ---- 拖动：用 Pointer Events（不是 mouse），并捕获指针 ---- */
       const onPointerDown = useCallback(event => {
         if (event.button !== 0) return
@@ -399,8 +445,12 @@ window.__ModuleLoader__.load({
       }
 
       const bubble = settings.bubble ? (snapshot?.bubble ?? null) : null
-      const bubbleImage = settings.bubbleImages && bubble?.image
-        ? `${ROUTE}/art/${encodeURIComponent(bubble.image)}`
+      // 深色模式用变体（契约 §4 `fileDark`）。变体缺失时回落浅色版 —— 不会更糟。
+      const bubbleFile = bubble
+        ? (dark && bubble.imageDark ? bubble.imageDark : bubble.image)
+        : null
+      const bubbleImage = settings.bubbleImages && bubbleFile
+        ? `${ROUTE}/art/${encodeURIComponent(bubbleFile)}`
         : null
 
       // 容器必须小（只包住宠物），否则会挡住界面 —— 见文件头约束 2。
@@ -468,7 +518,8 @@ window.__ModuleLoader__.load({
           ? null
           : h('div', {
               key: 'bubble',
-              className: 'zf-pet__bubble',
+              className: 'zf-pet__bubble'
+                + (bubble.imageOpaque ? ' zf-pet__bubble--opaque' : ''),
               'data-zf-pet-bubble-kind': bubble.kind
             }, [
               bubbleImage === null
@@ -737,6 +788,27 @@ window.__ModuleLoader__.load({
 }
 .zf-pet__bubble-img{ width:34px;height:34px;object-fit:contain;flex:0 0 auto; }
 .zf-pet__bubble-text{ white-space:pre-wrap;word-break:break-word; }
+
+/* ── 不透明满幅贴纸（契约 §4 的 opaque 字段）──────────────────────────
+ * 这类图**自带白底/黑底、铺满整图**（黑白线稿贴纸）。它们本身已经是「一张卡片」，
+ * 若再套气泡的底色/边框/内边距，就会出现「一张纸贴在另一个浅色框里」的双层边框。
+ * 所以：不画底、不加边框/内边距，只留投影；圆角贴在图片自己身上。
+ * ──────────────────────────────────────────────────────────────────── */
+.zf-pet__bubble--opaque{
+  background:transparent;
+  border:none;
+  padding:0;
+  gap:0;
+  overflow:hidden;
+}
+.zf-pet__bubble--opaque .zf-pet__bubble-img{
+  /* 贴纸本身就是整句话，34px 根本读不清。放宽到 128px —— 气泡 max-width 220 之内。 */
+  width:auto;max-width:128px;
+  height:auto;max-height:128px;
+  object-fit:contain;
+  border-radius:10px;
+  display:block;
+}
 @keyframes zf-pet-bubble-in{
   from{ opacity:0; transform:translateY(4px) scale(.96); }
   to{ opacity:1; transform:none; }

@@ -133,7 +133,13 @@ function loadClient (options = {}) {
 
   const documentStub = {
     head: { appendChild () {} },
-    createElement: () => ({ id: '', textContent: '', remove () {} })
+    createElement: () => ({ id: '', textContent: '', remove () {} }),
+    // 允许测试注入外壳主题属性（client.js 读 data-ds-theme-source 选深色变体）。
+    documentElement: {
+      getAttribute: k => Object.prototype.hasOwnProperty.call(options.documentAttrs ?? {}, k)
+        ? options.documentAttrs[k]
+        : null
+    }
   }
 
   const win = {
@@ -615,6 +621,64 @@ ok('bubbleImages 关闭时气泡只剩文字', () => {
   assert.ok(bubble !== undefined, '应渲染气泡')
   const imgs = bubble.props.children.filter(c => c !== null && c.type === 'img')
   assert.equal(imgs.length, 0, '关掉表情图后不该有 img')
+})
+
+/* ── 深色变体（契约 §4 `fileDark`）与不透明贴纸（`opaque`）──────────────── */
+
+function renderBubble (bubble, opts = {}) {
+  const l = loadClient(opts)
+  l.exports.apply(l.ctx)
+  const { Pet, runtime } = l.exports.__test
+  runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 1, frameMs: 36 } } }
+  runtime.__state.snapshot = { petState: 'idle', label: '', bubble }
+  runtime.__state.settings = normalizePet({ bubble: true, bubbleImages: true })
+  l.react.resetHooks()
+  const tree = Pet({ runtime })
+  const b = tree.props.children.find(c => c !== null && c.props?.['data-zf-pet-bubble-kind'] !== undefined)
+  const img = b.props.children.find(c => c !== null && c.type === 'img')
+  return { bubbleNode: b, img }
+}
+
+ok('⭐ 深色模式（外壳 data-ds-theme-source=dark）→ 用 imageDark', () => {
+  const { img } = renderBubble({
+    id: 1, kind: 'image', text: null, image: 'bubble/new/01.png',
+    imageDark: 'bubble/new/01-dark.png', imageOpaque: true, imageHasText: true
+  }, { documentAttrs: { 'data-ds-theme-source': 'dark' } })
+  assert.ok(img, '应渲染 img')
+  assert.equal(decodeURIComponent(img.props.src), '/api/zhuang-fangyi/pet/art/bubble/new/01-dark.png')
+})
+
+ok('浅色模式 → 用原图（不用变体）', () => {
+  const { img } = renderBubble({
+    id: 1, kind: 'image', text: null, image: 'bubble/new/01.png',
+    imageDark: 'bubble/new/01-dark.png', imageOpaque: true, imageHasText: true
+  }, { documentAttrs: { 'data-ds-theme-source': 'light' } })
+  assert.equal(decodeURIComponent(img.props.src), '/api/zhuang-fangyi/pet/art/bubble/new/01.png')
+})
+
+ok('没有 imageDark 时深色模式回落原图（不会更糟）', () => {
+  const { img } = renderBubble({
+    id: 1, kind: 'image', text: null, image: 'bubble/17-yay.png',
+    imageDark: null, imageOpaque: false, imageHasText: true
+  }, { documentAttrs: { 'data-ds-theme-source': 'dark' } })
+  assert.equal(decodeURIComponent(img.props.src), '/api/zhuang-fangyi/pet/art/bubble/17-yay.png')
+})
+
+ok('不透明贴纸 → 气泡带 zf-pet__bubble--opaque（不套气泡底）', () => {
+  const { bubbleNode } = renderBubble({
+    id: 1, kind: 'image', text: null, image: 'bubble/new/01.png',
+    imageDark: null, imageOpaque: true, imageHasText: true
+  })
+  assert.ok(bubbleNode.props.className.includes('zf-pet__bubble--opaque'),
+    'opaque=true 应加修饰类（CSS 里不画底/边框/内边距）')
+})
+
+ok('透明抠图 → 气泡保持原样（不加 opaque 修饰类）', () => {
+  const { bubbleNode } = renderBubble({
+    id: 1, kind: 'both', text: 'hi', image: 'bubble/17-yay.png',
+    imageDark: null, imageOpaque: false, imageHasText: true
+  })
+  assert.ok(!bubbleNode.props.className.includes('zf-pet__bubble--opaque'))
 })
 
 ok('缺该状态的素材时回落到 idle', () => {

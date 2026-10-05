@@ -145,13 +145,24 @@ export function normalizeAtlas (raw) {
     for (const entry of raw.bubble) {
       if (entry === null || typeof entry !== 'object') continue
       if (!addFile(entry.file)) continue
+      const file = String(entry.file).replace(/\\/g, '/')
+      // 深色变体（可选）：相对 `art/pet/` 的路径，也必须进白名单才服务。
+      let fileDark = null
+      if (isSafeRel(entry.fileDark)) {
+        fileDark = String(entry.fileDark).replace(/\\/g, '/')
+        addFile(entry.fileDark)
+      }
       out.bubble.push({
-        file: String(entry.file).replace(/\\/g, '/'),
+        file,
         w: Number.isFinite(entry.w) ? Math.round(entry.w) : 0,
         h: Number.isFinite(entry.h) ? Math.round(entry.h) : 0,
         // 该图**自己已经把文字画进去了**（聊天贴纸）。
         // 缺字段按 false（旧清单仍可用，只是可能叠字）。
-        hasText: entry.hasText === true
+        hasText: entry.hasText === true,
+        // 该图**没有 alpha、铺满整个画布**（黑白线稿自带白底）。
+        // 渲染侧据此**不套气泡自己的底/内边距**，避免"白纸贴在浅色框里"的双层边框。
+        opaque: entry.opaque === true,
+        fileDark
       })
     }
   }
@@ -329,6 +340,25 @@ export function bubbleHasText (atlas, file) {
     if (entry?.file === key) return entry.hasText === true
   }
   return false
+}
+
+/**
+ * 按当前主题挑出该气泡图**实际要加载的文件**。
+ *
+ * 深色模式由**渲染方自己判断**（原生 exe 读系统深色模式；overlay 用
+ * `prefers-color-scheme`），因为只有渲染方知道自己的实际主题 —— Host 在服务端
+ * 无从知晓。所以 Host 只负责把两条路径都给出去，由渲染方选。
+ *
+ * @param {{file: string, fileDark?: string|null}} entry
+ * @param {boolean} dark
+ * @returns {string|null}
+ */
+export function resolveBubbleFile (entry, dark) {
+  if (entry === null || entry === undefined) return null
+  if (dark === true && typeof entry.fileDark === 'string' && entry.fileDark !== '') {
+    return entry.fileDark
+  }
+  return entry.file ?? null
 }
 
 /**

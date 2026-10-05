@@ -44,6 +44,7 @@ import {
   artForState,
   bubbleArt,
   bubbleHasText,
+  resolveBubbleFile,
   atlasReport,
   geometryFor,
   VALID_STATES
@@ -997,6 +998,74 @@ ok('只给文字不给图时 kind=text（图不可用也不崩）', () => {
   assert.equal(b.kind, 'text')
   assert.equal(b.image, null)
   assert.equal(b.imageHasText, false)
+})
+
+/* ── opaque / fileDark：不透明满幅贴纸与深色模式变体 ───────────────────────
+ *
+ * 素材里新增了一批「黑白线稿 + 白底铺满整图」的贴纸（实测 20 张）。
+ * 它们不能抠白底（白色既是背景也是脸的填充色），呈现方式与透明抠图不同：
+ * 不该再套气泡自己的底。深色模式则需要换用变体文件。
+ * ────────────────────────────────────────────────────────────────────────── */
+
+ok('normalizeAtlas 保留 opaque 与 fileDark，并把深色文件加进白名单', () => {
+  const atlas = normalizeAtlas({
+    bubble: [{
+      file: 'bubble/new/01.png', w: 256, h: 256,
+      hasText: true, opaque: true, fileDark: 'bubble/new/01-dark.png'
+    }]
+  })
+  const e = atlas.bubble[0]
+  assert.equal(e.opaque, true)
+  assert.equal(e.hasText, true)
+  assert.equal(e.fileDark, 'bubble/new/01-dark.png')
+  assert.ok(atlas.allowed.has('bubble/new/01-dark.png'),
+    '深色文件必须进白名单，否则 /pet/art/ 服务不了它')
+})
+
+ok('缺 opaque/fileDark 时按缺省（旧清单向后兼容）', () => {
+  const atlas = normalizeAtlas({ bubble: [{ file: 'b/1.png', w: 1, h: 1 }] })
+  const e = atlas.bubble[0]
+  assert.equal(e.opaque, false)
+  assert.equal(e.fileDark, null)
+})
+
+ok('fileDark 是遍历路径时被丢弃且不进白名单', () => {
+  const atlas = normalizeAtlas({
+    bubble: [{ file: 'b/1.png', w: 1, h: 1, fileDark: '../../secret.png' }]
+  })
+  assert.equal(atlas.bubble[0].fileDark, null)
+  assert.ok(!atlas.allowed.has('../../secret.png'))
+})
+
+ok('resolveBubbleFile 深色挑变体、浅色挑原图、缺失回落原图', () => {
+  const e = { file: 'a.png', fileDark: 'a-dark.png' }
+  assert.equal(resolveBubbleFile(e, true), 'a-dark.png')
+  assert.equal(resolveBubbleFile(e, false), 'a.png')
+  assert.equal(resolveBubbleFile({ file: 'a.png' }, true), 'a.png', '没有变体就回落原图')
+  assert.equal(resolveBubbleFile(null, true), null)
+})
+
+ok('⭐ 状态机把 imageOpaque / imageDark 透传到快照', () => {
+  const { machine } = makeMachine({}, () => ({
+    file: 'bubble/new/01.png', hasText: true, opaque: true, fileDark: 'bubble/new/01-dark.png'
+  }))
+  machine.apply({ type: 'agent/status', sessionId: 's1', status: 'running' })
+  machine.apply({ type: 'tool/call', sessionId: 's1', callId: 'c1' })
+  const b = machine.snapshot().bubble
+  assert.equal(b.image, 'bubble/new/01.png')
+  assert.equal(b.imageOpaque, true, '渲染方据此不再套气泡底')
+  assert.equal(b.imageDark, 'bubble/new/01-dark.png', '渲染方据此在深色模式换图')
+  assert.equal(b.imageHasText, true)
+  assert.equal(b.text, null, '自带文字的贴纸不叠文案')
+})
+
+ok('旧式 pickBubbleImage（纯字符串）时 imageOpaque=false 且 imageDark=null', () => {
+  const { machine } = makeMachine({}, () => 'bubble/legacy.png')
+  machine.apply({ type: 'agent/status', sessionId: 's1', status: 'running' })
+  machine.apply({ type: 'tool/call', sessionId: 's1', callId: 'c1' })
+  const b = machine.snapshot().bubble
+  assert.equal(b.imageOpaque, false)
+  assert.equal(b.imageDark, null)
 })
 
 ok('atlasReport 报出覆盖与缺失', () => {

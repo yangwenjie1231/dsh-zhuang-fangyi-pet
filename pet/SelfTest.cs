@@ -75,6 +75,7 @@ namespace DshZhuangFangyiPet
 
                 PetJson.Atlas atlas = TestAtlas(artDir);
                 TestPriority();
+                TestBubbleOpaqueAndDark();
                 SpriteSheet sheet = TestSprite(artDir, atlas);
                 TestFilesMapCompat();
                 TestClamp();
@@ -444,10 +445,77 @@ namespace DshZhuangFangyiPet
             }
         }
 
+        /// <summary>
+        /// 契约 §4 opaque/fileDark：新字段解析、旧快照向后兼容、深色判定（注册表 + --dark 覆盖）、
+        /// 选图矩阵。选图走 Program 实际使用的 PetTheme.SelectBubbleImageRel 纯函数，
+        /// 自检测的就是运行路径本身。
+        /// </summary>
+        private static void TestBubbleOpaqueAndDark()
+        {
+            // (1) 新字段解析：imageOpaque:true + imageDark
+            PetSnapshot s1 = PetSnapshot.Parse(
+                "{\"rev\":11,\"petState\":\"working\",\"bubble\":{\"id\":9001,\"kind\":\"image\"," +
+                "\"image\":\"bubble/new/01.png\",\"imageOpaque\":true," +
+                "\"imageDark\":\"bubble/new/01-dark.png\"}}");
+            bool ok1 = s1 != null && s1.Bubble != null && s1.Bubble.Opaque &&
+                       s1.Bubble.ImageDark == "bubble/new/01-dark.png" &&
+                       s1.Bubble.Image == "bubble/new/01.png";
+            Check(ok1, "契约 §4：snapshot.bubble.imageOpaque/imageDark 解析",
+                  ok1 ? "imageOpaque:true → Opaque=true；imageDark 原样读出" : "解析失败");
+
+            // (2) 向后兼容：旧快照没有这两个字段 → Opaque=false、ImageDark=null
+            PetSnapshot s2 = PetSnapshot.Parse(
+                "{\"rev\":12,\"petState\":\"idle\",\"bubble\":{\"id\":9002,\"kind\":\"image\"," +
+                "\"image\":\"bubble/04.png\"}}");
+            bool ok2 = s2 != null && s2.Bubble != null &&
+                       !s2.Bubble.Opaque && s2.Bubble.ImageDark == null;
+            Check(ok2, "旧快照向后兼容：缺 imageOpaque/imageDark → Opaque=false、ImageDark=null",
+                  ok2 ? "旧 Host 快照行为不变（透明抠图呈现保留）" : "解析失败");
+
+            // (3) 显式 false / null 与缺省一致
+            PetSnapshot s3 = PetSnapshot.Parse(
+                "{\"rev\":13,\"bubble\":{\"id\":9003,\"kind\":\"both\",\"image\":\"bubble/x.png\"," +
+                "\"text\":\"你好\",\"imageOpaque\":false,\"imageDark\":null}}");
+            bool ok3 = s3 != null && s3.Bubble != null &&
+                       !s3.Bubble.Opaque && s3.Bubble.ImageDark == null;
+            Check(ok3, "显式 imageOpaque:false / imageDark:null 与缺省一致", ok3 ? "一致" : "解析失败");
+
+            // (4) 选图矩阵（Program.ApplySnapshot 实际调用的纯函数）
+            bool selOk =
+                PetTheme.SelectBubbleImageRel(true, "a.png", "a-dark.png", true) == "a-dark.png" &&
+                PetTheme.SelectBubbleImageRel(true, "a.png", "a-dark.png", false) == "a.png" &&
+                PetTheme.SelectBubbleImageRel(true, "a.png", null, true) == "a.png" &&
+                PetTheme.SelectBubbleImageRel(true, "a.png", "", true) == "a.png" &&
+                PetTheme.SelectBubbleImageRel(false, "a.png", "a-dark.png", true) == null &&
+                PetTheme.SelectBubbleImageRel(true, null, null, true) == null;
+            Check(selOk, "气泡选图矩阵（深色且 imageDark 非空 → imageDark，否则 → image）",
+                  "深色+变体→变体；浅色→原图；深色无变体→原图；kind 无 image→null");
+
+            // (5) --dark 参数：auto/0/1 与非法值
+            string e;
+            PetOptions d1 = PetOptions.Parse(new string[] { "--dark", "1" }, out e);
+            PetOptions d0 = PetOptions.Parse(new string[] { "--dark", "0" }, out e);
+            PetOptions da = PetOptions.Parse(new string[] { "--dark=auto" }, out e);
+            PetOptions dbad = PetOptions.Parse(new string[] { "--dark", "maybe" }, out e);
+            bool optOk = d1 != null && d1.DarkOverride == true &&
+                         d0 != null && d0.DarkOverride == false &&
+                         da != null && da.DarkOverride == null &&
+                         dbad == null;
+            Check(optOk, "--dark auto/0/1 解析与非法值拒绝（exit 3 的前提）",
+                  "1→强制深色，0→强制浅色，auto→读注册表，maybe→" + (dbad == null ? "拒绝" : "误过"));
+
+            // (6) 深色判定：强制覆盖语义 + 注册表读取不抛异常（读不到按浅色）
+            bool sysDark = PetTheme.SystemPrefersDark();
+            bool covOk = PetTheme.IsDark(true) && !PetTheme.IsDark(false) &&
+                         PetTheme.IsDark(null) == sysDark;
+            Check(covOk, "深色判定：--dark 覆盖生效，auto 跟随注册表（读不到按浅色，绝不崩）",
+                  "本机注册表 SystemPrefersDark()=" + (sysDark ? "深色" : "浅色") +
+                  "（Lead 实测本机 AppsUseLightTheme=0；浅色机器上同样通过）");
+        }
+
         private static void TestClamp()
         {
-            PetNative.WorkArea v = PetNative.VirtualWorkspace();
-            int cx, cy;
+            PetNative.WorkArea v = PetNative.VirtualWorkspace();            int cx, cy;
             PetNative.ClampToWorkspace(999999, 999999, 200, 200, out cx, out cy);
             bool ok1 = cx + 200 <= v.Right && cy + 200 <= v.Bottom && cx >= v.X && cy >= v.Y;
             PetNative.ClampToWorkspace(-999999, -999999, 200, 200, out cx, out cy);
@@ -502,6 +570,28 @@ namespace DshZhuangFangyiPet
                 Check(ok, "气泡窗：HWND 创建 + 恒 HTTRANSPARENT",
                       "hwnd=0x" + h.ToInt64().ToString("X") + " NCHITTEST(10,10)=" + r1.ToInt32() +
                       " (200,200)=" + r2.ToInt32() + " 期望 -1");
+
+                // ---- 契约 §4 opaque：不透明满幅贴纸不画气泡底；透明抠图恢复默认 ----
+                BitmapSource bmp = MakeSolidBubbleBitmap(24);
+                PetBubbleInfo ob = new PetBubbleInfo();
+                ob.Id = 990001;
+                ob.Kind = "image";
+                ob.Image = "bubble/opaque-selftest.png";
+                ob.Opaque = true;
+                bubble.Show(ob, bmp);
+                bool opaqueOk = bubble.IsOpaquePresentation;
+                Check(opaqueOk, "不透明满幅气泡：不画底/边框/内边距 + 图片上限放宽 240",
+                      "IsOpaquePresentation=" + opaqueOk +
+                      "（背景透明、BorderThickness=0、Padding=0、MaxWidth/MaxHeight=240，投影保留）");
+
+                PetBubbleInfo tb = new PetBubbleInfo();
+                tb.Id = 990002;
+                tb.Kind = "image";
+                tb.Image = "bubble/cutout-selftest.png";
+                bubble.Show(tb, bmp);
+                bool backOk = !bubble.IsOpaquePresentation;
+                Check(backOk, "透明抠图气泡：opaque 贴纸之后恢复默认底/边框/内边距 + 上限 160x200",
+                      "第二次显示普通抠图，IsOpaquePresentation=" + bubble.IsOpaquePresentation + " 期望 false");
             }
             catch (Exception ex)
             {
@@ -582,6 +672,24 @@ namespace DshZhuangFangyiPet
         private static IntPtr MakeLParam(int x, int y)
         {
             return new IntPtr(unchecked((y << 16) | (x & 0xFFFF)));
+        }
+
+        /// <summary>自检用：生成一张不透明的实心 PNG 位图（模拟满幅贴纸）。</summary>
+        private static BitmapSource MakeSolidBubbleBitmap(int size)
+        {
+            using (Bitmap bmp = new Bitmap(size, size, PixelFormat.Format32bppArgb))
+            {
+                using (Graphics g = Graphics.FromImage(bmp))
+                    g.Clear(Color.FromArgb(255, 255, 255, 255));
+                using (MemoryStream ms = new MemoryStream())
+                {
+                    bmp.Save(ms, ImageFormat.Png);
+                    ms.Position = 0;
+                    BitmapSource src = BitmapFrame.Create(ms, BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
+                    src.Freeze();
+                    return src;
+                }
+            }
         }
 
         private static void Pump(int ms)

@@ -22,11 +22,21 @@
   | **F1** 细笔触半身像 · 深色作战服 · **无文字** | `gif 01/02/03/04/06/07` + `wx 1..8` | **主体**（`states`） | — |
   | **F2** 鲨鱼睡衣贴纸 · **中文印在图上** | 用户抠的 16 张（`08`~`23`） | **表情包**（`bubble`） | `true` |
   | **F3** 简笔场景 · 无文字 · 风格自成一派 | `gif 24/26/28/29` + 用户抠的 `25_看书` | **表情包**（`bubble`） | `false` |
+  | **F4** 黑白线稿贴纸 · **白底铺满整图** · 中文大字 | `fromQQ/新表情包/庄方宜(未扣背景)/*.png` 20 张 | **表情包**（`bubble`） | `true` |
 
   为什么 F2 只能当表情包：它每张都 baked-in 一句中文（"晚安啦"）。当**主体**会让桌宠
   永远挂着同一句话；当**气泡**时若 Host 再叠一句 `bubble.text`，屏幕上会**出现两段
   打架的文字** —— 这正是契约 §4 新增 `bubble[].hasText` 的原因。F1 不得进气泡池
   （主体重复出现没意义），F2/F3 不得进 `states`（风格会跳）。
+
+  F4 是后加的一批（`fromQQ/新表情包/庄方宜(未扣背景)/*.png`，20 张 1254² 线稿贴纸），
+  同样只能当表情包。它与 F2/F3 的**根本差别**在于：
+
+    · **不透明**（0% alpha、白底铺满整图）→ 契约 §4 新增 `bubble[].opaque = true`，
+      渲染方**不得再套气泡底/内边距**，否则会出现「白纸贴在浅色框里」的双层边框；
+    · **绝不能抠白底**：白色既是背景、**也是脸/衣服的填充色**，键控白底实测透明占比
+      72.7%~78.6%，脸上会破出透明洞（原图直接满幅用，不抠、不键控、不 flatten）；
+    · **带深色模式变体** → 契约 §4 的 `bubble[].fileDark`（见 `make_dark()` 的注释）。
 
 设计要点：
   · **不抠图**。`QQ表情\\*.png` 是四角纯白的不透明图，用户明确要求**手动抠图**；
@@ -64,9 +74,10 @@ import glob
 import hashlib
 import json
 import os
+import re
 import shutil
 import sys
-from PIL import Image
+from PIL import Image, ImageOps
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -76,6 +87,9 @@ SRC = os.path.join(ART, 'src')
 ASSETS = os.path.join(os.path.dirname(ROOT), '庄方宜素材', '10-表情包')
 ASSETS_WX = os.path.join(ASSETS, 'wx')
 ASSETS_QQ = os.path.join(ASSETS, 'QQ表情')
+# F4 源素材目录（用户 2026-10 从 QQ 新收的一批，**未抠背景**）。
+# 与 `庄方宜素材\` 不同级，是 `fromQQ\新表情包\庄方宜(未扣背景)\`。
+ASSETS_NEW = os.path.join(os.path.dirname(ROOT), 'fromQQ', '新表情包', '庄方宜(未扣背景)')
 
 # ── 契约常量（不得单方面改动，见 docs/接口契约.md §1 / §4）────────────────────
 # §1 的 9 个合法状态名；`states` 的键只能取其中之一。
@@ -167,6 +181,52 @@ CUTOUT_EXTRA = (
     ('25-reading', '25-reading.png', False),
 )
 
+# ── F4：黑白线稿贴纸（20 张，**不透明满幅**，带深色变体）────────────────────
+# 语义名**逐张看图**取自图上 baked-in 的中文大字（不是照抄 `1 (1).png` 这类文件名）。
+# 第 1 项是输出序号 `NN`（决定文件名排序与清单顺序），第 2 项是源文件名。
+#
+# ⚠️ 这批**绝不能抠白底**：白色既是背景、也是脸/衣服的填充色。实测键控白底后
+# 透明占比 72.7%~78.6%，脸上会破出透明洞（眼睛、脸颊变透明）。所以原图直接当
+# 「不透明满幅贴纸」用 —— 不抠、不键控、不 `flatten()`。
+BUBBLE_F4 = (
+    # (NN, 语义名,            源文件名,     图上文字)
+    ('01', 'bored',          '1 (1).png',  '庄很无聊'),
+    ('02', 'good-morning',   '1 (2).png',  '早上好'),
+    ('03', 'dazed',          '10.png',     '哦呀斯密'),
+    ('04', 'definitely',     '2 (1).png',  '宜定可以'),
+    ('05', 'wink',           '2 (2).png',  'Wink'),
+    ('06', 'brain-overload', '3 (1).png',  '庄脑过载'),
+    ('07', 'wants',          '3 (2).png',  '庄想要'),
+    ('08', 'miss-you',       '4 (1).png',  '庄想你了'),
+    ('09', 'got-it',         '4 (2).png',  '庄得到'),
+    ('10', 'hate-you',       '5 (1).png',  '庄讨厌你'),
+    ('11', 'sneak-snack',    '5 (2).png',  '庄偷吃外卖'),
+    ('12', 'wake-up',        '5.png',      '起床！别过少爷生活'),
+    ('13', 'so-good',        '6 (1).png',  '太中啦'),
+    ('14', 'so-strong',      '6.png',      '！强强！'),
+    ('15', 'so-loud',        '7 (1).png',  '庄一直响'),
+    ('16', 'knock-knock',    '7.png',      '庄门戳你'),
+    ('17', 'crying',         '8 (1).png',  '庄一直哭'),
+    ('18', 'disgusted',      '8.png',      '庄感到恶心'),
+    ('19', 'slacking',       '9 (1).png',  '摸鱼ing'),
+    ('20', 'unhappy',        '9.png',      '庄不开心'),
+)
+
+# F4 深色变体的输出子目录（契约 §4 示例即 `bubble/new/01.png` / `bubble/new/01-dark.png`）。
+F4_SUBDIR = 'new'
+
+# ── 深色变体（契约 §4 `fileDark`）───────────────────────────────────────────
+# **只翻低饱和像素的明度、保留高饱和像素的色相**：
+#   · 低饱和（S < 18%）≈ 黑白线稿与白底 —— 翻明度，白底→黑底、黑线→白线；
+#   · 高饱和（S ≥ 18%）≈ 彩色点缀（粉爱心、黄星星、彩虹）—— 原样保留色相。
+#
+# **为什么不能整通道 `ImageChops.invert`**：实测 20 张里 15 张纯黑白，整翻很干净；
+# 但 5 张带彩色点缀（`2 (2).png` `3 (2).png` `5.png` `8 (1).png` `8.png`），整翻会把
+# 粉爱心翻成青绿、黄星星翻成蓝、彩虹反向，实测差异像素 23%~35%，观感明显不对。
+# 饱和感知翻转在**纯灰阶图上与整翻逐像素完全等价**（实测 20/20 差异 0.0000%），
+# 在彩色图上保留原色相 —— 两个目标同时满足，所以选它。
+SAT_LOW = int(0.18 * 255)   # 饱和度阈值：低于此值视为「黑白」像素
+
 # 用户手动抠图目录。**注意**：这里的文件名是**语义名**（如 `08-love-you.png`），
 # 不再是状态名 —— F2/F3 只当气泡，不当主体。
 CUTOUT = os.path.join(SRC, 'cutout')
@@ -178,8 +238,9 @@ RAW = os.path.join(SRC, 'raw')
 # ── 基础工具 ────────────────────────────────────────────────────────────────
 
 def ensure_dirs():
-    """建好全部输出目录（含用户手动抠图的 `cutout/`）。"""
-    for d in (ART, os.path.join(ART, 'bubble'), os.path.join(ART, 'thumbs'),
+    """建好全部输出目录（含用户手动抠图的 `cutout/` 与 F4 的 `bubble/new/`）。"""
+    for d in (ART, os.path.join(ART, 'bubble'), os.path.join(ART, 'bubble', F4_SUBDIR),
+              os.path.join(ART, 'thumbs'),
               SRC, os.path.join(SRC, 'png'), os.path.join(SRC, 'gif'),
               os.path.join(SRC, 'raw'), CUTOUT):
         os.makedirs(d, exist_ok=True)
@@ -291,12 +352,48 @@ def copy_if_different(src, dst):
     return True
 
 
+def make_dark(im):
+    """生成深色模式变体（契约 §4 `fileDark`）：**饱和感知的明度翻转**。
+
+    规则（契约 §4 已冻结）：只翻**低饱和**像素的明度，**保留高饱和**像素的色相。
+
+    ```python
+    hsv = im.convert("HSV"); H, S, V = hsv.split()
+    low = S.point(lambda s: 255 if s < SAT_LOW else 0)   # 低饱和 = 黑白线稿/白底
+    out = Image.merge("HSV", (H, S, Image.composite(ImageOps.invert(V), V, low)))
+    ```
+
+    ⚠️ **为什么不能整通道 `ImageChops.invert`**（这条是实测判据，不是洁癖）：
+    20 张里 15 张是纯黑白，整通道翻转很干净；但 5 张带彩色点缀
+    （`2 (2).png` `3 (2).png` `5.png` `8 (1).png` `8.png`）整翻会把粉爱心变青绿、
+    黄星星变蓝、彩虹反向 —— 实测与饱和感知版的差异像素 **23%~35%**，观感明显不对。
+    而饱和感知版在**纯灰阶图上与整翻逐像素完全等价**（实测 20/20 差异 0.0000%），
+    彩色图上保留原色相。两个目标同时满足，所以选它。
+
+    返回同尺寸同模式的 RGB 图（尺寸必须与原图一致，否则切主题时气泡会跳）。
+    """
+    rgb = im.convert('RGB')
+    H, S, V = rgb.convert('HSV').split()
+    low = S.point(lambda s: 255 if s < SAT_LOW else 0)
+    return Image.merge('HSV', (H, S, Image.composite(ImageOps.invert(V), V, low))).convert('RGB')
+
+
+def f4_source(fname):
+    """返回 F4 源文件路径；不存在返回 None（缺失只警告，不报错）。"""
+    p = os.path.join(ASSETS_NEW, fname)
+    return p if os.path.isfile(p) else None
+
+
 def resolve_bubble_pool(by_semantic):
-    """解析气泡池 = F2（用户抠的 16 张贴纸）+ F3（4 张简笔 GIF + 用户抠的 25_看书）。
+    """解析气泡池 = F2（用户抠的 16 张贴纸）+ F3（4 张简笔 GIF + 用户抠的 25_看书）
+    + F4（20 张**不透明满幅**黑白线稿贴纸，带深色变体）。
 
     返回 `(pool, miss)`：`pool` 是 `[(item, hasText), …]`，`hasText` 直接来自上面
-    两张**显式表**，不靠对图像做 OCR / 猜测。顺序固定为 F2 → F3 → F3 抠图，
+    三张**显式表**，不靠对图像做 OCR / 猜测。顺序固定为 F2 → F3 → F3 抠图 → F4，
     保证 `pet.json` 的 `bubble` 数组稳定（幂等可校验）。
+
+    F4 的 item 额外带 `opaque=True` 与 `dark=True`（见 `write_bubble()`）——
+    它们是契约 §4 的可选字段 `opaque` / `fileDark` 的来源。
 
     **默认值规则**：不在表里的一律按 `false`（安全侧 —— 允许 Host 叠加 `bubble.text`）。
     以后新增素材必须显式登记 `hasText`，否则会以 `false` 进池。
@@ -325,6 +422,16 @@ def resolve_bubble_pool(by_semantic):
         else:
             miss.append({'name': fname, 'reason': 'needsCutout',
                          'detail': 'F3 用户手动抠图（简笔、无文字）'})
+    for nn, semantic, fname, text in BUBBLE_F4:
+        p = f4_source(fname)
+        if p is None:
+            miss.append({'name': fname, 'reason': 'missing',
+                         'detail': 'F4 黑白线稿贴纸源文件不存在（%s）' % ASSETS_NEW})
+            continue
+        # `opaque=True`：0% alpha、白底铺满整图 → 渲染方不套气泡底/内边距；
+        # `dark=True`：额外产出一份 `-dark` 深色变体（契约 §4 `fileDark`）。
+        pool.append(({'kind': 'png', 'semantic': '%s-%s' % (nn, semantic), 'name': fname,
+                      'path': p, 'opaque': True, 'dark': True, 'label': text}, True))
     return pool, miss
 
 
@@ -339,6 +446,9 @@ def has_text_of(semantic):
     for s, _, ht in CUTOUT_EXTRA:
         if s == semantic:
             return ht
+    for _nn, s, _f, _t in BUBBLE_F4:
+        if s == semantic or '%s-%s' % (_nn, s) == semantic:
+            return True
     return False
 
 
@@ -493,32 +603,73 @@ def write_thumb(state, entry, report):
     report['made'].append((rel, thumb.size, os.path.getsize(path)))
 
 
-def write_bubble(item, has_text, report):
-    """产出气泡表情池 `art/pet/bubble/<语义名>.png`，并返回契约 §4 的条目。
+def fit_bubble(im):
+    """气泡按 **1:1 等比缩到最长边 ≤ `BUBBLE_MAX`**（不裁切、不拉伸）。
 
-    气泡按 **1:1 等比缩到不超过 256px**（不裁切、不拉伸）：
     气泡里常带文字或装饰，裁 bbox 或改比例都会破坏构图。
+    深浅两版**必须共用这一个函数**，否则尺寸会不一致，切主题时气泡会跳。
+    """
+    if max(im.size) > BUBBLE_MAX:
+        s = BUBBLE_MAX / float(max(im.size))
+        im = im.resize((max(1, round(im.width * s)), max(1, round(im.height * s))),
+                       Image.LANCZOS)
+    return im
 
-    `hasText` 原样带进清单：`true` = 该图**自己已经把文字画进去了**（F2 贴纸），
+
+def write_bubble(item, has_text, report):
+    """产出气泡表情池图，并返回契约 §4 的条目。
+
+    输出路径：
+      · 一般素材 → `art/pet/bubble/<语义名>.png`（透明抠图，`opaque` 缺省 false）；
+      · F4 线稿贴纸 → `art/pet/bubble/new/<NN>-<语义名>.png` **外加**一份
+        `...-dark.png` 深色变体（契约 §4 的 `fileDark`）。
+
+    `hasText` 原样带进清单：`true` = 该图**自己已经把文字画进去了**（F2 贴纸 / F4 线稿），
     Host 必须用 `kind: 'image'` 且**不再叠** `bubble.text`，否则屏幕上会出现两段
-    打架的文字（契约 §4）。判定来自 `BUBBLE_F2`/`BUBBLE_F3`/`CUTOUT_EXTRA` 显式表。
+    打架的文字（契约 §4）。判定来自 `BUBBLE_F2`/`BUBBLE_F3`/`CUTOUT_EXTRA`/`BUBBLE_F4`
+    显式表。
+
+    `opaque`：F4 是 0% alpha、白底铺满整图 → `true`，渲染方**不套气泡底/内边距**
+    （否则白纸贴在浅色框里会出现双层边框）。**不抠、不键控、不 flatten**：
+    白色既是背景也是脸/衣服的填充色，键控会把角色内部掏空。
+
+    深色变体与原图**尺寸严格一致**（同一个 `fit_bubble()` 的结果直接喂 `make_dark()`）。
     """
     src = item.get('cutout') or item['path']
     if item['kind'] == 'gif':
         im = gif_frames(src)[0][0]              # 气泡用首帧（静态）
     else:
         im = read_rgba(src)
-    if max(im.size) > BUBBLE_MAX:
-        s = BUBBLE_MAX / float(max(im.size))
-        im = im.resize((max(1, round(im.width * s)), max(1, round(im.height * s))),
-                       Image.LANCZOS)
 
+    if item.get('dark'):
+        # F4：满幅不透明贴纸，带深色变体。原图**原样保留 alpha**（其实是 0% 透明，
+        # 即整幅不透明），只做等比缩放 —— 绝不抠白底、绝不 flatten。
+        base = fit_bubble(im).convert('RGB')
+        rel = os.path.join('bubble', F4_SUBDIR, '%s.png' % item['semantic'])
+        path = os.path.join(ART, rel)
+        base.save(path, 'PNG', optimize=True)
+        report['made'].append((rel, base.size, os.path.getsize(path)))
+
+        # 深色变体：与浅色版**同尺寸**（make_dark 不改变几何），只翻低饱和像素的明度。
+        dark = make_dark(base)
+        rel_dark = os.path.join('bubble', F4_SUBDIR, '%s-dark.png' % item['semantic'])
+        path_dark = os.path.join(ART, rel_dark)
+        dark.save(path_dark, 'PNG', optimize=True)
+        report['made'].append((rel_dark, dark.size, os.path.getsize(path_dark)))
+        report.setdefault('dark', []).append(
+            (item['semantic'], item.get('label', ''), base.size))
+
+        return {'file': rel.replace(os.sep, '/'), 'w': base.width, 'h': base.height,
+                'hasText': bool(has_text), 'opaque': True,
+                'fileDark': rel_dark.replace(os.sep, '/')}
+
+    im = fit_bubble(im)
     rel = os.path.join('bubble', '%s.png' % item['semantic'].replace(':', '-'))
     path = os.path.join(ART, rel)
     im.save(path, 'PNG', optimize=True)
     report['made'].append((rel, im.size, os.path.getsize(path)))
     return {'file': rel.replace(os.sep, '/'), 'w': im.width, 'h': im.height,
-            'hasText': bool(has_text)}
+            'hasText': bool(has_text), 'opaque': False}
 
 
 def stage_sources(usable, report, refresh_raw=False):
@@ -557,11 +708,15 @@ def prune_unreferenced(referenced, report):
     `variants.happy` 从 7 项缩回 5 项），旧的高序号文件会留在磁盘上变成孤儿。
     宿主是按 `pet.json` 派生 URL 白名单的，孤儿文件既占体积又容易让人误以为还在用。
 
-    清理范围严格限定在脚本自管的三个目录（顶层 `*.png`、`bubble/`、`thumbs/`），
+    清理范围严格限定在脚本自管的三个目录（顶层 `*.png`、`bubble/**`、`thumbs/`），
     **绝不碰 `src/`（含用户手动抠图）与 `pet.json`**。
+
+    `bubble/` 用 `**` 递归（F4 的产物在 `bubble/new/` 子目录里），否则子目录里的
+    孤儿文件永远清不掉。
     """
     removed = []
-    for pat in ('*.png', os.path.join('bubble', '*.png'), os.path.join('thumbs', '*.png')):
+    for pat in ('*.png', os.path.join('bubble', '**', '*.png'),
+                os.path.join('thumbs', '*.png')):
         for p in sorted(glob.glob(os.path.join(ART, pat))):
             rel = os.path.relpath(p, ART)
             if rel not in referenced:
@@ -608,7 +763,8 @@ def print_check(mapping, gif_rows, dropped, bubbles, usable, states_light,
 
     报告**明确分成两块角色**，让人一眼看出哪张图被用在哪：
       · **主体（states）** —— 只列 F1 素材，并逐项标出 `gif:NN` / `wxN` 来源；
-      · **表情包（bubble）** —— 逐项打印 `hasText`（F2 贴纸 true / F3 场景 false）。
+      · **表情包（bubble）** —— 逐项打印 `hasText`，并把 F4 新增的 20 张
+        **单独标出** `opaque` / `fileDark` 是否齐全，再打印每张深色变体的生成方式。
     """
     print('素材覆盖率报告（--check，只读，未写任何文件）')
     print('=' * 70)
@@ -672,20 +828,65 @@ def print_check(mapping, gif_rows, dropped, bubbles, usable, states_light,
     # ── 块 2：表情包（bubble）────────────────────────────────────────────
     print('━' * 70)
     print('【表情包（bubble）】= F2 鲨鱼睡衣贴纸（文字 baked-in）+ F3 简笔场景')
+    print('                     + F4 黑白线稿贴纸（**不透明满幅** + 深色变体）')
     print('  hasText=true → Host 必须 kind=image，**不再叠 bubble.text**（否则两段文字打架）')
     print('  hasText=false → 可配 Host 文字（kind=both）')
+    print('  opaque=true  → 渲染方**不套气泡底/内边距**（图片自带白底，满幅绘制）')
+    print('  fileDark     → 深色模式变体（消费者按系统主题自选）')
     print('━' * 70)
     n_text = sum(1 for _, ht in bubbles if ht)
+    n_opaque = sum(1 for it, _ in bubbles if it.get('opaque'))
+    n_dark = sum(1 for it, _ in bubbles if it.get('dark'))
     print('  气泡池共 %d 张：hasText=true %d 张，hasText=false %d 张'
           % (len(bubbles), n_text, len(bubbles) - n_text))
-    print('  %-4s %-24s %-16s %-14s %6s' % ('', '语义名', '来源文件', '家族', 'hasText'))
+    print('  其中 F4 不透明满幅贴纸 %d 张（全部带 fileDark 深色变体）' % n_opaque)
+    print('  %-4s %-24s %-16s %-12s %7s %7s %9s' % (
+        '', '语义名', '来源文件', '家族', 'hasText', 'opaque', 'fileDark'))
     for it, ht in bubbles:
         fam = 'F2 贴纸' if ht else ('F3 场景' if not it['semantic'].startswith('gif:')
                                     else 'F3 GIF')
-        print('  [OK] %-24s %-16s %-14s %6s'
-              % (it['semantic'], it['name'], fam, 'true' if ht else 'false'))
+        if it.get('opaque'):
+            fam = 'F4 线稿'
+        print('  [OK] %-24s %-16s %-12s %7s %7s %9s'
+              % (it['semantic'], it['name'], fam, 'true' if ht else 'false',
+                 'true' if it.get('opaque') else 'false',
+                 'true' if it.get('dark') else '—'))
     print('  未在显式表里的新文件 → 默认 hasText=false（安全侧：允许配文字）')
     print()
+
+    # F4 单独一块：逐张标出 opaque / fileDark 是否齐全 + 深色变体怎么生成的
+    f4_rows = [(it, ht) for it, ht in bubbles if it.get('opaque')]
+    if f4_rows:
+        print('━' * 70)
+        print('【F4 新增：黑白线稿贴纸 %d 张】语义名逐张看图取自图上中文；'
+              '**不抠白底**' % len(f4_rows))
+        print('  不抠的理由：白色既是背景**也是脸/衣服的填充色**，键控白底实测透明占比')
+        print('  72.7%~78.6%，脸上会破出透明洞 → 原图直接当「不透明满幅贴纸」，不键控、不 flatten。')
+        print('━' * 70)
+        print('  %-4s %-24s %-14s %8s %10s %-10s' % (
+            '', '语义名', '图上文字', 'opaque', 'fileDark', '尺寸(浅/深)'))
+        for it, _ht in f4_rows:
+            light_rel = os.path.join('bubble', F4_SUBDIR, '%s.png' % it['semantic'])
+            dark_rel = os.path.join('bubble', F4_SUBDIR, '%s-dark.png' % it['semantic'])
+            lp, dp = os.path.join(ART, light_rel), os.path.join(ART, dark_rel)
+            if os.path.isfile(lp) and os.path.isfile(dp):
+                ls, ds = Image.open(lp).size, Image.open(dp).size
+                size_txt = '%dx%d/%dx%d %s' % (ls[0], ls[1], ds[0], ds[1],
+                                               '一致' if ls == ds else '★不一致')
+                dark_txt = '齐全'
+            else:
+                size_txt, dark_txt = '—', '★缺'
+            print('  [OK] %-24s %-14s %8s %10s %-10s'
+                  % (it['semantic'], it.get('label', ''), 'true', dark_txt, size_txt))
+        print()
+        print('  深色变体生成方式（%d 张，逐张同一算法）：' % len(f4_rows))
+        print('    · 算法：饱和感知明度翻转 —— 只翻 S<%d 的低饱和像素的 V，' % SAT_LOW)
+        print('            保留 S>=%d 的高饱和像素的色相（粉爱心/黄星星/彩虹不变色）' % SAT_LOW)
+        print('    · 判据：整通道 invert 会把彩色点缀补色化（实测 5/20 张差异 23%~35%）；')
+        print('            饱和感知版在**纯灰阶图上与整翻逐像素完全等价**（实测差异 0.0000%）')
+        print('    · 尺寸：与浅色版**同尺寸**（同一 fit_bubble() 结果直接喂 make_dark）')
+        print('    · 输出：bubble/%s/<NN>-<语义名>-dark.png（契约 §4 fileDark）' % F4_SUBDIR)
+        print()
 
     print('待抠 / 缺失（%d 项，仅警告）：' % len(missing))
     for m in missing:
@@ -766,8 +967,10 @@ def main():
     ensure_dirs()
     if args.clean:
         # art/pet 整棵树都是本脚本的产出范围，清掉旧图后重生成
-        for pat in ('*.png', os.path.join('bubble', '*.png'), os.path.join('thumbs', '*.png')):
-            for p in glob.glob(os.path.join(ART, pat)):
+        # （`bubble/**` 递归，覆盖 F4 的 `bubble/new/` 子目录）
+        for pat in ('*.png', os.path.join('bubble', '**', '*.png'),
+                    os.path.join('thumbs', '*.png')):
+            for p in glob.glob(os.path.join(ART, pat), recursive=True):
                 os.remove(p)
 
     report = {'made': []}
@@ -798,6 +1001,10 @@ def main():
         referenced.update(vs)
     for b in bubbles:
         referenced.add(b['file'].replace('/', os.sep))
+        # ⚠️ 深色变体也必须登记！否则 `prune_unreferenced()` 会把它当孤儿删掉
+        # —— 它不在 `b['file']` 里，只在 `b['fileDark']` 里（实测踩过一次）。
+        if b.get('fileDark'):
+            referenced.add(b['fileDark'].replace('/', os.sep))
     for s in states:
         referenced.add(os.path.join('thumbs', '%s.png' % s))
     prune_unreferenced(referenced, report)
@@ -825,8 +1032,19 @@ def main():
         n = len(variants.get(s, []))
         print('  %s %-10s variants=%d' % ('[OK]' if s in states else '[缺]', s, n))
     n_text = sum(1 for b in bubbles if b['hasText'])
-    print('气泡池（表情包，F2+F3）：%d 张；其中 hasText=true %d 张、false %d 张'
+    n_opaque = sum(1 for b in bubbles if b.get('opaque'))
+    n_dark = sum(1 for b in bubbles if b.get('fileDark'))
+    print('气泡池（表情包，F2+F3+F4）：%d 张；其中 hasText=true %d 张、false %d 张'
           % (len(bubbles), n_text, len(bubbles) - n_text))
+    print('  F4 不透明满幅贴纸：opaque=true %d 张，fileDark 深色变体 %d 张'
+          % (n_opaque, n_dark))
+    if report.get('dark'):
+        # 逐张核对：深浅两版尺寸必须一致，否则切主题时气泡会跳
+        bad = [(s, sz) for s, _t, sz in report['dark']
+               if Image.open(os.path.join(ART, 'bubble', F4_SUBDIR, '%s-dark.png' % s)).size != sz]
+        print('  深浅尺寸一致性：%d/%d 张一致%s'
+              % (len(report['dark']) - len(bad), len(report['dark']),
+                 '' if not bad else '  ★不一致：%s' % bad))
     print('待抠/缺失：%d 项；弃用：%d 项' % (len(manifest['missing']), len(dropped)))
     if report.get('pruned'):
         print('清理旧产物 %d 个（清单已不再引用）：%s'
