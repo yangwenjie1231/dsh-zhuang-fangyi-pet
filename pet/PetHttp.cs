@@ -605,6 +605,18 @@ namespace DshZhuangFangyiPet
         /// theme 只可能是 auto/light/dark 三个常量，直接拼进 JSON 是安全的；
         /// 仍然过一遍白名单，避免将来误传别的值。
         /// </summary>
+        /// <summary>
+        /// 托盘改「显示状态」后回报宿主持久化（POST /pet/settings，只带这两个字段）。
+        ///
+        /// 合并语义：宿主侧 `/pet/settings` 是合并补丁，只带部分字段不会抹掉其它设置。
+        /// </summary>
+        public void PostSettingsStatus(bool hint, bool statusAlways)
+        {
+            PostJson("/api/zhuang-fangyi/pet/settings",
+                     "{\"hint\":" + (hint ? "true" : "false") +
+                     ",\"statusAlways\":" + (statusAlways ? "true" : "false") + "}");
+        }
+
         public void PostSettingsTheme(string theme)
         {
             string t = theme == "light" || theme == "dark" ? theme : "auto";

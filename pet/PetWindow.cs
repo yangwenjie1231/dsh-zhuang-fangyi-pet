@@ -177,11 +177,14 @@ namespace DshZhuangFangyiPet
             {
                 CancelSendBtnHide();
                 UpdateSendBtnVisibility(true);
+                try { HoverChanged(true); } catch { }   // hint：悬停显示状态文字
             };
             MouseLeave += delegate(object s, MouseEventArgs e)
             {
                 // 不立刻隐藏：给用户把手移到按钮上的时间（450ms 宽限）。
                 HideSendBtnSoon();
+                // 悬停标记立即撤销（状态文字不参与交互，不需要宽限期）
+                try { HoverChanged(false); } catch { }
             };
 
             Loaded += OnLoaded;
@@ -235,6 +238,16 @@ namespace DshZhuangFangyiPet
 
         public string CurrentState { get { return _state; } }
         public bool HasSprite { get { return _sheet != null; } }
+
+        /// <summary>
+        /// 最近一次的状态文字（快照的 `label`，已按 locale 本地化）。
+        ///
+        /// 状态文字窗是**独立窗口**，它拿不到快照 —— 由 Program 把 label 存进来，
+        /// 窗口只负责画。这样"文字从哪来"只有一处真相（状态机）。
+        /// </summary>
+        private string _visibleLabel = "";
+        public string VisibleLabel() { return _visibleLabel; }
+        public void SetVisibleLabel(string label) { _visibleLabel = label ?? ""; }
         public double Scale { get { return _opt.Scale; } }
         public bool ClickThrough { get { return _clickThrough; } }
         public IntPtr Handle { get { return _hwnd; } }
@@ -545,6 +558,14 @@ namespace DshZhuangFangyiPet
         /// （它要 POST 给 Host，不能每帧发），所以拖动中的跟随必须走这条轻量回调。
         /// </summary>
         public Action DragMoved = delegate { };
+
+        /// <summary>
+        /// 本体被鼠标悬停/移出（true=进入 / false=离开）。
+        ///
+        /// 用途：`hint`（悬停时显示状态）—— 状态文字窗是独立窗口，本体不知道它存在，
+        /// 必须把悬停事实播出去。与 ✎ 按钮共用同一个 MouseEnter/MouseLeave 时机。
+        /// </summary>
+        public Action<bool> HoverChanged = delegate { };
 
         public void SetBubbleVisibleState(bool visible)
         {

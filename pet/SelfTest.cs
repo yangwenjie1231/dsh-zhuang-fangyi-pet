@@ -558,7 +558,8 @@ namespace DshZhuangFangyiPet
             PetSnapshot emptySt = PetSnapshot.Parse("{\"rev\":2,\"settings\":{}}");
             PetSettingsInfo es = emptySt == null ? null : emptySt.Settings;
             bool emptyOk = es != null && !es.HasScale && !es.HasOpacity && !es.HasClickThrough &&
-                           !es.HasTopmost && !es.HasBubble && !es.HasDoubleClick && !es.HasTheme;
+                           !es.HasTopmost && !es.HasBubble && !es.HasDoubleClick && !es.HasTheme &&
+                !es.HasHint && !es.HasStatusAlways;
             Check(emptyOk, "settings={} → 全部字段缺省（逐字段不动现状）",
                   emptyOk ? "7 个 Has* 全为 false" : "误置 Has*");
 
@@ -736,6 +737,58 @@ namespace DshZhuangFangyiPet
                           PetGallery.ShortName("") == "";
             Check(nameOk, "画廊缩略图标题取文件名主干（去目录与扩展名）",
                   nameOk ? "bubble/new/13-so-good.png → 13-so-good" : "取名不符");
+            // ⭐ 状态显示（契约 §2 v6）：hint/statusAlways 必须能解析出来。
+            // 这两个字段原先只有 overlay 用，exe 拿到 label 却没人渲染 ——
+            // 桌面版因此一直没有状态文字（用户点名过"在底下显示一下状态"）。
+            PetSnapshot stSnap = PetSnapshot.Parse(
+                "{\"rev\":7,\"label\":\"正在思考…\",\"settings\":{\"hint\":true,\"statusAlways\":true}}");
+            bool stParse = stSnap != null && stSnap.Settings != null &&
+                stSnap.Settings.HasHint && stSnap.Settings.Hint &&
+                stSnap.Settings.HasStatusAlways && stSnap.Settings.StatusAlways &&
+                stSnap.Label == "正在思考…";
+            Check(stParse, "状态显示：hint/statusAlways 解析 + label 取到",
+                  stParse ? "hint=1 statusAlways=1 label=正在思考…" : "解析结果不符");
+
+            // ⭐ 显隐矩阵（与 overlay 逐条对齐；这是"两端表现一致"的唯一保证）
+            PetStatusLabel lbl = new PetStatusLabel();
+            lbl.DiagSetLabel("待机中", 1.0, false);
+            bool m1, m2, m3, m4, m5;
+            lbl.DiagSetState(true, false, false, false); m1 = lbl.DiagShouldShow;   // 常显 → 显示
+            lbl.DiagSetState(false, true, false, true);  m2 = lbl.DiagShouldShow;   // 悬停 + hint → 显示
+            lbl.DiagSetState(false, true, false, false); m3 = lbl.DiagShouldShow;   // 没悬停 → 不显示
+            lbl.DiagSetState(false, false, false, true); m4 = lbl.DiagShouldShow;   // 都关 → 不显示
+            lbl.DiagSetState(true, false, true, true);   m5 = lbl.DiagShouldShow;   // 穿透 → 不显示
+            Check(m1 && m2 && !m3 && !m4 && !m5,
+                  "状态显示矩阵：常显/悬停/都关/穿透 四态（与 overlay 一致）",
+                  "常显=" + (m1 ? "显" : "隐") + " 悬停=" + (m2 ? "显" : "隐") +
+                  " 未悬停=" + (m3 ? "显" : "隐") + " 都关=" + (m4 ? "显" : "隐") +
+                  " 穿透=" + (m5 ? "显" : "隐"));
+
+            // ⭐ 纯展示：状态文字窗必须恒穿透、不吃焦点（不能挡住桌面图标）
+            bool pureOk = lbl.IsPureDisplay;
+            Check(pureOk, "状态文字窗是纯展示（不吃焦点）",
+                  pureOk ? "ShowActivated=false, Topmost=true" : "属性不符");
+
+            // ⭐ 字号随缩放（与气泡同一模式）；新建就该有正常值（不是 0）
+            double f1 = lbl.DiagFontSize;
+            lbl.DiagSetLabel("待机中", 0.5, false);
+            double f05 = lbl.DiagFontSize;
+            lbl.DiagSetLabel("待机中", 2.0, false);
+            double f2 = lbl.DiagFontSize;
+            bool fontOk = f1 > 0 && f05 < f1 && f2 > f1;
+            Check(fontOk, "状态文字字号随缩放（0.5× 变小 / 2× 变大）",
+                  f1.ToString("0.#") + " → " + f05.ToString("0.#") + " → " + f2.ToString("0.#"));
+
+            // ⭐ 定位：贴本体下方居中（主次与气泡相反）
+            lbl.DiagSetLabel("待机中", 1.0, false);
+            double tx, ty; int tbw, tbh;
+            lbl.DiagTargetFor(1000, 1000, 200, 200, out tx, out ty, out tbw, out tbh);
+            bool belowOk = ty > 1200;   // 本体底边 1200 → 文字在更下方
+            bool centeredOk = Math.Abs(tx + tbw / 2 - 1100) <= 2;   // 本体中心 x=1100
+            Check(belowOk && centeredOk, "状态文字贴本体下方居中",
+                  "目标=(" + tx.ToString("0") + "," + ty.ToString("0") + ") 宽=" + tbw +
+                  "（本体 1000,1000 200x200，中心 x=1100，底边 1200）");
+            try { lbl.ForceClose(); } catch { }
             PetInput picker = new PetInput(new PetHttp("http://127.0.0.1:1/", "t"));
             List<PetSessionChoice> chs = new List<PetSessionChoice>();
             PetSessionChoice c1 = new PetSessionChoice(); c1.SessionId = "s-a"; c1.Title = "甲"; c1.Running = true;

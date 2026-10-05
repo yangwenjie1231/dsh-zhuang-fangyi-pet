@@ -23,6 +23,7 @@ namespace DshZhuangFangyiPet
         private ToolStripMenuItem _miBubble;
         private readonly List<ToolStripMenuItem> _scaleItems = new List<ToolStripMenuItem>();
         private readonly List<ToolStripMenuItem> _themeItems = new List<ToolStripMenuItem>();
+        private readonly List<ToolStripMenuItem> _statusItems = new List<ToolStripMenuItem>();
 
         public Action ToggleVisible = delegate { };
         public Action<bool> SetClickThrough = delegate { };
@@ -39,6 +40,9 @@ namespace DshZhuangFangyiPet
         /// <summary>深浅色主题（'auto' | 'light' | 'dark'）；贴纸与气泡外壳一起换。</summary>
         public Action<string> SetTheme = delegate { };
         public Func<string> GetTheme = delegate { return "auto"; };
+        /// <summary>状态显示模式：'hint'（悬停）| 'always'（常显）| 'off'。</summary>
+        public Action<string> SetStatusMode = delegate { };
+        public Func<string> GetStatusMode = delegate { return "hint"; };
 
         public bool BubbleToggleEnabled = true;
         public Action<bool> SetBubble = delegate { };
@@ -118,6 +122,28 @@ namespace DshZhuangFangyiPet
             }
             _menu.Items.Add(theme);
 
+            // 状态显示：自动（hint）/ 常显 / 关闭。
+            // 放托盘的理由与主题一致：开着点击穿透时本体收不到鼠标，托盘是唯一入口。
+            ToolStripMenuItem showStatus = new ToolStripMenuItem("显示状态(&S)");
+            string[] statusKeys = new string[] { "hint", "always", "off" };
+            string[] statusNames = new string[] { "悬停时显示", "一直显示（下方常驻）", "不显示" };
+            for (int i = 0; i < statusKeys.Length; i++)
+            {
+                string key = statusKeys[i];
+                ToolStripMenuItem it = new ToolStripMenuItem(statusNames[i]);
+                it.Tag = key;
+                it.Click += delegate(object sender, EventArgs e)
+                {
+                    ToolStripMenuItem mi = sender as ToolStripMenuItem;
+                    if (mi == null) return;
+                    SetStatusMode((string)mi.Tag);
+                    Refresh();
+                };
+                _statusItems.Add(it);
+                showStatus.DropDownItems.Add(it);
+            }
+            _menu.Items.Add(showStatus);
+
             ToolStripMenuItem gallery = new ToolStripMenuItem("表情包…(&G)");
             gallery.Click += delegate { OpenGallery(); };
             _menu.Items.Add(gallery);
@@ -168,6 +194,12 @@ namespace DshZhuangFangyiPet
                 {
                     double s = (double)_scaleItems[i].Tag;
                     _scaleItems[i].Checked = Math.Abs(s - cur) < 0.001;
+                }
+                string sm = GetStatusMode();
+                for (int i = 0; i < _statusItems.Count; i++)
+                {
+                    string k = _statusItems[i].Tag as string;
+                    _statusItems[i].Checked = string.Equals(k, sm, StringComparison.Ordinal);
                 }
                 string th = GetTheme();
                 for (int i = 0; i < _themeItems.Count; i++)

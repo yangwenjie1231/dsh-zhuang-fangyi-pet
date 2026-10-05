@@ -367,6 +367,17 @@ await ok('⭐ 有 sessionController 时：list() 的标题进快照，指定会�
 })
 /* ── 画廊（读操作，无副作用）────────────────────────────────────────────── */
 
+await ok('⭐ 快照 settings 块带 hint/statusAlways（原生窗状态显示的依据，契约 §2 v6）', async () => {
+  // 这两个字段原先只有 overlay 用 —— 桌面版桌宠因此一直没有状态文字
+  //（快照里明明有 label，exe 也解析了，却无人渲染）。
+  const r = await get('/api/zhuang-fangyi/pet/state')
+  const snap = JSON.parse(r.body)
+  assert.ok(snap.settings && typeof snap.settings === 'object', '应有 settings 块')
+  assert.equal(typeof snap.settings.hint, 'boolean', 'hint 必须是布尔（exe 按它决定悬停显示）')
+  assert.equal(typeof snap.settings.statusAlways, 'boolean', 'statusAlways 必须是布尔（常显开关）')
+  // label 是状态文字的**唯一来源**（已本地化），必须一并存在
+  assert.equal(typeof snap.label, 'string', '快照应带 label（状态文字来源）')
+})
 await ok('⭐ GET /pet/gallery 返回全部表情（能主动看全，不再靠随机撒）', async () => {
   const r = await get('/api/zhuang-fangyi/pet/gallery')
   assert.equal(r.status, 200)

@@ -383,7 +383,12 @@ export function apply (ctx, config) {
       topmost: s.topmost,
       bubble: s.bubble,
       doubleClick: s.doubleClick,
-      theme: s.theme
+      theme: s.theme,
+      // 状态显示：原生窗要有和 overlay 一样的「悬停显示 / 常显」能力。
+      // 原先只有 overlay 用这两个字段，exe 拿到了快照里的 label 却没人用 ——
+      // 桌面版桌宠因此完全没有状态文字。
+      hint: s.hint,
+      statusAlways: s.statusAlways
     }
   }
 

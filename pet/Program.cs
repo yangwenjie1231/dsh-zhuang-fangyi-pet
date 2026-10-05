@@ -188,6 +188,10 @@ namespace DshZhuangFangyiPet
         private PetSpriteStore _store;
         private PetWindow _win;
         private PetBubble _bubble;
+        /// <summary>状态文字窗（独立窗口，纯展示恒穿透）。见 `PetStatusLabel` 的类注释。</summary>
+        private PetStatusLabel _status;
+        /// <summary>本体当前是否被悬停（`hint` 用它决定状态文字显隐）。</summary>
+        private bool _hovering;
         private PetTray _tray;
         private Application _app;
 
@@ -213,6 +217,9 @@ namespace DshZhuangFangyiPet
 
         // task-6：由 snapshot.settings 实时覆盖的运行时状态（argv 只提供初始值）
         private string _settingsTheme = "auto";        // 'auto' | 'light' | 'dark'
+        /// <summary>契约 §2 v6：状态文字常显 / 悬停显示（与 overlay 同语义）。</summary>
+        private bool _statusAlways;
+        private bool _hintOn;
         private string _doubleClick = "focus-dsh";     // 'focus-dsh' | 'emote' | 'none'
 
         // task-7：发消息（悬停 ✎ → 输入窗 → POST /pet/send）
@@ -291,10 +298,21 @@ namespace DshZhuangFangyiPet
             _win.ScaleAdjusted = OnScaleAdjusted;       // task-6：滚轮缩放 → 去抖上报 + 托盘刷新
             _win.DoubleClickInvoked = OnPetDoubleClick; // task-6：双击行为由 settings.doubleClick 决定
             _win.SendButtonClicked = OnSendButtonClicked;  // task-7：✎ → 打开输入窗
+            // 悬停事实 → 状态文字（`hint` 用）。与 ✎ 同一时机，不另起一套判定。
+            _win.HoverChanged = delegate(bool over)
+            {
+                _hovering = over;
+                RefreshStatusLabel();
+            };
 
             _bubble = new PetBubble();
             _bubble.PetRectProvider = PetRect;
             _bubble.HideNow();
+
+            // 状态文字窗（用户点名"在底下显示一下状态"）。
+            // 独立窗口 + 纯展示：绝不能塞进本体窗，那会破坏"窗口尺寸=帧尺寸"与
+            // 基于 ActualWidth 的 alpha 命中归一化（见 PetStatusLabel 类注释）。
+            _status = new PetStatusLabel();
             WireAttentionButton();   // task-8：「去处理」→ focus-dsh 链路
 
             _tray = new PetTray();
@@ -323,6 +341,10 @@ namespace DshZhuangFangyiPet
                     if (!visible)
                     {
                         _bubble.HideNow();
+                        // 状态文字也是独立窗口 —— 与气泡同理：本体藏了它必须一起藏，
+                        // 否则会出现「隐藏了桌宠、底下还挂着一行状态」。
+                        _status.Hide();
+                        _hovering = false;
                     }
                     else if (_bubbleOn && _lastBubbleId != _shownBubbleId)
                     {
@@ -334,13 +356,27 @@ namespace DshZhuangFangyiPet
             };
             _tray.SetClickThrough = delegate(bool on) { _win.SetClickThrough(on); };
             _tray.SetTopmost = delegate(bool on) { _win.SetTopmost(on); _tray.SetTopmostCheck(on); };
-            _tray.SetScale = delegate(double s) { _win.SetScale(s); _win.ReclampPosition(false); _bubble.SetScale(s); };
+            _tray.SetScale = delegate(double s) { _win.SetScale(s); _win.ReclampPosition(false); _bubble.SetScale(s); _status.SetScale(s); };
             _tray.SetBubble = delegate(bool on)
             {
                 _bubbleOn = on;
                 if (!on) _bubble.HideNow();
             };
             _tray.ResetPosition = delegate { _win.ReclampPosition(true); };
+            // 状态显示：本地立即生效 + 回报宿主持久化（与主题同一条链路）。
+            _tray.GetStatusMode = delegate
+            {
+                if (_statusAlways) return "always";
+                return _hintOn ? "hint" : "off";
+            };
+            _tray.SetStatusMode = delegate(string mode)
+            {
+                _statusAlways = string.Equals(mode, "always", StringComparison.Ordinal);
+                _hintOn = string.Equals(mode, "hint", StringComparison.Ordinal);
+                PetLog.Info("托盘：状态显示 → " + mode);
+                try { _http.PostSettingsStatus(_hintOn, _statusAlways); } catch (Exception ex) { PetLog.Warn("状态显示回报失败: " + PetLog.Describe(ex)); }
+                RefreshStatusLabel();
+            };
             _tray.FocusDsh = delegate { OnFocusDsh(); };
             _tray.OpenGallery = delegate { OpenGallery(); };
             _tray.Quit = delegate { Quit(); };
@@ -486,6 +522,10 @@ namespace DshZhuangFangyiPet
             // 首帧**无条件**同步一次，之后才交给 diff。
             try { _bubble.ApplyTheme(PetTheme.ResolveIsDark(_opt.DarkOverride, _settingsTheme)); } catch { }
             try { _bubble.SetScale(_win.Scale); } catch (Exception ex) { PetLog.Warn("首帧气泡缩放失败: " + PetLog.Describe(ex)); }
+            // 状态文字同理由首帧对齐（它同样吃 SetScale）；顺带刷一次显隐 ——
+            // hint/statusAlways 也是"首帧就该生效"的设置。
+            try { _status.SetScale(_win.Scale); } catch { }
+            try { RefreshStatusLabel(); } catch { }
 
             // 输入窗开着时，会话列表跟着快照走（新开/结束的对话要即时反映）
             if (_input != null) ApplySendChoices();
@@ -495,6 +535,11 @@ namespace DshZhuangFangyiPet
 
             // task-8：attention diff（值没变零日志；null → 立刻收恒亮气泡）
             ApplyAttention(snap);
+
+            // 状态文字：快照的 label 是**已本地化**的状态词（待机中/正在思考…）。
+            // 先存进本体窗，再刷新标签（标签通过 VisibleLabel() 读它，单一真相）。
+            _win.SetVisibleLabel(snap.Label);
+            RefreshStatusLabel();
 
             string st = snap.EffectiveState();
             if (!_previewMode)
@@ -575,6 +620,17 @@ namespace DshZhuangFangyiPet
                 PetLog.Info("settings: doubleClick → " + _doubleClick);
                 changed = true;
             }
+            // 契约 §2 v6：状态显示（逐字段 diff，值没变不动）
+            bool statusChanged = false;
+            if (st.HasHint && st.Hint != _hintOn) { _hintOn = st.Hint; statusChanged = true; }
+            if (st.HasStatusAlways && st.StatusAlways != _statusAlways) { _statusAlways = st.StatusAlways; statusChanged = true; }
+            if (statusChanged)
+            {
+                PetLog.Info("settings: 状态显示 → hint=" + (_hintOn ? "1" : "0") +
+                            " statusAlways=" + (_statusAlways ? "1" : "0"));
+                RefreshStatusLabel();
+            }
+
             if (st.HasTheme && st.Theme != _settingsTheme)
             {
                 _settingsTheme = st.Theme;
@@ -583,6 +639,7 @@ namespace DshZhuangFangyiPet
                 // 气泡外壳也跟着换色（原先只换贴纸图，白框在深色桌面上很刺眼）。
                 // 正在显示的气泡立即换色，不必等下一次弹出。
                 try { _bubble.ApplyTheme(darkNow); } catch (Exception ex) { PetLog.Warn("气泡换色失败: " + PetLog.Describe(ex)); }
+                try { _status.ApplyTheme(darkNow); } catch { }
                 changed = true;
             }
 
@@ -734,6 +791,7 @@ namespace DshZhuangFangyiPet
             _tray.Refresh();   // 缩放档位勾选立即对齐
             // 气泡同比缩放：滚轮时立刻重排（否则气泡僵在原尺寸，看着很突兀）
             try { _bubble.SetScale(newScale); } catch (Exception ex) { PetLog.Warn("气泡缩放失败: " + PetLog.Describe(ex)); }
+            try { _status.SetScale(newScale); } catch { }
         }
 
         private void OnScalePostTick(object sender, EventArgs e)
@@ -829,6 +887,32 @@ namespace DshZhuangFangyiPet
             try { _bubble.PlaceNearPet(); } catch { }
         }
 
+        /// <summary>
+        /// 刷新状态文字窗（显隐 + 内容 + 位置）。
+        ///
+        /// **单点入口**：快照/设置/悬停/移动都走这里，避免"某个路径忘了更新"——
+        /// 气泡那几轮反复踩过（隐藏不同步、缩放不同步、跟随不同步）。
+        ///
+        /// 显隐规则在 `PetStatusLabel.ShouldShow`（与 overlay 逐条对齐）：
+        /// `statusAlways` 常显 / `hint` 悬停显示 / 两个都关不显示 / `clickThrough` 不显示。
+        /// </summary>
+        private void RefreshStatusLabel()
+        {
+            if (_status == null) return;
+            try
+            {
+                int x, y, w, h;
+                _win.GetScreenRect(out x, out y, out w, out h);
+                _status.Update(
+                    _win.VisibleLabel(),
+                    _statusAlways,
+                    _hintOn,
+                    _win.ClickThrough,
+                    _hovering,
+                    new int[] { x, y, w, h });
+            }
+            catch (Exception ex) { PetLog.Warn("状态文字刷新失败: " + PetLog.Describe(ex)); }
+        }
         /// <summary>
         /// 桌宠移动时让输入窗跟着走。
         ///

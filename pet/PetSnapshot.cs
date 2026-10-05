@@ -56,6 +56,10 @@ namespace DshZhuangFangyiPet
         public bool HasBubble;       public bool Bubble;
         public bool HasDoubleClick;  public string DoubleClick;  // 'focus-dsh'(默认) | 'emote' | 'none'
         public bool HasTheme;        public string Theme;        // 'auto'(默认) | 'light' | 'dark'
+        /// <summary>契约 §2 v6：悬停本体时显示状态文字。旧快照缺省 = false（不改变现状）。</summary>
+        public bool HasHint;         public bool Hint;
+        /// <summary>契约 §2 v6：状态文字常驻本体下方。旧快照缺省 = false。</summary>
+        public bool HasStatusAlways; public bool StatusAlways;
 
         /// <summary>非法/缺省值一律回落 focus-dsh（task-6 验收点）。</summary>
         public static string NormalizeDoubleClick(string v)
@@ -226,6 +230,17 @@ namespace DshZhuangFangyiPet
                 {
                     si.HasTheme = true;
                     si.Theme = PetSettingsInfo.NormalizeTheme(st.Str("theme", null));
+                }
+                // 契约 §2 v6：状态显示（布尔字段，缺省不动现状）
+                if (st.Get("hint") != null && st.Get("hint").Kind == PetJson.JVal.TBool)
+                {
+                    si.HasHint = true;
+                    si.Hint = st.Bool("hint", false);
+                }
+                if (st.Get("statusAlways") != null && st.Get("statusAlways").Kind == PetJson.JVal.TBool)
+                {
+                    si.HasStatusAlways = true;
+                    si.StatusAlways = st.Bool("statusAlways", false);
                 }
                 s.Settings = si;
             }
