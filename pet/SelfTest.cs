@@ -842,6 +842,107 @@ namespace DshZhuangFangyiPet
             Check(cleared, "切回透明气泡时撤销贴纸圆角裁剪（窗复用不留残留）",
                   cleared ? "裁剪已清除" : "残留裁剪 → 普通气泡四角会被切掉");
             try { opaqueProbe.ForceClose(); } catch { }
+            // ⭐ 双击桌宠要把 DSH 叫回来 —— 找窗判定必须**接受最小化窗口**。
+            //
+            // 被真实反馈逼出来的：原先 `FindDshWindow` 里有 `if (IsIconic(h)) return true;`
+            // 跳过最小化窗口，而用户双击的**目的就是把它叫回来**。
+            // 日志实证："FocusDsh: 未找到 DSH 主窗" → 双击完全没反应。
+            //
+            // ⚠️ 断言必须打**真实判定函数** `IsDshCandidate`（运行路径与它共用），
+            // 不能自己另造窗口去检查 IsIconic 语义 —— 第一版就是那样，结果把过滤
+            // 改回去断言照样绿（假绿）。这里造一个标题合规、**已最小化**的真实窗口，
+            // 直接问 `IsDshCandidate` 收不收它。
+            bool minAccepted;
+            string minTitle;
+            {
+                System.Windows.Window probe = new System.Windows.Window();
+                probe.Title = "DeepSeek Harness";
+                probe.Width = 60; probe.Height = 60;
+                probe.ShowInTaskbar = false;
+                probe.Show();
+                probe.WindowState = System.Windows.WindowState.Minimized;
+                Pump(120);
+                IntPtr ph = new System.Windows.Interop.WindowInteropHelper(probe).Handle;
+                bool mini;
+                // 用**别的 pid** 冒充外来进程（本进程窗口会被 selfPid 过滤掉）
+                minAccepted = PetNative.IsDshCandidate(ph, 999999u, out minTitle, out mini);
+                bool actuallyMinimized = mini;
+                probe.Close();
+                minAccepted = minAccepted && actuallyMinimized;
+            }
+            Check(minAccepted, "找窗判定接受最小化窗口（双击才能把 DSH 叫回来）",
+                  minAccepted ? "标题合规且已最小化 → 仍被接受为候选"
+                              : "最小化窗口被拒 → 最小化时双击无效");
+
+            // 反面：不可见的窗口不该被接受（Electron 辅助窗就是这类）
+            bool invisibleRejected;
+            {
+                System.Windows.Window probe = new System.Windows.Window();
+                probe.Title = "DeepSeek Harness";
+                probe.Width = 60; probe.Height = 60;
+                probe.ShowInTaskbar = false;
+                probe.Show();
+                IntPtr ph = new System.Windows.Interop.WindowInteropHelper(probe).Handle;
+                probe.Hide();
+                Pump(120);
+                bool mini;
+                string tt;
+                invisibleRejected = !PetNative.IsDshCandidate(ph, 999999u, out tt, out mini);
+                probe.Close();
+            }
+            Check(invisibleRejected, "找窗判定拒绝不可见窗口（不误选 Electron 辅助窗）",
+                  invisibleRejected ? "不可见 → 被拒" : "不可见窗口也被接受了");
+
+            // ⭐ 前置窗口必须带 **Z 序兜底**，且断言要打到真实函数 `ActivateWindow`。
+            //
+            // 跨进程时 `SetForegroundWindow` 会被前台锁定拒绝（实测返回 False），
+            // 日志里的"前置失败"就是这么来的；只靠它会导致"双击没反应"。
+            // 第一版断言直接调 SetWindowPos（测的是副本），把兜底删掉照样绿 —— 已改正。
+            bool activated;
+            {
+                System.Windows.Window probe = new System.Windows.Window();
+                probe.Width = 60; probe.Height = 60;
+                probe.WindowStyle = System.Windows.WindowStyle.None;
+                probe.ShowInTaskbar = false;
+                probe.Show();
+                Pump(120);
+                IntPtr ph = new System.Windows.Interop.WindowInteropHelper(probe).Handle;
+                // 真正调**运行路径**：ActivateWindow
+                activated = PetNative.ActivateWindow(ph);
+                probe.Close();
+            }
+            Check(activated, "前置窗口走真实路径且成功（含 Z 序兜底）",
+                  activated ? "ActivateWindow 返回 true（前台化或 Z 序提升成功）"
+                            : "ActivateWindow 返回 false → 双击会没反应");
+
+            // 常量核对（Z 序兜底依赖这些值）
+            bool constOk = PetNative.HWND_TOP == IntPtr.Zero &&
+                           PetNative.SWP_NOMOVE == 2 && PetNative.SWP_NOSIZE == 1 &&
+                           PetNative.SWP_SHOWWINDOW == 0x40;
+            Check(constOk, "SetWindowPos 常量值正确（0/2/1/0x40）",
+                  constOk ? "HWND_TOP=0 SWP_NOMOVE=2 SWP_NOSIZE=1 SWP_SHOWWINDOW=0x40"
+                          : "常量值不符（会导致 Z 序操作异常）");
+            // ⭐ 输入窗与气泡**不能占同一侧**（用户反馈"输入框会和气泡重叠"）。
+            //
+            // 两者是独立窗口、互不知情：气泡优先贴**头顶**，输入窗原本也贴上方
+            // → 同时出现时直接叠在一起。现在分工：**气泡占上方、输入窗占下方**。
+            // 断言用**计算出的目标方位**比较（不读未 Show 的 Left/Top —— 那会是 NaN）。
+            PetInput posProbe = new PetInput(new PetHttp("http://127.0.0.1:1/", "t"));
+            double inX, inY;
+            posProbe.DiagTargetFor(1000, 1000, 200, 200, out inX, out inY);
+            // 本体底边 = 1200。输入窗应在**下方**（y > 1200），气泡在**上方**（y < 1000）
+            bool inputBelow = inY > 1200;
+            Check(inputBelow, "输入窗放在桌宠下方（与气泡分占两侧，不重叠）",
+                  "输入窗目标 y=" + inY.ToString("0") + "（桌宠底边 1200，应在其下）");
+            // 气泡的目标方位（同一本体矩形）应与输入窗**不同侧**
+            PetBubble sideProbe = new PetBubble();
+            int bx, by;
+            sideProbe.DiagTargetFor(1000, 1000, 200, 200, out bx, out by);
+            bool oppositeSide = by < 1000 && inY > 1200;
+            Check(oppositeSide, "气泡在上 / 输入窗在下（方位相反，互不遮挡）",
+                  "气泡 y=" + by.ToString("0") + "（上方）；输入窗 y=" + inY.ToString("0") + "（下方）");
+            try { posProbe.Close(); } catch { }
+            try { sideProbe.ForceClose(); } catch { }
             PetInput picker = new PetInput(new PetHttp("http://127.0.0.1:1/", "t"));
             List<PetSessionChoice> chs = new List<PetSessionChoice>();
             PetSessionChoice c1 = new PetSessionChoice(); c1.SessionId = "s-a"; c1.Title = "甲"; c1.Running = true;

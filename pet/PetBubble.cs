@@ -143,6 +143,34 @@ namespace DshZhuangFangyiPet
             SetScale(scale);
             return _image == null ? 0 : _image.MaxHeight;
         }
+        /// <summary>
+        /// 自检诊断用：算出气泡目标位置（物理像素）。与 `PlaceNearPet` 同一套规则
+        /// （**上方优先**），但不写窗口属性（没 Show 过的窗口 Left/Top 是 NaN）。
+        /// 用途：验证"气泡在上 / 输入窗在下"两侧分工，不重叠。
+        /// </summary>
+        internal void DiagTargetFor(int px, int py, int pw, int ph, out int x, out int y)
+        {
+            double dpi = _hwnd == IntPtr.Zero ? 1.0 : PetNative.GetDpiForWindowSafe(_hwnd) / 96.0;
+            if (dpi <= 0) dpi = 1.0;
+            double wDip = _border != null && _border.DesiredSize.Width > 0 ? _border.DesiredSize.Width : 120;
+            double hDip = _border != null && _border.DesiredSize.Height > 0 ? _border.DesiredSize.Height : 48;
+            int bw = (int)Math.Round(wDip * dpi);
+            int bh = (int)Math.Round(hDip * dpi);
+            if (bw <= 0) bw = 200;
+            if (bh <= 0) bh = 48;
+            x = px + pw - bw;                    // 右对齐本体
+            y = py - bh - 10;                    // 上方优先
+            PetNative.WorkArea scr = PetNative.NearestScreen(px + pw / 2, py + ph / 2);
+            if (y < scr.Y + 4)
+            {
+                y = py + ph + 10;                // 上方放不下 → 下方
+                if (y + bh > scr.Bottom - 4) y = scr.Y + 4;
+            }
+            int maxX = scr.Right - bw - 4;
+            if (maxX < scr.X + 4) maxX = scr.X + 4;
+            if (x > maxX) x = maxX;
+            if (x < scr.X + 4) x = scr.X + 4;
+        }
         /// <summary>自检诊断用：气泡内边距左值（判断"外观是否初始化过"）。</summary>
         internal double DiagPaddingLeft { get { return _border == null ? 0 : _border.Padding.Left; } }
         /// <summary>自检诊断用：图片上限高度（缩放断言用）。</summary>

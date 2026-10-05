@@ -35,6 +35,30 @@ namespace DshZhuangFangyiPet
         private bool _sending;
         private bool _reallyClosing;
 
+        /// <summary>
+        /// 自检诊断用：算出输入窗的目标位置（物理像素）。
+        /// 与 `OpenNear` 同一套规则（**下方优先**），但不写窗口属性 ——
+        /// 没 Show 过的窗口 Left/Top 是 NaN，断言无从比较。
+        /// </summary>
+        public void DiagTargetFor(int petX, int petY, int petW, int petH, out double x, out double y)
+        {
+            double dpi = _hwnd == IntPtr.Zero ? 1.0 : PetNative.GetDpiForWindowSafe(_hwnd) / 96.0;
+            if (dpi <= 0) dpi = 1.0;
+            int w = (int)Math.Round(DiagWidth * dpi);
+            int h = 60;
+            x = petX + petW / 2 - w / 2;
+            y = petY + petH + 8;
+            PetNative.WorkArea scr = PetNative.NearestScreen(petX + petW / 2, petY + petH / 2);
+            if (y + h > scr.Bottom - 4)
+            {
+                y = petY - h - 8;
+                if (y < scr.Y + 4) y = scr.Y + 4;
+            }
+            int maxX = scr.Right - w - 4;
+            if (maxX < scr.X + 4) maxX = scr.X + 4;
+            if (x > maxX) x = maxX;
+            if (x < scr.X + 4) x = scr.X + 4;
+        }
         /// <summary>自检诊断用：窗口宽度（DIP；未 Show 时用测量值）。</summary>
         public double DiagWidth
         {
@@ -207,10 +231,15 @@ namespace DshZhuangFangyiPet
             int h = (int)Math.Round(ActualHeight * dpi);
             if (w <= 0 || h <= 0) return;
 
+            // 与 OpenNear 同一套规则（否则拖动时窗口会跳到另一个方位）。
             int x = petX + petW / 2 - w / 2;
-            int y = petY - h - 8;
+            int y = petY + petH + 8;
             PetNative.WorkArea scr = PetNative.NearestScreen(petX + petW / 2, petY + petH / 2);
-            if (y < scr.Y + 4) y = petY + petH + 8;
+            if (y + h > scr.Bottom - 4)
+            {
+                y = petY - h - 8;
+                if (y < scr.Y + 4) y = scr.Y + 4;
+            }
             int maxX = scr.Right - w - 4;
             if (maxX < scr.X + 4) maxX = scr.X + 4;
             if (x > maxX) x = maxX;
@@ -239,11 +268,20 @@ namespace DshZhuangFangyiPet
                 if (w <= 0) w = 300;
                 if (h <= 0) h = 70;
 
-                // 默认贴在桌宠正上方 8px；放不下 → 桌宠下方；再 clamp 进工作区
+                // ⚠️ **优先放桌宠下方**，不是上方。
+                //
+                // 踩过：气泡（`PetBubble`）优先贴**头顶**，而输入窗原本也贴上方 ——
+                // 两个独立窗口互不知情，同时出现时直接叠在一起（用户反馈"输入框会和气泡重叠"）。
+                // 现在分工明确：**气泡占上方、输入窗占下方**，从布局上就不会撞。
+                // 下方放不下才退回上方（此时气泡若也在上方，宁可让输入窗尽量下移）。
                 int x = petX + petW / 2 - w / 2;
-                int y = petY - h - 8;
+                int y = petY + petH + 8;
                 PetNative.WorkArea scr = PetNative.NearestScreen(petX + petW / 2, petY + petH / 2);
-                if (y < scr.Y + 4) y = petY + petH + 8;
+                if (y + h > scr.Bottom - 4)
+                {
+                    y = petY - h - 8;                  // 下方放不下 → 退回上方
+                    if (y < scr.Y + 4) y = scr.Y + 4;
+                }
                 int maxX = scr.Right - w - 4;
                 if (maxX < scr.X + 4) maxX = scr.X + 4;
                 if (x > maxX) x = maxX;
