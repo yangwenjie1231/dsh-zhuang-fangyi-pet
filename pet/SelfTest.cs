@@ -78,6 +78,7 @@ namespace DshZhuangFangyiPet
                 TestBubbleOpaqueAndDark();
                 TestSettingsScaleDoubleClickTheme();
                 TestPositionReportBody();
+                TestSendCapabilityAndBody();
                 SpriteSheet sheet = TestSprite(artDir, atlas);
                 TestFilesMapCompat();
                 TestClamp();
@@ -639,6 +640,73 @@ namespace DshZhuangFangyiPet
                             body.IndexOf("\"bubbleX\":56", StringComparison.Ordinal) >= 0 &&
                             body.IndexOf("\"bubbleY\":78", StringComparison.Ordinal) >= 0;
             Check(noScale && fieldsOk, "位置上报 body 不含 scale（回响环修复：位置/设置通道分离）", body);
+        }
+
+        /// <summary>
+        /// task-7：send 能力位解析（缺失=不可用）、ShouldShowSendButton 纯函数、
+        /// 发送 body 构造（转义：引号/反斜杠/换行/中文）、空/超长预校验、错误文案映射。
+        /// 窗口交互（悬停/点击/键盘）无法脚本化 —— 全部走运行路径实际引用的纯函数单测。
+        /// </summary>
+        private static void TestSendCapabilityAndBody()
+        {
+            // (1) snapshot.send 缺失 → Send=null → 不可用（旧 Host 快照不显示 ✎）
+            PetSnapshot noSend = PetSnapshot.Parse("{\"rev\":1,\"petState\":\"idle\"}");
+            Check(noSend != null && noSend.Send == null &&
+                  !PetSendInfo.ShouldShowSendButton(noSend.Send),
+                  "snapshot.send 块缺失 → 不可用（不显示 ✎）", "Send=null → ShouldShowSendButton=false");
+
+            // (2) available:false → 不可用；available:true → 可用
+            PetSnapshot off = PetSnapshot.Parse(
+                "{\"rev\":2,\"send\":{\"available\":false,\"reason\":\"no sessionController\"}}");
+            PetSnapshot on = PetSnapshot.Parse("{\"rev\":3,\"send\":{\"available\":true}}");
+            bool capOk = off != null && off.Send != null && !off.Send.Available &&
+                         off.Send.Reason == "no sessionController" &&
+                         !PetSendInfo.ShouldShowSendButton(off.Send) &&
+                         on != null && on.Send != null && on.Send.Available &&
+                         PetSendInfo.ShouldShowSendButton(on.Send);
+            Check(capOk, "snapshot.send 解析：available=false 不显示 ✎；true 可用",
+                  "false(reason 原样读出)→false；true→true；null→false");
+
+            // (3) 发送 body 构造：转义正确（引号/反斜杠/换行/中文）。
+            // 注意：Escape 把 <0x20 的控制字符转成 \uXXXX（合法 JSON），所以换行在 body 里是 \u000a；
+            // 正确的验证方式是「反序列化回来等于原文」（roundtrip），而不是断言特定转义写法。
+            string body1 = PetHttp.BuildSendBody("你好");
+            string body2 = PetHttp.BuildSendBody("说\"引\"与\\反斜");
+            string body3 = PetHttp.BuildSendBody("第一行\n第二行\t制表");
+            string body4 = PetHttp.BuildSendBody(null);
+            bool escOk = body1 == "{\"text\":\"你好\"}" &&
+                         body2.IndexOf("\\\"引\\\"", StringComparison.Ordinal) >= 0 &&
+                         body2.IndexOf("\\\\反斜", StringComparison.Ordinal) >= 0 &&
+                         body3.IndexOf("\\u000a", StringComparison.Ordinal) >= 0 &&
+                         body3.IndexOf("\\u0009", StringComparison.Ordinal) >= 0 &&
+                         body4 == "{\"text\":\"\"}";
+            // 反序列化自洽：解析回来必须等于原文（含控制字符与引号/反斜杠）
+            PetJson.JVal back2 = PetJson.Parse(body2);
+            PetJson.JVal back3 = PetJson.Parse(body3);
+            bool roundtrip = back2 != null && back2.IsObj && back2.Str("text", null) == "说\"引\"与\\反斜" &&
+                             back3 != null && back3.IsObj && back3.Str("text", null) == "第一行\n第二行\t制表";
+            Check(escOk && roundtrip, "send body 构造 + 转义（引号/反斜杠/换行/中文/空串）",
+                  "你好→原样；引号→\\\"；换行→\\u000a；roundtrip 与原文一致；null→{\"text\":\"\"}");
+
+            // (4) 预校验：空/空白不发；2000 字通过；2001 字挡下
+            string longOk = new string('字', PetHttp.SendTextMax);
+            string longBad = new string('字', PetHttp.SendTextMax + 1);
+            bool preOk = PetHttp.ValidateSendText(null) == "empty" &&
+                         PetHttp.ValidateSendText("") == "empty" &&
+                         PetHttp.ValidateSendText("   ") == "empty" &&
+                         PetHttp.ValidateSendText("hi") == null &&
+                         PetHttp.ValidateSendText(longOk) == null &&
+                         PetHttp.ValidateSendText(longBad) == "too-long";
+            Check(preOk, "send 预校验（与 Host 准入一致）",
+                  "null/空/空白→empty 不发；2000 字→过；2001 字→too-long 挡下");
+
+            // (5) 失败文案映射（Host 的 400/409/503/401 语义）
+            bool errOk = PetInput.DescribeSendError(0, null).IndexOf("连不上", StringComparison.Ordinal) >= 0 &&
+                         PetInput.DescribeSendError(400, "{\"error\":\"too-long\"}").IndexOf("太长", StringComparison.Ordinal) >= 0 &&
+                         PetInput.DescribeSendError(409, "{}").IndexOf("会话", StringComparison.Ordinal) >= 0 &&
+                         PetInput.DescribeSendError(503, "{}").IndexOf("宿主", StringComparison.Ordinal) >= 0 &&
+                         PetInput.DescribeSendError(418, "{}").IndexOf("418", StringComparison.Ordinal) >= 0;
+            Check(errOk, "send 失败文案映射（0/400/409/503/其它）", "网络失败/超长/无会话/不可用/未知码各有一句话");
         }
 
         private static void TestClamp()

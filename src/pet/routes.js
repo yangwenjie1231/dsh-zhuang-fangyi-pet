@@ -171,6 +171,8 @@ function readBody (req) {
  * @param {string} deps.token - 一次性令牌
  * @param {object} deps.hub - SSE hub
  * @param {(patch: object) => void} deps.onPosition - 位置回报
+ * @param {(text: string, sessionId?: string) => Promise<object>} [deps.onSend] - 发消息到会话
+ * @param {() => {available: boolean, reason: string|null}} [deps.sendCapability] - 发消息能力位
  * @param {(command: string) => object} deps.onCommand - 命令处理
  * @param {() => object} deps.getSettings - 取当前设置
  * @param {(next: object) => object} deps.setSettings - 覆盖设置（归一化后返回）
@@ -180,6 +182,15 @@ function readBody (req) {
  */
 export function createHandler (deps) {
   const logger = deps.logger ?? console
+
+  /**
+   * 一条消息的长度上限。
+   *
+   * 为什么要有：气泡输入框是**单行**的快捷入口，不是用来写长文的。
+   * 不设限的话，一次误粘贴能把一整个文件塞进会话，既难撤回也烧 token。
+   * 2000 字对"说句话"绰绰有余。
+   */
+  const SEND_MAX_CHARS = 2000
 
   const sendJson = (res, code, body) => {
     const text = JSON.stringify(body)
@@ -359,6 +370,48 @@ export function createHandler (deps) {
         }
         deps.onPosition(patch)
         sendJson(res, 200, { ok: true, applied: patch })
+        return
+      }
+
+      // ── 发消息到会话（契约 §3 新增）────────────────────────────────────
+      if (route === '/send' && (req.method === 'POST' || req.method === 'PUT')) {
+        let parsed
+        try {
+          parsed = JSON.parse(await readBody(req))
+        } catch {
+          sendJson(res, 400, { error: 'invalid-json' })
+          return
+        }
+        const raw = parsed?.text
+        const text = typeof raw === 'string' ? raw.trim() : ''
+        if (text === '') {
+          sendJson(res, 400, { error: 'empty' })
+          return
+        }
+        if (text.length > SEND_MAX_CHARS) {
+          sendJson(res, 400, { error: 'too-long', max: SEND_MAX_CHARS })
+          return
+        }
+        // 能力位先查一次：宿主没装配 sessionController 就明确 503，
+        // 不要让调用方以为"消息发出去了"。
+        const cap = deps.sendCapability?.()
+        if (cap !== undefined && cap !== null && cap.available !== true) {
+          sendJson(res, 503, { error: 'unavailable', reason: cap.reason ?? null })
+          return
+        }
+        try {
+          const result = await deps.onSend(text, parsed?.sessionId)
+          sendJson(res, 200, { ok: true, sessionId: result?.sessionId ?? null })
+        } catch (error) {
+          const code = error?.code
+          if (code === 'no-session') sendJson(res, 409, { error: 'no-session' })
+          else if (code === 'unavailable') {
+            sendJson(res, 503, { error: 'unavailable', reason: error?.message ?? null })
+          } else {
+            logger?.warn?.(`zhuang-fangyi-pet: 发送失败（${error?.message ?? error}）`)
+            sendJson(res, 502, { error: 'send-failed', message: String(error?.message ?? error) })
+          }
+        }
         return
       }
 

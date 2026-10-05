@@ -568,6 +568,112 @@ namespace DshZhuangFangyiPet
             return sb.ToString();
         }
 
+        /// <summary>Escape 的公开包装：send body 构造与 SelfTest 共用（引号/反斜杠/&lt;32 控制符转义）。</summary>
+        public static string JsonEscape(string s)
+        {
+            return Escape(s);
+        }
+
+        // ------------------------------------------------------------------
+        // task-7：POST /pet/send（在气泡里发消息）
+        // ------------------------------------------------------------------
+
+        /// <summary>send 文本长度上限（与 Host 一致：&gt;2000 → 400 too-long）。</summary>
+        public const int SendTextMax = 2000;
+
+        /// <summary>task-7 预校验（与 Host 准入一致）：null/空白→"empty"；&gt;2000 字→"too-long"；通过→null。
+        /// 纯函数，PetInput 与 SelfTest 共用。</summary>
+        public static string ValidateSendText(string text)
+        {
+            if (text == null) return "empty";
+            if (text.Trim().Length == 0) return "empty";
+            if (text.Length > SendTextMax) return "too-long";
+            return null;
+        }
+
+        /// <summary>构造 POST /pet/send body 的纯函数（{"text":"…"}，转义正确），SelfTest 直接断言。</summary>
+        public static string BuildSendBody(string text)
+        {
+            return "{\"text\":\"" + Escape(text == null ? "" : text) + "\"}";
+        }
+
+        /// <summary>
+        /// task-7：发送文本到当前会话（POST /pet/send，Bearer 头）。
+        /// 排队语义：exe 不做任何打断（Host 固定 followup），只管把文本发出去。
+        /// 与 PostJson 不同：**带结果回调**（done 在线程池线程上被调，done(status, body)，
+        /// status=HTTP 状态码，网络失败=0 且 body=错误描述）——输入窗要靠它区分
+        /// 成功（关窗+气泡「已发送」）/ 失败（就地报错不丢字）。done 可为 null（退化成 PostJson 语义）。
+        /// </summary>
+        public void PostSend(string text, Action<int, string> done)
+        {
+            if (_disposed)
+            {
+                if (done != null) done(0, "http 已释放");
+                return;
+            }
+            string url = _base + "/api/zhuang-fangyi/pet/send";
+            string json = BuildSendBody(text);
+            string token = _token;
+            ThreadPool.QueueUserWorkItem(delegate(object _)
+            {
+                HttpWebResponse resp = null;
+                int status = 0;
+                string body = null;
+                try
+                {
+                    HttpWebRequest req = (HttpWebRequest)WebRequest.Create(url);
+                    req.Method = "POST";
+                    req.ContentType = "application/json; charset=utf-8";
+                    req.Timeout = 10000;
+                    req.ReadWriteTimeout = 10000;
+                    req.Proxy = null;
+                    req.KeepAlive = false;
+                    req.ServicePoint.Expect100Continue = false;
+                    req.Headers["Authorization"] = "Bearer " + token;
+                    byte[] payload = new UTF8Encoding(false).GetBytes(json);
+                    req.ContentLength = payload.Length;
+                    using (Stream rs = req.GetRequestStream()) rs.Write(payload, 0, payload.Length);
+                    resp = (HttpWebResponse)req.GetResponse();
+                    status = (int)resp.StatusCode;
+                    using (Stream rs2 = resp.GetResponseStream())
+                    using (StreamReader rd = new StreamReader(rs2, new UTF8Encoding(false)))
+                        body = rd.ReadToEnd();
+                    if (status >= 200 && status < 300) Interlocked.Exchange(ref _consecutive401, 0);
+                }
+                catch (WebException we)
+                {
+                    HttpWebResponse er = we.Response as HttpWebResponse;
+                    if (er != null)
+                    {
+                        try
+                        {
+                            status = (int)er.StatusCode;
+                            using (Stream rs3 = er.GetResponseStream())
+                            using (StreamReader rd = new StreamReader(rs3, new UTF8Encoding(false)))
+                                body = rd.ReadToEnd();
+                        }
+                        catch { }
+                        try { er.Close(); } catch { }
+                    }
+                    if (status == 0) body = DescribeWebError(we);
+                    if (IsAuthRejected(status)) HandleAuthRejected(status);
+                }
+                catch (Exception ex)
+                {
+                    body = PetLog.Describe(ex);
+                }
+                finally
+                {
+                    if (resp != null) { try { resp.Close(); } catch { } }
+                }
+                Action<int, string> d = done;
+                if (d != null)
+                {
+                    try { d(status, body); } catch (Exception ex) { PetLog.Warn("send 回调异常: " + PetLog.Describe(ex)); }
+                }
+            });
+        }
+
         public static string DescribeWebError(WebException we)
         {
             if (we == null) return "(null)";

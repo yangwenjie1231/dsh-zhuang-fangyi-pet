@@ -224,6 +224,23 @@ await ok('⭐ 快照带 settings 块（exe 实时应用的依据，契约 §2）
   }
 })
 
+await ok('⭐ 快照带 send 能力位（✎ 入口的开关，契约 §2）', async () => {
+  const r = await get('/api/zhuang-fangyi/pet/state')
+  const snap = JSON.parse(r.body)
+  assert.ok(snap.send && typeof snap.send === 'object', '快照应有 send 块')
+  assert.equal(typeof snap.send.available, 'boolean')
+  // 这个 e2e 宿主没装配 sessionController → 必须如实报不可用，而不是乐观地报可用
+  assert.equal(snap.send.available, false, '桩宿主没提供 sessionController，应报不可用')
+  assert.ok(snap.send.reason, '不可用必须给出原因（UI 要能显示为什么）')
+})
+
+await ok('⭐ 能力不可用时 /pet/send 返回 503 而不是假装成功', async () => {
+  const r = await post2('/api/zhuang-fangyi/pet/send', { text: '你好' })
+  assert.equal(r.status, 503, '没有发消息能力就该明确说不可用')
+  const body = JSON.parse(r.body)
+  assert.equal(body.error, 'unavailable')
+})
+
 await ok('⭐ POST /pet/settings 是合并语义：裸 {scale} 不许抹掉其它设置', async () => {
   // 对应一个实测抓到的数据丢失缺陷：exe 滚轮缩放只 POST {"scale": n}，
   // 若 Host 按整体替换处理（按默认值归一化），用户的透明度/穿透/主题/双击会被全抹回默认。

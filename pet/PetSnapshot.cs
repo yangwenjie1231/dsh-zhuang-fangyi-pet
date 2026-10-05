@@ -62,6 +62,25 @@ namespace DshZhuangFangyiPet
         }
     }
 
+    /// <summary>
+    /// 契约 §2（task-7，additive）：snapshot.send 能力位。
+    /// 块缺失（旧 Host 快照）→ **按不可用处理**（不显示 ✎，点了会报错像坏了）。
+    /// </summary>
+    internal sealed class PetSendInfo
+    {
+        public bool Available;
+        public string Reason;   // 不可用原因（可选，供日志）
+
+        /// <summary>
+        /// 纯函数：是否显示 ✎ 入口。**旧快照（sendInfo==null）= false**；
+        /// available=false = false（Host 明确说不可用，别让人点了报错）。
+        /// </summary>
+        public static bool ShouldShowSendButton(PetSendInfo sendInfo)
+        {
+            return sendInfo != null && sendInfo.Available;
+        }
+    }
+
     internal sealed class PetSnapshot
     {
         public long Rev = -1;
@@ -70,6 +89,7 @@ namespace DshZhuangFangyiPet
         public long Since;
         public PetBubbleInfo Bubble;
         public PetSettingsInfo Settings;
+        public PetSendInfo Send;
         public List<PetSessionInfo> Sessions = new List<PetSessionInfo>();
         public bool NativeAvailable = true;
         public string NativeError;
@@ -151,6 +171,16 @@ namespace DshZhuangFangyiPet
                     si.Theme = PetSettingsInfo.NormalizeTheme(st.Str("theme", null));
                 }
                 s.Settings = si;
+            }
+
+            // task-7（additive）：send 能力位。块缺失 → Send 保持 null → 按不可用处理。
+            PetJson.JVal send = root.Get("send");
+            if (send != null && send.IsObj)
+            {
+                PetSendInfo pi = new PetSendInfo();
+                pi.Available = send.Bool("available", false);
+                pi.Reason = send.Str("reason", null);
+                s.Send = pi;
             }
 
             PetJson.JVal sess = root.Get("sessions");

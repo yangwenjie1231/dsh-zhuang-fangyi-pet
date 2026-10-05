@@ -145,7 +145,15 @@ window.__ModuleLoader__.load({
         fallbackNote: '当前使用窗口内悬浮（只在 DSH 窗口里可见）',
         reason: '原因',
         reset: '重置位置',
-        resetDone: '已重置，重新拖动即可'
+        resetDone: '已重置，重新拖动即可',
+        sendTitle: '发消息给庄方宜',
+        sendPlaceholder: '说点什么…',
+        sendTip: 'Enter 发送 · Esc 收起',
+        sending: '发送中…',
+        activity: '活跃度',
+        activityQuiet: '安静（只提醒要紧的事）',
+        activityNormal: '正常',
+        activityPlayful: '调皮（爱说话、会主动冒头）'
       },
       en: {
         nav: 'Zhuang Fangyi Pet',
@@ -191,7 +199,15 @@ window.__ModuleLoader__.load({
         fallbackNote: 'Using in-window overlay (visible only inside DSH)',
         reason: 'Reason',
         reset: 'Reset position',
-        resetDone: 'Reset. Drag it anywhere.'
+        resetDone: 'Reset. Drag it anywhere.',
+        sendTitle: 'Send a message',
+        sendPlaceholder: 'Say something…',
+        sendTip: 'Enter to send · Esc to close',
+        sending: 'Sending…',
+        activity: 'Liveliness',
+        activityQuiet: 'Quiet (only important notices)',
+        activityNormal: 'Normal',
+        activityPlayful: 'Playful (chatty, pops up on its own)'
       }
     }
 
@@ -219,6 +235,8 @@ window.__ModuleLoader__.load({
         bubbleGapMs: 8000,
         /** 双击桌宠做什么。 */
         doubleClick: 'focus-dsh',
+        /** 活跃度：安静 / 正常 / 调皮（气泡频率与主动卖萌，语义见 src/pet/activity.js）。 */
+        activity: 'normal',
         /** 深浅色贴纸：auto 跟随渲染方环境。 */
         theme: 'auto',
         /** 悬停显示状态文字 / 桌宠下方常显状态。 */
@@ -247,6 +265,7 @@ window.__ModuleLoader__.load({
       if (Number.isFinite(input.bubbleGapMs)) out.bubbleGapMs = Math.min(60000, Math.max(0, input.bubbleGapMs))
       if (['focus-dsh', 'emote', 'none'].includes(input.doubleClick)) out.doubleClick = input.doubleClick
       if (['auto', 'light', 'dark'].includes(input.theme)) out.theme = input.theme
+      if (['quiet', 'normal', 'playful'].includes(input.activity)) out.activity = input.activity
       if (input.locale === 'zh' || input.locale === 'en') out.locale = input.locale
       return out
     }
@@ -315,6 +334,8 @@ window.__ModuleLoader__.load({
       const { runtime } = props
       const runtimeRef = useRef(runtime)
       runtimeRef.current = runtime
+      /** 文案取词器（`✎` 与输入框的提示要本地化；与设置页同一份字典）。 */
+      const t = runtime.t ?? (key => key)
 
       const [snapshot, setSnapshot] = useState(() => runtimeRef.current.snapshot)
       const [atlas, setAtlas] = useState(() => runtimeRef.current.atlas)
@@ -399,6 +420,41 @@ window.__ModuleLoader__.load({
       const dark = settings.theme === 'dark'
         ? true
         : settings.theme === 'light' ? false : darkAuto
+
+      // ── 从气泡发消息（用户点名："直接在桌宠的气泡中发送"）────────────────
+      //
+      // 入口：鼠标悬停时桌宠旁边出现一个小 ✎；点它才展开输入框。
+      // 这样不占地方、不破坏拖动，也不占用双击（双击默认是打开 DSH）。
+      //
+      // **能力位门控**：宿主没装配 `sessionController` 时 `send.available=false`，
+      // 这时**不显示** ✎ —— 给一个点了必报错的入口比没有入口更像坏了。
+      const canSend = snapshot?.send?.available === true
+      const [composerOpen, setComposerOpen] = useState(false)
+      const [sending, setSending] = useState(false)
+      const [sendError, setSendError] = useState(null)
+      const sendTextRef = useRef('')
+
+      const submitSend = useCallback(async () => {
+        const text = String(sendTextRef.current ?? '').trim()
+        if (text === '' || sending) return
+        if (text.length > 2000) {
+          setSendError('太长了（最多 2000 字）')
+          return
+        }
+        setSending(true)
+        setSendError(null)
+        try {
+          await runtime.sendMessage?.(text)
+          // 发出去就收起来：输入框是快捷入口，不是常驻编辑器。
+          setComposerOpen(false)
+          sendTextRef.current = ''
+        } catch (error) {
+          // **失败不关闭、不清空** —— 用户刚打的字不能丢。
+          setSendError(error?.message ?? String(error))
+        } finally {
+          setSending(false)
+        }
+      }, [runtime, sending])
 
       /* ---- 拖动：用 Pointer Events（不是 mouse），并捕获指针 ---- */
       const onPointerDown = useCallback(event => {
@@ -598,7 +654,54 @@ window.__ModuleLoader__.load({
           : h('div', {
               key: 'hint',
               className: 'zf-pet__hint' + (settings.statusAlways ? ' zf-pet__hint--always' : '')
-            }, snapshot?.label ?? '')
+            }, snapshot?.label ?? ''),
+
+        // ── ✎ 发消息入口（悬停才出现；能力不可用/整体穿透时不渲染）──────────
+        //
+        // 穿透模式下桌宠收不到鼠标，按钮会出现但点不动 —— 那比不给入口更像坏了。
+        canSend && !settings.clickThrough
+          ? h('button', {
+              key: 'send-btn',
+              className: 'zf-pet__send-btn',
+              title: t('sendTitle'),
+              'aria-label': t('sendTitle'),
+              onClick: event => {
+                // 别让点击冒泡到容器的拖动处理（否则会顺带拖一下/触发双击）。
+                event.stopPropagation()
+                setSendError(null)
+                setComposerOpen(true)
+              }
+            }, '✎')
+          : null,
+
+        // ── 输入条：点 ✎ 后出现，Enter 发送、Esc 收起 ────────────────────────
+        composerOpen
+          ? h('div', { key: 'composer', className: 'zf-pet__composer' }, [
+              h('input', {
+                key: 'input',
+                className: 'zf-pet__composer-input',
+                type: 'text',
+                placeholder: t('sendPlaceholder'),
+                maxLength: 2000,
+                autoFocus: true,
+                disabled: sending,
+                onInput: event => { sendTextRef.current = event.target.value },
+                onKeyDown: event => {
+                  // Enter 发送。用 keydown 而不是表单提交：这是浮层，没有 form。
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    submitSend()
+                  } else if (event.key === 'Escape') {
+                    event.preventDefault()
+                    setComposerOpen(false)
+                    setSendError(null)
+                  }
+                }
+              }),
+              h('span', { key: 'tip', className: 'zf-pet__composer-tip' },
+                sending ? t('sending') : (sendError ?? t('sendTip')))
+            ])
+          : null
       ])
     }
 
@@ -761,6 +864,19 @@ window.__ModuleLoader__.load({
         }),
 
         h('h3', { key: 'g4', className: 'zf-pet-settings__group' }, t('groupBehavior')),
+        h('label', { key: 'activity', className: 'zf-pet-row' }, [
+          h('span', { key: 'l', className: 'zf-pet-row__label' }, t('activity')),
+          h('select', {
+            key: 's',
+            className: 'zf-pet-row__input',
+            value: settings.activity,
+            onChange: e => set({ activity: e.target.value })
+          }, [
+            h('option', { key: 'quiet', value: 'quiet' }, t('activityQuiet')),
+            h('option', { key: 'normal', value: 'normal' }, t('activityNormal')),
+            h('option', { key: 'playful', value: 'playful' }, t('activityPlayful'))
+          ])
+        ]),
         h(Slider, {
           key: 'happyMs',
           label: t('happyMs'),
@@ -958,6 +1074,50 @@ window.__ModuleLoader__.load({
  * 不加投影/不换底色 —— 它是说明文字，不该比桌宠本体更抢眼。 */
 .zf-pet__hint--always{ opacity:1; }
 
+/* ── ✎ 发消息入口 ───────────────────────────────────────────────────────
+ * 平时完全隐藏，只在悬停桌宠时淡入 —— 桌宠是装饰，不该常驻一个按钮抢注意力。
+ * 尺寸用固定 px（不随 scale 缩放）：它是个**控件**，不是素材，
+ * 跟着缩放到 0.3× 时会小到点不中。
+ * ──────────────────────────────────────────────────────────────────────── */
+.zf-pet__send-btn{
+  position:absolute; right:-4px; top:-4px;
+  width:22px;height:22px;padding:0;
+  display:flex;align-items:center;justify-content:center;
+  border-radius:50%;
+  border:1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.12));
+  background:var(--dsw-alias-bg-layer-1, #fff);
+  color:var(--dsw-alias-label-primary, #222);
+  font-size:12px;line-height:1;cursor:pointer;
+  box-shadow:0 2px 6px rgba(0,0,0,.18);
+  opacity:0;transition:opacity .12s;
+  pointer-events:auto;
+}
+.zf-pet:hover .zf-pet__send-btn{ opacity:1; }
+.zf-pet__send-btn:focus-visible{ opacity:1; outline:2px solid var(--dsw-alias-brand-primary); }
+
+/* 输入条：浮在桌宠下方。必须 pointer-events:auto（气泡是 none）。 */
+.zf-pet__composer{
+  position:absolute; left:0; bottom:-30px;
+  display:flex;align-items:center;gap:6px;
+  padding:4px 6px;border-radius:10px;
+  background:var(--dsw-alias-bg-layer-1, #fff);
+  border:1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.12));
+  box-shadow:0 6px 18px rgba(0,0,0,.18);
+  pointer-events:auto;
+}
+.zf-pet__composer-input{
+  width:150px;font-size:12px;
+  padding:3px 6px;border-radius:6px;
+  border:1px solid var(--dsw-alias-border-l1, rgba(0,0,0,.08));
+  background:transparent;color:var(--dsw-alias-label-primary, #222);
+}
+.zf-pet__composer-input:focus{ outline:none; border-color:var(--dsw-alias-brand-primary); }
+.zf-pet__composer-tip{
+  font-size:11px;max-width:150px;
+  color:var(--dsw-alias-label-tertiary, #888);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+
 /* 尊重系统的减弱动效：停在第一帧。 */
 @media (prefers-reduced-motion:reduce){
   .zf-pet__sprite{ animation:none; }
@@ -1095,6 +1255,43 @@ window.__ModuleLoader__.load({
         pollTimer.unref?.()
       }
 
+      /**
+       * 从桌宠气泡里发一条消息到会话（契约 §3 `/pet/send`）。
+       *
+       * **排队语义**：宿主固定用 `agent.followup`，不打断当前回合 —— 这是用户
+       * 明确选的投递方式（"排队，不打断"）。这里只负责把文本送过去并如实报错。
+       *
+       * @param {string} text
+       * @returns {Promise<void>} 失败时抛错（带可读原因），由 UI 就地展示
+       */
+      async function sendMessage (text) {
+        let res
+        try {
+          res = await fetch(`${ROUTE}/send`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ text })
+          })
+        } catch (error) {
+          throw new Error(`网络错误：${error?.message ?? error}`)
+        }
+        // 失败时把宿主给的原因翻成人话 —— "503" 对用户毫无意义。
+        if (!res.ok) {
+          let body = null
+          try { body = await res.json() } catch { /* 非 JSON 响应 */ }
+          const map = {
+            empty: '内容是空的',
+            'too-long': '太长了（最多 2000 字）',
+            'no-session': '现在没有可以发的会话',
+            unavailable: '宿主没提供发消息能力',
+            'send-failed': '发送被拒绝'
+          }
+          const key = body?.error
+          const detail = body?.reason ?? body?.message
+          throw new Error((map[key] ?? `发送失败（HTTP ${res.status}）`) + (detail ? `：${detail}` : ''))
+        }
+      }
+
       /** 设置改动 → 通知宿主（宿主负责落盘与转达 exe）。 */
       async function updateSettings (patch) {
         const next = normalizePet({ ...state.settings, ...patch })
@@ -1169,6 +1366,7 @@ window.__ModuleLoader__.load({
         updateSettings,
         reportPosition,
         sendCommand,
+        sendMessage,
         connect,
         dispose () {
           disposed = true

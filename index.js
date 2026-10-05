@@ -37,7 +37,8 @@ import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 
 import { defaultSettings, normalizeSettings, SETTINGS_VERSION } from './src/settings.js'
-import { createPetState } from './src/pet/state.js'
+import { createPetState, DEFAULT_BUBBLE_STATES } from './src/pet/state.js'
+import { activityConfig } from './src/pet/activity.js'
 import { bridgeHostEvents } from './src/pet/events.js'
 import { loadAtlas, artForState, bubbleArt, atlasReport } from './src/pet/atlas.js'
 import { createHub } from './src/pet/hub.js'
@@ -241,21 +242,35 @@ export function apply (ctx, config) {
   ctx.effect(() => () => hub.dispose(), 'zhuang-fangyi-pet: sse hub')
 
   // ── 状态机：气泡选图注入 atlas（状态机本身不知道素材目录）─────────────────
+  /**
+   * 当前设置 → 状态机 `config`。
+   *
+   * **抽成函数是为了热更新**：设置页里改活跃度/气泡时长/完成提醒，
+   * 必须立刻重算并 `machine.setConfig()`，否则用户点了没反应。
+   */
+  const machineConfig = () => {
+    const s = settings.get()
+    // 活跃度档位：只决定「哪些状态值得弹、间隔倍率、要不要主动卖萌」。
+    // 用户的显式数值仍是基准（档位乘倍率），见 src/pet/activity.js 的说明。
+    const act = activityConfig(s.activity, s, DEFAULT_BUBBLE_STATES)
+    return {
+      happyMs: s.happyMs,
+      sleepMs: s.sleepMs,
+      /** 气泡一次显示多久、两条之间最小间隔（用户可调；档位在此之上缩放）。 */
+      bubbleMs: s.bubbleMs,
+      bubbleSilenceMs: act.bubbleSilenceMs,
+      /** "调皮"档空闲主动蹦表情的中位间隔；其余档位为 null。 */
+      idleEmoteMs: act.idleEmoteMs,
+      /** AI 完成一回合时**强制**弹一条提醒（绕过静默期与优先级）。 */
+      notifyComplete: s.notifyComplete,
+      locale: s.locale,
+      // 气泡总开关关掉 → 空列表（状态机据此知道"用户不想要任何气泡"）。
+      bubbleStates: s.bubble ? act.bubbleStates : []
+    }
+  }
+
   const machine = createPetState({
-    config: {
-      happyMs: settings.get().happyMs,
-      sleepMs: settings.get().sleepMs,
-      /** 气泡一次显示多久、两条之间最小间隔（用户可在设置页调）。 */
-      bubbleMs: settings.get().bubbleMs,
-      bubbleSilenceMs: settings.get().bubbleGapMs,
-      /** AI 完成一回合时**强制**弹一条提醒（绕过静默期与优先级）。
-       *  但气泡总开关关掉时绝不强弹 —— `bubbleStates: []` 已表达"用户不想要气泡"。 */
-      notifyComplete: settings.get().notifyComplete,
-      locale: settings.get().locale,
-      // 只在**关闭**气泡时覆盖；开启时用默认的状态列表。
-      // （传 undefined 会被状态机过滤掉，见 state.js 的说明。）
-      bubbleStates: settings.get().bubble ? undefined : []
-    },
+    config: machineConfig(),
     pickBubbleImage: (key, seed) => {
       if (!settings.get().bubble || !settings.get().bubbleImages) return null
       // 返回**整条记录**（含 `hasText`）而不只是路径：状态机需要知道这张图
@@ -271,6 +286,16 @@ export function apply (ctx, config) {
     lastState: null,
     lastBubbleAt: null
   }
+
+  /**
+   * 发消息能力的装配状态（**声明必须早于 `withSettings`**）。
+   *
+   * `withSettings` 每帧广播都会读它们，而广播可能在装配早期就发生 ——
+   * `let` 声明晚于使用会踩暂时性死区（TDZ）直接抛错。
+   * 真正的服务注入在下面（要用 `ctx.inject`），这里只放可变槽位。
+   */
+  let sendService = null
+  let sendMissingReason = '宿主未装配 sessionController 服务'
 
   /**
    * exe 关心的设置子集（契约 §2 `snapshot.settings`）。
@@ -292,7 +317,16 @@ export function apply (ctx, config) {
   }
 
   /** 快照 + 设置 = 广播帧（exe 与 overlay 共用同一帧）。 */
-  const withSettings = snap => ({ ...snap, settings: exeSettings() })
+  const withSettings = snap => ({
+    ...snap,
+    settings: exeSettings(),
+    // 能力位：两半边的 ✎ 入口都靠它决定显不显示（**不做没入口的错误**）。
+    // 每次广播时重新求值：sessionController 是异步装配的，早帧可能是 false。
+    send: {
+      available: sendService !== null,
+      reason: sendService === null ? (sendMissingReason ?? '发消息能力不可用') : null
+    }
+  })
 
   // 状态变化 → 广播。这是唯一的推送出口。
   const offChange = machine.on(snapshot => {
@@ -307,6 +341,9 @@ export function apply (ctx, config) {
   //（用户改完大小盯着桌宠看，半天没反应，会以为坏了）。
   const offSettings = settings.subscribe(() => {
     try {
+      // 先让状态机吃到新配置（活跃度/气泡时长/完成提醒都要**立刻**生效），
+      // 再广播 —— 顺序反了的话，这一帧推的还是旧行为，用户会看到"改完没反应"。
+      machine.setConfig(machineConfig())
       hub.broadcast(withSettings(machine.snapshot()))
     } catch (error) {
       logger.warn?.(`zhuang-fangyi-pet: 设置变化广播失败（${error?.message ?? error}）`)
@@ -329,6 +366,78 @@ export function apply (ctx, config) {
   }, 15000)
   ticker.unref?.()
   ctx.effect(() => () => clearInterval(ticker), 'zhuang-fangyi-pet: idle ticker')
+
+  // ── 发消息能力：`ctx.sessionController`（GUI 发消息走的就是这条服务）────────
+  //
+  // **必须是可选的**：不是每个 profile 都装配了 session-controller（它是核心
+  // bundle 的一部分，但插件不该假设）。拿不到时：
+  //   · `/pet/send` 返回 503 + 原因；
+  //   · 快照的 `send.available=false`；
+  //   · 两半边的 ✎ 入口都不显示（点了报错比没有入口更像坏了）。
+  //
+  // 用嵌套 `ctx.inject` 而不是 `ctx.get()`：`get()` 在服务还没装配好时返回
+  // undefined 且**不会**在它稍后可用时重跑；`inject` 会在服务就绪时回调
+  //（webServer 上已经吃过一次这个教训，见下面的注释）。
+  try {
+    ctx.inject(['sessionController'], scopedSend => {
+      try {
+        sendService = scopedSend.sessionController ?? null
+        sendMissingReason = sendService === null
+          ? '宿主未装配 sessionController 服务'
+          : null
+        logger.info?.('zhuang-fangyi-pet: 发消息能力已就绪（sessionController）')
+      } catch (error) {
+        sendMissingReason = `装配 sessionController 失败：${error?.message ?? error}`
+      }
+    })
+  } catch (error) {
+    // 某些宿主版本的 `inject` 可能直接抛（服务名未注册）。这绝不能中断 apply。
+    sendMissingReason = `inject sessionController 不可用：${error?.message ?? error}`
+    logger.warn?.(`zhuang-fangyi-pet: ${sendMissingReason}`)
+  }
+
+  /**
+   * 发一条消息到某个会话（**排队语义**，不打断当前回合）。
+   *
+   * 用 `followup`（mode 不给/非 steer）而非 `steer`：用户明确选了"排队，不打断"。
+   *
+   * @param {string} text
+   * @param {string} sessionId
+   * @returns {Promise<void>} 失败时抛错，由路由映射成 HTTP 状态码
+   */
+  const sendToSession = async (text, sessionId) => {
+    if (sendService === null) {
+      const error = new Error(sendMissingReason ?? '宿主未装配 sessionController 服务')
+      error.code = 'unavailable'
+      throw error
+    }
+    await sendService.prompt({
+      sessionId,
+      content: [{ type: 'text', text }],
+      // 每次发送一个唯一 id：Host 用它做去重（同 id 重试不会插入第二条）。
+      requestId: `zf-pet-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+      // 不传 mode ⇒ 走 `agent.followup`（排队）
+    })
+  }
+
+  /**
+   * 挑一个要发给它的会话。
+   *
+   * 优先用调用方指定的；否则用**最近活跃**的那个（就是桌宠此刻在为你演的那个会话）。
+   * 状态机已经按会话记了 `lastEventAt`，直接复用它的记账，不另建一套认知。
+   *
+   * @param {string|undefined} requested
+   * @returns {string|null} 没有可发会话时返回 null
+   */
+  const pickSessionId = requested => {
+    if (typeof requested === 'string' && requested !== '') return requested
+    const stats = machine.sessionStats()
+    // 状态机把"事件没带 sessionId"归到字面量 `'unknown'`。**绝不能拿它去发消息** ——
+    // 那不是一个真实会话，`prompt()` 必然 not-found；宁可回 409 说"没有可发的会话",
+    // 也不要发一个注定失败、还可能让用户以为消息出去了的请求。
+    const real = stats.find(s => s.sessionId !== 'unknown')
+    return real !== undefined ? real.sessionId : null
+  }
 
   // ── exe launcher ────────────────────────────────────────────────────────
   const launcher = createLauncher({
@@ -375,6 +484,21 @@ export function apply (ctx, config) {
     onPosition: patch => {
       settings.update(patch)
     },
+    /** 发消息（契约 §3 新增）。路由把抛出的错映射成状态码，见 routes.js。 */
+    onSend: async (text, sessionId) => {
+      const target = pickSessionId(sessionId)
+      if (target === null) {
+        const error = new Error('没有可发送的会话')
+        error.code = 'no-session'
+        throw error
+      }
+      await sendToSession(text, target)
+      return { sessionId: target }
+    },
+    sendCapability: () => ({
+      available: sendService !== null,
+      reason: sendService === null ? (sendMissingReason ?? '发消息能力不可用') : null
+    }),
     getSettings: () => settings.get(),
     setSettings: next => {
       // **必须是合并，不是整体替换**：exe 的滚轮缩放只 POST `{"scale": n}` 一个字段，

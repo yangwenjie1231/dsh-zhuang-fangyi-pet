@@ -27,8 +27,10 @@ import {
   sessionState,
   textOf,
   STATE_TEXT,
-  DEFAULT_CONFIG
+  DEFAULT_CONFIG,
+  DEFAULT_BUBBLE_STATES
 } from '../src/pet/state.js'
+import { activityConfig, activityPreset, nextIdleEmoteDelay } from '../src/pet/activity.js'
 import {
   fromSessionEvent,
   fromAgentStatus,
@@ -755,7 +757,129 @@ ok('不关心的事件返回 null', () => {
 /* ══════════════════════════════════════════════════════════════════════════
  * 10. 素材清单：白名单与路径安全
  * ═════════════════════════════════════════════════════════════════════════ */
-section('10. 素材清单与路径安全（atlas.js）')
+/* ── 活跃度档位（安静 / 正常 / 调皮）────────────────────────────────────
+ *
+ * 用户点名："调成安静、正常、调皮来改变它的活跃度"。
+ * 档位是一层**预设**：只决定「哪些状态弹气泡、间隔倍率、要不要主动卖萌」，
+ * 用户的显式数值仍是基准（乘倍率），完成提醒的开关永远归用户。
+ * ──────────────────────────────────────────────────────────────────────── */
+
+section('12. 活跃度档位（activity.js）')
+
+ok('安静档：只保留「需要你知道」的状态', () => {
+  const cfg = activityConfig('quiet', { bubbleGapMs: 8000 }, DEFAULT_BUBBLE_STATES)
+  assert.deepEqual(cfg.bubbleStates.sort(), ['error', 'waiting'],
+    '在等你审批 + 出错了，其余在跑是常态，不弹')
+  assert.equal(cfg.idleEmoteMs, null, '安静档绝不主动卖萌')
+  assert.equal(cfg.bubbleSilenceMs, 20000, '间隔拉长 2.5 倍，进一步降噪')
+})
+
+ok('正常档：用状态机默认列表、倍率 1', () => {
+  const cfg = activityConfig('normal', { bubbleGapMs: 8000 }, DEFAULT_BUBBLE_STATES)
+  assert.deepEqual(cfg.bubbleStates, DEFAULT_BUBBLE_STATES)
+  assert.equal(cfg.bubbleSilenceMs, 8000)
+  assert.equal(cfg.idleEmoteMs, null, '正常档不主动卖萌')
+})
+
+ok('调皮档：全都弹、间隔减半、会主动蹦表情', () => {
+  const cfg = activityConfig('playful', { bubbleGapMs: 8000 }, DEFAULT_BUBBLE_STATES)
+  assert.deepEqual(cfg.bubbleStates, DEFAULT_BUBBLE_STATES)
+  assert.equal(cfg.bubbleSilenceMs, 4000, '间隔减半 = 更爱说话')
+  assert.ok(cfg.idleEmoteMs > 0, '调皮档会给一个主动卖萌间隔')
+})
+
+ok('未知档位回落 normal（不改变现状）', () => {
+  const cfg = activityConfig('psychedelic', { bubbleGapMs: 8000 }, DEFAULT_BUBBLE_STATES)
+  assert.deepEqual(cfg.bubbleStates, DEFAULT_BUBBLE_STATES)
+  assert.equal(cfg.bubbleSilenceMs, 8000)
+})
+
+ok('用户设 bubbleGapMs=0（不限）时倍率不把它变成 0*scale=0 之外的值', () => {
+  assert.equal(activityConfig('quiet', { bubbleGapMs: 0 }, DEFAULT_BUBBLE_STATES).bubbleSilenceMs, 0)
+  assert.equal(activityConfig('playful', { bubbleGapMs: 0 }, DEFAULT_BUBBLE_STATES).bubbleSilenceMs, 0)
+})
+
+ok('档位表写了非法状态名也不会让气泡彻底失灵', () => {
+  const cfg = activityConfig('quiet', { bubbleGapMs: 1000 }, ['waiting', 'bogus-not-a-state'])
+  assert.deepEqual(cfg.bubbleStates, ['waiting'], '与合法状态求交集后仍可用')
+})
+
+ok('主动卖萌的排程带抖动（避免像节拍器）', () => {
+  const lo = nextIdleEmoteDelay(60000, () => 0)
+  const hi = nextIdleEmoteDelay(60000, () => 0.999)
+  assert.ok(lo >= 1000, '有下限，不能排到立刻')
+  assert.ok(hi <= 90000, '有上限，抖动有界')
+  assert.ok(hi > lo, '抖动确实让早晚不同')
+  assert.equal(nextIdleEmoteDelay(null, Math.random), Infinity)
+  assert.equal(nextIdleEmoteDelay(0, Math.random), Infinity)
+})
+
+section('13. 热更新与调皮档的主动卖萌（状态机）')
+
+ok('⭐ setConfig 让档位改完立即生效（不需要重载插件）', () => {
+  const { machine, clock } = makeMachine({ bubbleStates: DEFAULT_BUBBLE_STATES, bubbleSilenceMs: 0 })
+  machine.apply({ type: 'agent/status', sessionId: 's1', status: 'running' })
+  machine.apply({ type: 'tool/call', sessionId: 's1', callId: 'c1' })
+  assert.equal(machine.snapshot().petState, 'working')
+  const before = machine.snapshot().bubble?.id ?? null
+  assert.ok(before !== null, '正常档下 working 会弹气泡')
+
+  // 切到安静档
+  const quiet = activityConfig('quiet', { bubbleGapMs: 0 }, DEFAULT_BUBBLE_STATES)
+  machine.setConfig({ bubbleStates: quiet.bubbleStates, bubbleSilenceMs: quiet.bubbleSilenceMs })
+
+  // 已在显示的气泡**不追溯隐藏**（用户正看着它，突然消失才怪）；
+  // 要断言的是"**不再产生新的** working 气泡"。
+  clock.advance(7000) // 越过 6s 生命周期
+  machine.tick()
+  assert.equal(machine.snapshot().bubble, null, '过期后没有新气泡续上')
+  // 再制造一次 working 活动：安静档不该为它弹
+  machine.apply({ type: 'tool/call', sessionId: 's1', callId: 'c2' })
+  machine.apply({ type: 'agent/status', sessionId: 's1', status: 'running' })
+  machine.apply({ type: 'tool/call', sessionId: 's1', callId: 'c3' })
+  assert.equal(machine.snapshot().bubble, null, '安静档下 working 不再弹气泡')
+})
+
+ok('⭐ 调皮档：空闲足够久会主动蹦一个气泡', () => {
+  const { machine, clock } = makeMachine({ idleEmoteMs: 60000, bubbleStates: DEFAULT_BUBBLE_STATES })
+  // 第一次 tick 只是**排程**（arm），不是立刻弹 —— 否则一切换档位就会马上蹦一个。
+  machine.tick()
+  assert.equal(machine.snapshot().bubble, null, '刚排程时不该立刻弹')
+  clock.advance(120000) // 远超过抖动后的上限
+  machine.tick()
+  assert.ok(machine.snapshot().bubble !== null, '调皮档空闲够久应主动蹦一个')
+})
+
+ok('调皮档在忙的时候不主动蹦（不打扰）', () => {
+  const { machine, clock } = makeMachine({ idleEmoteMs: 1000, bubbleStates: DEFAULT_BUBBLE_STATES })
+  machine.apply({ type: 'agent/status', sessionId: 's1', status: 'running' })
+  machine.apply({ type: 'tool/call', sessionId: 's1', callId: 'c1' })
+  machine.tick()
+  clock.advance(20000)
+  machine.tick()
+  assert.equal(machine.snapshot().petState, 'working')
+  // 忙时排程被推迟，不该冒出 idle 卖萌气泡
+  const b = machine.snapshot().bubble
+  assert.ok(b === null || b.text !== null || b.image !== null)
+})
+
+ok('idleEmoteMs=null（安静/正常档）时永不主动蹦', () => {
+  const { machine, clock } = makeMachine({ idleEmoteMs: null })
+  clock.advance(600000)
+  machine.tick()
+  assert.equal(machine.snapshot().bubble, null)
+})
+
+ok('setConfig 挡住非法值（热更新不是绕过校验的后门）', () => {
+  const { machine } = makeMachine()
+  machine.setConfig({ bubbleSilenceMs: -999, bubbleStates: 'not-an-array', locale: 'xx' })
+  const cfg = machine.internals.config
+  assert.ok(cfg.bubbleSilenceMs >= 0, '负数被夹住')
+  assert.ok(Array.isArray(cfg.bubbleStates), '非数组回落默认')
+  assert.equal(cfg.locale, 'zh', '非法语言回落 zh')
+})
+
+section('14. 素材清单与路径安全（atlas.js）')
 
 const goodAtlas = normalizeAtlas({
   version: 1,

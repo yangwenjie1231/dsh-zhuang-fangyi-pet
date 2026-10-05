@@ -211,6 +211,10 @@ namespace DshZhuangFangyiPet
         private string _settingsTheme = "auto";        // 'auto' | 'light' | 'dark'
         private string _doubleClick = "focus-dsh";     // 'focus-dsh' | 'emote' | 'none'
 
+        // task-7：发消息（悬停 ✎ → 输入窗 → POST /pet/send）
+        private bool _sendAvailable;   // snapshot.send.available（块缺失=false）
+        private PetInput _input;
+
         private static readonly string[] PreviewStates = new string[]
         {
             "waking", "idle", "listening", "thinking", "working",
@@ -272,6 +276,7 @@ namespace DshZhuangFangyiPet
             _win.OnDisplayChanged = OnDisplayChanged;
             _win.ScaleAdjusted = OnScaleAdjusted;       // task-6：滚轮缩放 → 去抖上报 + 托盘刷新
             _win.DoubleClickInvoked = OnPetDoubleClick; // task-6：双击行为由 settings.doubleClick 决定
+            _win.SendButtonClicked = OnSendButtonClicked;  // task-7：✎ → 打开输入窗
 
             _bubble = new PetBubble();
             _bubble.PetRectProvider = PetRect;
@@ -366,6 +371,9 @@ namespace DshZhuangFangyiPet
             // task-6：先应用 snapshot.settings（可能改尺寸/穿透/主题，气泡定位要用新尺寸）。
             // 逐字段 diff，值没变就不动（避免每帧重复 SetScale 抖动）。
             ApplySettings(snap.Settings);
+
+            // task-7：send 能力位（available=false 或块缺失 → 不显示 ✎）
+            ApplySendInfo(snap.Send);
 
             string st = snap.EffectiveState();
             if (!_previewMode)
@@ -481,6 +489,62 @@ namespace DshZhuangFangyiPet
             }
 
             if (changed) _tray.Refresh();   // 托盘勾选状态（缩放档位/穿透/气泡）跟着真实值走
+        }
+
+        // ------------------------------------------------------------------
+        // task-7：发消息（悬停 ✎ → 输入窗 → POST /pet/send，排队语义）
+        // ------------------------------------------------------------------
+
+        /// <summary>snapshot.send 能力位变化：available=false → 按钮立刻隐藏。</summary>
+        private void ApplySendInfo(PetSendInfo send)
+        {
+            bool avail = PetSendInfo.ShouldShowSendButton(send);
+            if (avail == _sendAvailable) return;
+            _sendAvailable = avail;
+            _win.SetSendAvailable(avail);
+            PetLog.Info("send 能力位 → " + (avail ? "可用" : ("不可用" +
+                (send != null && !string.IsNullOrEmpty(send.Reason) ? "（" + send.Reason + "）" : ""))));
+        }
+
+        /// <summary>✎ 被点（只有可用时按钮才可见；防御式再查一次）→ 打开输入窗。</summary>
+        private void OnSendButtonClicked()
+        {
+            if (!_sendAvailable) return;
+            if (_input == null)
+            {
+                _input = new PetInput(_http);
+                _input.Sent = delegate
+                {
+                    // 成功 → 关输入窗，气泡提示「已发送」（不弹 Host 气泡，用本地假 id）
+                    try
+                    {
+                        PetBubbleInfo b = new PetBubbleInfo();
+                        b.Id = -DateTime.Now.Ticks;   // 负 id：绝不与 Host 的 bubble.id 撞
+                        b.Kind = "text";
+                        b.Text = "已发送";
+                        b.DurationMs = 1600;
+                        b.Priority = 95;
+                        _bubble.Show(b, null);
+                    }
+                    catch { }
+                };
+                _input.Closed2 = delegate
+                {
+                    try { _win.SetSendOpen(false); } catch { }
+                    _input = null;
+                };
+            }
+            int x, y, w, h;
+            _win.GetScreenRect(out x, out y, out w, out h);
+            _win.SetSendOpen(true);
+            _input.OpenNear(x, y, w, h);
+        }
+
+        /// <summary>退出时若输入窗还开着，一并收掉。</summary>
+        private void CloseInput()
+        {
+            try { if (_input != null) _input.Close(); } catch { }
+            _input = null;
         }
 
         // ------------------------------------------------------------------
@@ -712,6 +776,7 @@ namespace DshZhuangFangyiPet
             try { if (_retryTimer != null) _retryTimer.Stop(); } catch { }
             try { if (_diagTimer != null) _diagTimer.Stop(); } catch { }
             try { if (_scalePostTimer != null) _scalePostTimer.Stop(); } catch { }
+            try { CloseInput(); } catch { }   // task-7：输入窗还开着就一并收掉
 
             Dispatcher d = _ui;
             if (d != null && !d.CheckAccess())

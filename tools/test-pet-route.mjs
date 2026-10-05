@@ -110,6 +110,10 @@ const hub = createHub({ logger: { warn () {}, debug () {}, info () {} }, heartbe
 let positionPatch = null
 let commandSeen = null
 let settingsValue = { enabled: true, mode: 'auto', scale: 1 }
+/** `/pet/send` 的桩：记录调用、可控能力位与错误。 */
+let sendSeen = null
+let sendCap = { available: true, reason: null }
+let sendThrow = null
 
 const handler = createHandler({
   snapshot,
@@ -126,6 +130,12 @@ const handler = createHandler({
   onCommand: command => {
     commandSeen = command
     return { ok: command }
+  },
+  sendCapability: () => sendCap,
+  onSend: async (text, sessionId) => {
+    if (sendThrow !== null) throw sendThrow
+    sendSeen = { text, sessionId }
+    return { sessionId: sessionId ?? 'auto-picked' }
   },
   getSettings: () => settingsValue,
   setSettings: next => {
@@ -538,6 +548,128 @@ await okAsync('POST /position 非法 JSON → 400', async () => {
     body: '{not json'
   })
   assert.equal(r.status, 400)
+})
+
+/* ── /pet/send：从气泡发消息（契约 §3）────────────────────────────────── */
+
+await okAsync('POST /send 正常发送并回执 sessionId', async () => {
+  sendSeen = null; sendThrow = null; sendCap = { available: true, reason: null }
+  const r = await call(`${ROUTE_PREFIX}/send`, {
+    method: 'POST',
+    headers: auth({ 'content-type': 'application/json' }),
+    body: JSON.stringify({ text: '  你好呀  ' })
+  })
+  assert.equal(r.status, 200)
+  const body = JSON.parse(r.body)
+  assert.equal(body.ok, true)
+  assert.ok(body.sessionId, '应回执投递到的会话')
+  assert.equal(sendSeen.text, '你好呀', '两端空白应被裁掉')
+})
+
+await okAsync('POST /send 空文本 → 400（不打扰会话）', async () => {
+  sendSeen = null
+  for (const text of ['', '   ', '\n\t ']) {
+    const r = await call(`${ROUTE_PREFIX}/send`, {
+      method: 'POST',
+      headers: auth({ 'content-type': 'application/json' }),
+      body: JSON.stringify({ text })
+    })
+    assert.equal(r.status, 400)
+    assert.equal(JSON.parse(r.body).error, 'empty')
+  }
+  assert.equal(sendSeen, null, '空文本不该到达发送层')
+})
+
+await okAsync('POST /send 超长 → 400（气泡是快捷入口，不是写长文的地方）', async () => {
+  sendSeen = null
+  const r = await call(`${ROUTE_PREFIX}/send`, {
+    method: 'POST',
+    headers: auth({ 'content-type': 'application/json' }),
+    body: JSON.stringify({ text: 'a'.repeat(2001) })
+  })
+  assert.equal(r.status, 400)
+  assert.equal(JSON.parse(r.body).error, 'too-long')
+  assert.equal(sendSeen, null)
+})
+
+await okAsync('POST /send 边界：正好 2000 字放行', async () => {
+  sendSeen = null
+  const r = await call(`${ROUTE_PREFIX}/send`, {
+    method: 'POST',
+    headers: auth({ 'content-type': 'application/json' }),
+    body: JSON.stringify({ text: 'a'.repeat(2000) })
+  })
+  assert.equal(r.status, 200, '上限本身是允许的')
+})
+
+await okAsync('POST /send 能力不可用 → 503 + 原因（不要假装发出去了）', async () => {
+  sendCap = { available: false, reason: '宿主未装配 sessionController 服务' }
+  const r = await call(`${ROUTE_PREFIX}/send`, {
+    method: 'POST',
+    headers: auth({ 'content-type': 'application/json' }),
+    body: JSON.stringify({ text: 'hi' })
+  })
+  assert.equal(r.status, 503)
+  const body = JSON.parse(r.body)
+  assert.equal(body.error, 'unavailable')
+  assert.match(body.reason, /sessionController/)
+  sendCap = { available: true, reason: null }
+})
+
+await okAsync('POST /send 没有可发会话 → 409', async () => {
+  const err = new Error('没有可发送的会话'); err.code = 'no-session'
+  sendThrow = err
+  const r = await call(`${ROUTE_PREFIX}/send`, {
+    method: 'POST',
+    headers: auth({ 'content-type': 'application/json' }),
+    body: JSON.stringify({ text: 'hi' })
+  })
+  assert.equal(r.status, 409)
+  assert.equal(JSON.parse(r.body).error, 'no-session')
+  sendThrow = null
+})
+
+await okAsync('POST /send 投递被拒 → 502 + 可读 message', async () => {
+  sendThrow = new Error('agent busy')
+  const r = await call(`${ROUTE_PREFIX}/send`, {
+    method: 'POST',
+    headers: auth({ 'content-type': 'application/json' }),
+    body: JSON.stringify({ text: 'hi' })
+  })
+  assert.equal(r.status, 502)
+  const body = JSON.parse(r.body)
+  assert.equal(body.error, 'send-failed')
+  assert.match(body.message, /busy/)
+  sendThrow = null
+})
+
+await okAsync('POST /send 非法 JSON → 400', async () => {
+  const r = await call(`${ROUTE_PREFIX}/send`, {
+    method: 'POST',
+    headers: auth({ 'content-type': 'application/json' }),
+    body: '{oops'
+  })
+  assert.equal(r.status, 400)
+})
+
+await okAsync('POST /send 无令牌且伪造 Host → 403（准入与其他路由一致）', async () => {
+  // `fetch` 不允许改 Host 头，所以直接对 server 发原始请求（照抄 §2 的做法）。
+  const raw = await new Promise((resolve, reject) => {
+    const socket = http.request({
+      host: '127.0.0.1',
+      port,
+      path: `${ROUTE_PREFIX}/send`,
+      method: 'POST',
+      headers: { host: 'evil.example.com', 'content-type': 'application/json' }
+    }, res => {
+      let body = ''
+      res.on('data', c => { body += c })
+      res.on('end', () => resolve({ status: res.statusCode, body }))
+    })
+    socket.on('error', reject)
+    socket.end(JSON.stringify({ text: 'hi' }))
+  })
+  assert.equal(raw.status, 403, '发消息是**写**操作，不能只靠同源假设')
 })
 
 await okAsync('POST /command 分派命令', async () => {

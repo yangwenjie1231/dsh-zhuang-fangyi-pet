@@ -41,6 +41,11 @@ namespace DshZhuangFangyiPet
         private readonly Border _fallback;
         private readonly TextBlock _fallbackText;
 
+        // task-7：悬停 ✎ 发消息入口（默认隐藏；MouseEnter 出现 / MouseLeave 隐藏）
+        private readonly Border _sendBtn;
+        private bool _sendAvailable;
+        private bool _sendOpen;
+
         /// <summary>
         /// 位置上报回调（物理像素 x,y）。回响环修复：**不含 scale** —— 缩放走
         /// /pet/settings 专用通道；且 ReportPosition 内部按"值没变就不发"去重。
@@ -99,6 +104,41 @@ namespace DshZhuangFangyiPet
             _fallback.Visibility = Visibility.Collapsed;
             _root.Children.Add(_fallback);
 
+            // task-7：悬停 ✎ 按钮 —— 小、半透明、贴右上角，尺寸随 scale。
+            // 放在 _root 最上层；命中测试在 HitTestDip/WndProc 里给按钮区放行。
+            TextBlock pen = new TextBlock();
+            pen.Text = "✎";
+            pen.FontSize = 13;
+            pen.Foreground = Brushes.White;
+            pen.TextAlignment = TextAlignment.Center;
+            _sendBtn = new Border();
+            _sendBtn.Child = pen;
+            _sendBtn.CornerRadius = new CornerRadius(9);
+            _sendBtn.Width = 22;
+            _sendBtn.Height = 22;
+            _sendBtn.HorizontalAlignment = HorizontalAlignment.Right;
+            _sendBtn.VerticalAlignment = VerticalAlignment.Top;
+            _sendBtn.Margin = new Thickness(0, -7, -7, 0);
+            _sendBtn.Background = new SolidColorBrush(Color.FromArgb(150, 60, 90, 150));
+            _sendBtn.BorderBrush = new SolidColorBrush(Color.FromArgb(180, 190, 215, 250));
+            _sendBtn.BorderThickness = new Thickness(1);
+            _sendBtn.Cursor = Cursors.Hand;
+            _sendBtn.Visibility = Visibility.Collapsed;
+            _sendBtn.MouseDown += delegate(object s, MouseButtonEventArgs e)
+            {
+                // 只吃掉事件：不进拖动，也不进双击分派
+                e.Handled = true;
+            };
+            _sendBtn.MouseLeftButtonUp += delegate(object s, MouseButtonEventArgs e)
+            {
+                e.Handled = true;
+                Action h = SendButtonClicked;
+                if (h != null) h();
+            };
+            _sendBtn.MouseEnter += delegate { _sendBtn.Opacity = 1; };
+            _sendBtn.MouseLeave += delegate { _sendBtn.Opacity = 0.78; };
+            _root.Children.Add(_sendBtn);
+
             Content = _root;
 
             _timer = new DispatcherTimer(DispatcherPriority.Render);
@@ -109,9 +149,42 @@ namespace DshZhuangFangyiPet
             MouseLeftButtonUp += OnMouseLeftButtonUp;
             MouseRightButtonUp += OnMouseRightButtonUp;
             MouseWheel += OnMouseWheel;   // task-6：悬停滚轮缩放
+            MouseEnter += delegate(object s, MouseEventArgs e) { UpdateSendBtnVisibility(true); };
+            MouseLeave += delegate(object s, MouseEventArgs e) { UpdateSendBtnVisibility(false); };
 
             Loaded += OnLoaded;
             Closing += OnClosing;
+        }
+
+        /// <summary>task-7：✎ 被点击（Program 装配成打开输入窗）。</summary>
+        public Action SendButtonClicked = delegate { };
+
+        /// <summary>task-7：snapshot.send 能力位变化时由 Program 调（false → 隐藏按钮）。</summary>
+        public void SetSendAvailable(bool available)
+        {
+            _sendAvailable = available;
+            if (!available) UpdateSendBtnVisibility(false);
+        }
+
+        /// <summary>task-7：输入窗打开期间按钮保持可见（鼠标会离开本体去输入窗）。</summary>
+        public void SetSendOpen(bool open)
+        {
+            _sendOpen = open;
+            UpdateSendBtnVisibility(open);
+        }
+
+        /// <summary>悬停显隐：能力可用 + （鼠标在本体上 或 输入窗开着）→ 显示。</summary>
+        private void UpdateSendBtnVisibility(bool overPet)
+        {
+            bool show = _sendAvailable && (overPet || _sendOpen);
+            // 尺寸随 scale 缩放（22 DIP 基准，最小 16、最大 40，别在大尺寸下成小点）
+            double s = PetOptions.ClampScale(_opt.Scale);
+            double sz = Math.Max(16, Math.Min(40, 22 * s));
+            _sendBtn.Width = sz;
+            _sendBtn.Height = sz;
+            TextBlock tb = _sendBtn.Child as TextBlock;
+            if (tb != null) tb.FontSize = Math.Max(10, Math.Min(26, 13 * s));
+            _sendBtn.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
         }
 
         public string CurrentState { get { return _state; } }
@@ -376,6 +449,7 @@ namespace DshZhuangFangyiPet
             _opt.Scale = scale;
             if (_sheet != null) ApplySizeForSheet();
             ReclampPosition(false);
+            UpdateSendBtnVisibility(IsMouseOver);   // task-7：✎ 尺寸随 scale 即时重算
         }
 
         public void SetOpacity(double opacity)
@@ -436,8 +510,22 @@ namespace DshZhuangFangyiPet
         // 命中测试 / 拖动
         // ------------------------------------------------------------------
 
+        /// <summary>task-7：✎ 按钮的 DIP 矩形（按钮在 _root 里贴右上角，负 margin 外扩 7）。</summary>
+        private bool IsOverSendButton(Point dip)
+        {
+            if (_sendBtn == null || _sendBtn.Visibility != Visibility.Visible) return false;
+            double bw = _sendBtn.Width, bh = _sendBtn.Height;
+            if (bw <= 0 || bh <= 0) return false;
+            double left = ActualWidth - bw - _sendBtn.Margin.Right;
+            double top = -_sendBtn.Margin.Top;
+            return dip.X >= left && dip.X <= ActualWidth &&
+                   dip.Y >= top && dip.Y <= top + bh;
+        }
+
         private bool HitTestDip(Point p)
         {
+            // task-7：按钮区永远算实体（桌宠透明角落是 HTTRANSPARENT，按钮必须点得到）
+            if (IsOverSendButton(p)) return true;
             if (!_clickThrough) return true;
             if (_sheet == null)
             {
@@ -570,7 +658,7 @@ namespace DshZhuangFangyiPet
                     }
 
                 case PetNative.WM_MOUSEACTIVATE:
-                    // 点桌宠不要把用户的编辑器焦点抢走
+                    // 点桌宠/按钮不要把用户的编辑器焦点抢走（按钮用 MouseLeftButtonUp 触发，仍能收到点击）
                     handled = true;
                     return new IntPtr(PetNative.MA_NOACTIVATE);
 

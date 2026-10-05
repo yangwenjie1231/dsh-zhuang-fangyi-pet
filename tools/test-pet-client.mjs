@@ -715,6 +715,69 @@ ok('透明抠图 → 气泡保持原样（不加 opaque 修饰类）', () => {
   assert.ok(!bubbleNode.props.className.includes('zf-pet__bubble--opaque'))
 })
 
+/* ── ✎ 从气泡发消息（能力位门控）──────────────────────────────────────────
+ *
+ * 入口只在 `snapshot.send.available === true` 时出现 —— 宿主没装配
+ * `sessionController` 时给一个点了必报错的按钮，比不给入口更像坏了。
+ * ──────────────────────────────────────────────────────────────────────── */
+
+function renderPetWithSend (sendBlock) {
+  const l = loadClient()
+  l.exports.apply(l.ctx)
+  const { Pet, runtime } = l.exports.__test
+  runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 1, frameMs: 36 } } }
+  runtime.__state.snapshot = { petState: 'idle', label: '', bubble: null, send: sendBlock }
+  runtime.__state.settings = normalizePet({})
+  l.react.resetHooks()
+  const tree = Pet({ runtime })
+  const btn = tree.props.children.find(c => c !== null && c.props?.className === 'zf-pet__send-btn')
+  return { tree, btn }
+}
+
+ok('⭐ send.available=false 时不渲染 ✎（不给必然报错的入口）', () => {
+  const { btn } = renderPetWithSend({ available: false, reason: '宿主未装配 sessionController 服务' })
+  assert.equal(btn, undefined)
+})
+
+ok('⭐ 缺 send 块（旧 Host 快照）时也不渲染 ✎', () => {
+  const { btn } = renderPetWithSend(undefined)
+  assert.equal(btn, undefined, '缺能力位按不可用处理')
+})
+
+ok('send.available=true 时渲染 ✎', () => {
+  const { btn } = renderPetWithSend({ available: true, reason: null })
+  assert.ok(btn !== undefined, '能力可用就该给入口')
+  assert.equal(btn.type, 'button')
+})
+
+ok('点击 ✎ 会 stopPropagation（不能顺带触发拖动/双击）', () => {
+  const { btn } = renderPetWithSend({ available: true, reason: null })
+  let stopped = false
+  let prevented = false
+  btn.props.onClick({ stopPropagation: () => { stopped = true }, preventDefault: () => { prevented = true } })
+  assert.equal(stopped, true, '必须阻止冒泡到容器的指针处理')
+})
+
+ok('⭐ clickThrough 时不给 ✎（按钮会显示却点不动）', () => {
+  const l = loadClient()
+  l.exports.apply(l.ctx)
+  const { Pet, runtime } = l.exports.__test
+  runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 1, frameMs: 36 } } }
+  runtime.__state.snapshot = { petState: 'idle', label: '', bubble: null, send: { available: true } }
+  runtime.__state.settings = normalizePet({ clickThrough: true })
+  l.react.resetHooks()
+  const tree = Pet({ runtime })
+  const btn = tree.props.children.find(c => c !== null && c.props?.className === 'zf-pet__send-btn')
+  assert.equal(btn, undefined, '穿透模式下桌宠收不到鼠标，按钮点了也没用')
+})
+
+ok('activity 字段归一化：非法值回落 normal', () => {
+  assert.equal(normalizePet({ activity: 'playful' }).activity, 'playful')
+  assert.equal(normalizePet({ activity: 'quiet' }).activity, 'quiet')
+  assert.equal(normalizePet({ activity: 'chaos' }).activity, 'normal', '非法值回落')
+  assert.equal(normalizePet({}).activity, 'normal')
+})
+
 ok('缺该状态的素材时回落到 idle', () => {
   const l = loadClient()
   l.exports.apply(l.ctx)

@@ -38,6 +38,10 @@
  * @module src/pet/state.js
  */
 
+// 只借一个**纯函数**（带抖动的排程计算）—— 它没有 IO 也没有状态，
+// 不违反本文件"无 IO、无定时器"的约束。活跃度档位的语义真相在 `activity.js`。
+import { nextIdleEmoteDelay } from './activity.js'
+
 /** 合法状态名（契约 §1 的唯一值域；顺序即文档顺序，非优先级）。 */
 export const PET_STATES = [
   'waking',
@@ -88,7 +92,8 @@ export const EVENT_TEXT = {
 }
 
 /** 进入这些状态时会弹一次气泡；`idle`/`waking`/`sleeping` 太安静，不弹。 */
-const DEFAULT_BUBBLE_STATES = ['listening', 'thinking', 'working', 'waiting', 'happy', 'error']
+/** 默认弹气泡的状态（`activity.js` 的"正常/调皮"档按它走）。 */
+export const DEFAULT_BUBBLE_STATES = ['listening', 'thinking', 'working', 'waiting', 'happy', 'error']
 
 /** 默认参数。全部可被 `createPetState({config})` 覆盖，便于测试用极小值。 */
 export const DEFAULT_CONFIG = {
@@ -106,6 +111,12 @@ export const DEFAULT_CONFIG = {
   bubbleSilenceMs: 8000,
   /** 进入哪些状态时弹气泡。 */
   bubbleStates: DEFAULT_BUBBLE_STATES,
+  /**
+   * 空闲时**主动**蹦一个随机表情的中位间隔（ms）。`null` = 永不主动。
+   *
+   * 由活跃度档位给出（只有"调皮"会给一个数）。见 `activity.js`。
+   */
+  idleEmoteMs: null,
   /** 气泡文案语言。 */
   locale: 'zh'
 }
@@ -221,7 +232,35 @@ export function createPetState (options = {}) {
   for (const [key, value] of Object.entries(options.config ?? {})) {
     if (value !== undefined) overrides[key] = value
   }
-  const cfg = { ...DEFAULT_CONFIG, ...overrides }
+  /** 配置（**可变**：设置页改活跃度/气泡参数要能热更新，见 `setConfig`）。 */
+  let cfg = { ...DEFAULT_CONFIG, ...overrides }
+
+  /**
+   * 把配置补丁归一化：只接受已知键、过滤 undefined、夹取数值。
+   *
+   * 与创建期同一套规则 —— 热更新不能成为绕过校验的后门。
+   */
+  function normalizeConfig (patch) {
+    const next = { ...DEFAULT_CONFIG }
+    for (const [key, value] of Object.entries(patch ?? {})) {
+      if (!(key in DEFAULT_CONFIG)) continue
+      if (value === undefined) continue
+      next[key] = value
+    }
+    // 数值字段夹取：负数/NaN 会让排程与静默期算出荒唐结果。
+    for (const key of ['wakingMs', 'happyMs', 'listeningMs', 'sleepMs', 'bubbleMs', 'bubbleSilenceMs']) {
+      const n = Number(next[key])
+      next[key] = Number.isFinite(n) && n >= 0 ? n : DEFAULT_CONFIG[key]
+    }
+    if (next.idleEmoteMs !== null) {
+      const n = Number(next.idleEmoteMs)
+      next.idleEmoteMs = Number.isFinite(n) && n > 0 ? n : null
+    }
+    if (!Array.isArray(next.bubbleStates)) next.bubbleStates = DEFAULT_CONFIG.bubbleStates
+    if (next.locale !== 'zh' && next.locale !== 'en') next.locale = DEFAULT_CONFIG.locale
+    return next
+  }
+
   const pickBubbleImage = typeof options.pickBubbleImage === 'function'
     ? options.pickBubbleImage
     : () => null
@@ -256,6 +295,10 @@ export function createPetState (options = {}) {
    */
   let lastCompletedAt = 0
   let completedNotifiedAt = 0
+  /** "调皮"档主动蹦表情的排程：下次时刻、是否已武装、以及用于绕开静默期的递增 key。 */
+  let idleEmoteAt = 0
+  let idleEmoteArmed = false
+  let idleEmoteSeq = 0
   let nativeAvailable = false
   let nativeError = null
 
@@ -374,6 +417,30 @@ export function createPetState (options = {}) {
         priority: priorityOf('happy'),
         table: EVENT_TEXT
       })) changed = true
+    }
+
+    // ⭐ 活跃度"调皮"：空闲时**主动**蹦一个随机表情。
+    //
+    // 只在 truly idle（不是 working/sleeping/waiting）时才会蹦 —— 用户在忙的时候
+    // 桌宠自己跳出来卖萌是干扰，不是可爱。
+    //
+    // 每次都重新排下一次（哪怕这次没弹）：排程本身就是限流，
+    // 所以用**带计数的 key**绕开按 key 的静默期，而不是靠静默期限流。
+    if (typeof cfg.idleEmoteMs === 'number' && cfg.idleEmoteMs > 0 && cfg.bubbleStates.length > 0) {
+      if (idleEmoteArmed === false) {
+        idleEmoteAt = at + nextIdleEmoteDelay(cfg.idleEmoteMs)
+        idleEmoteArmed = true
+      } else if (petState === 'idle' && at >= idleEmoteAt) {
+        idleEmoteSeq += 1
+        requestBubble(`idle-emote-${idleEmoteSeq}`, at, { state: 'idle' })
+        idleEmoteAt = at + nextIdleEmoteDelay(cfg.idleEmoteMs)
+        changed = true
+      } else if (petState !== 'idle' && at >= idleEmoteAt) {
+        // 忙着呢 —— 这段时间不算数，重新排，别一空下来就立刻蹦。
+        idleEmoteAt = at + nextIdleEmoteDelay(cfg.idleEmoteMs)
+      }
+    } else {
+      idleEmoteArmed = false
     }
 
     // 气泡过期：清掉，让客户端收起气泡窗。
@@ -602,6 +669,43 @@ export function createPetState (options = {}) {
     apply,
     tick: () => refresh(now()),
     snapshot,
+    /**
+     * 热更新配置（**改完立即生效，不需要重载插件**）。
+     *
+     * 用途：活跃度档位、气泡时长/间隔、完成提醒这些都在设置页里现改 ——
+     * 用户点一下就该看到差别，而不是"重启 DSH 才生效"。
+     * 走的是同一套 `normalizeConfig`，所以非法值依旧被挡住。
+     *
+     * @param {object} patch - 配置补丁（只写要改的字段）
+     */
+    setConfig (patch) {
+      cfg = normalizeConfig({ ...cfg, ...patch })
+      // 换档后立刻重算：比如从"安静"切到"调皮"，当前该不该弹要马上重新判断。
+      idleEmoteArmed = false
+      refresh(now())
+    },
+    /**
+     * 各会话的活跃记账（**供"发消息挑目标会话"用**）。
+     *
+     * 快照里的 `sessions` 只有 `{sessionId, state, toolsInFlight}`，**不带时间**，
+     * 判不出谁最近活跃。这里把内部记录里已有的 `lastEventAt` 透出来，
+     * 让上层挑"最近那个会话"时用的是同一份真相，而不是另建一套认知。
+     *
+     * @returns {Array<{sessionId: string, at: number, state: string, running: boolean, toolsInFlight: number}>}
+     *   按 `at` 降序（最近活跃在前）。空会话列表返回 []。
+     */
+    sessionStats () {
+      const at = now()
+      return [...sessions.values()]
+        .map(rec => ({
+          sessionId: rec.sessionId,
+          at: typeof rec.lastEventAt === 'number' ? rec.lastEventAt : 0,
+          state: sessionState(rec, at),
+          running: rec.running === true,
+          toolsInFlight: rec.toolsInFlight.size
+        }))
+        .sort((a, b) => b.at - a.at)
+    },
     /** 订阅变化；返回取消函数。监听者抛错被容纳，不影响其它监听者。 */
     on (fn) {
       if (typeof fn !== 'function') return () => {}

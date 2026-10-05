@@ -42,6 +42,15 @@ export const DOUBLE_CLICK_ACTIONS = ['focus-dsh', 'emote', 'none']
 /** 深浅色贴纸选择。`auto` = 渲染方自己判断（exe 读系统、overlay 读外壳）。 */
 export const THEME_MODES = ['auto', 'light', 'dark']
 
+/**
+ * 活跃度档位：安静 / 正常 / 调皮。
+ *
+ * 用户点名的功能（"调成安静、正常、调皮来改变它的活跃度"）。
+ * 它是一层**预设**，作用在气泡频率与主动卖萌上；具体数值见
+ * `src/pet/activity.js`（Host 与测试共用的唯一真相）。
+ */
+export const ACTIVITY_MODES = ['quiet', 'normal', 'playful']
+
 /** 设置结构版本。v1 为首个版本。 */
 export const SETTINGS_VERSION = 1
 
@@ -73,8 +82,10 @@ export function defaultSettings () {
     bubbleGapMs: 8000,
     /** 双击桌宠做什么。 */
     doubleClick: 'focus-dsh',
-    /** 深浅色贴纸：auto 跟随渲染方环境，light/dark 强制。 */
+    /** 深色模式贴纸：auto 跟随渲染方环境，light/dark 强制。 */
     theme: 'auto',
+    /** 活跃度：安静 / 正常 / 调皮。改变气泡频率与是否主动卖萌。 */
+    activity: 'normal',
     /** 悬停时是否显示状态文字。 */
     hint: true,
     /** 是否在桌宠**下方常显**状态文字（不止悬停才出现）。 */
@@ -133,6 +144,7 @@ export function normalizeSettings (input) {
 
   if (DOUBLE_CLICK_ACTIONS.includes(input.doubleClick)) out.doubleClick = input.doubleClick
   if (THEME_MODES.includes(input.theme)) out.theme = input.theme
+  if (ACTIVITY_MODES.includes(input.activity)) out.activity = input.activity
 
   if (input.locale === 'zh' || input.locale === 'en') out.locale = input.locale
   out.version = SETTINGS_VERSION
