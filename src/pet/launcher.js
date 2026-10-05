@@ -149,7 +149,22 @@ export function createLauncher (deps) {
       return false
     }
 
-    const url = runtime?.url ?? baseUrlOf(ctx?.webServer)
+    // ⚠️ 取 webServer **必须用 `ctx.get()`，不能读 `ctx.webServer`**：
+    // cordis 对"未在 inject 声明的服务"用 Proxy getter，读取会**抛**
+    // `cannot get property "webServer" without inject`（实测把 exe 启动整个掐死）。
+    // 可选链 `ctx?.webServer` 防不住这个 —— 抛的是异常，不是 undefined。
+    // `ctx.get()` 是 cordis 的"无 inject 读取"通道，读不到返回 undefined。
+    let url = runtime?.url ?? null
+    if (url === null || url === undefined) {
+      let webServer = null
+      try {
+        webServer = typeof ctx?.get === 'function' ? ctx.get('webServer') : null
+      } catch (error) {
+        // 某些宿主实现连 get 都可能抛（服务名未注册）——按"端口未知"处理。
+        logger.warn?.(`zhuang-fangyi-pet: 读 webServer 失败（${error?.message ?? error}）`)
+      }
+      url = baseUrlOf(webServer)
+    }
     if (url === null || url === undefined) {
       available = false
       reason = 'webServer 端口未知，无法告知 exe 连哪里'

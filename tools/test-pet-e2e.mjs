@@ -21,6 +21,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { normalizeSettings } from '../src/settings.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.join(HERE, '..')
@@ -94,6 +95,28 @@ function makeCtx (webServer) {
     __services: services
   }
   return ctx
+}
+
+/**
+ * 把桩 ctx 包成"cordis 模式"：读**未声明**的服务时**抛**
+ * `cannot get property "x" without inject`（复刻 cordis 的 Proxy getter）。
+ *
+ * 为什么需要：真实 cordis 里，`ctx.webServer` 这种未在 inject 声明的服务
+ * **读取会抛异常**，而不是返回 undefined。`launcher.js` 曾用 `ctx?.webServer`
+ * 去取端口 —— 可选链防不住这个，异常直接把 exe 启动掐死，而当时所有桩 ctx
+ * 都是普通对象（能读到 webServer），所以测试全绿、真实环境必崩。
+ * 这个包装让"抛"这条路径在测试里也能被覆盖。
+ */
+function toCordisLike (ctx, injected = []) {
+  const allowed = new Set(['logger', 'on', 'emit', 'effect', 'inject', 'get',
+    'provide', 'set', 'call', 'subprocess', 'sessionController', ...injected])
+  return new Proxy(ctx, {
+    get (target, prop, recv) {
+      if (typeof prop === 'symbol' || prop in target) return Reflect.get(target, prop, recv)
+      if (allowed.has(prop)) return undefined
+      throw new Error(`cannot get property "${String(prop)}" without inject`)
+    }
+  })
 }
 
 /** 桩 webServer：真的起一个 http.Server，把注册的 route 接上。 */
@@ -611,6 +634,61 @@ await ok('降级时其余功能照常（状态、素材、路由都可用）', a
   assert.equal(atlas.status, 200)
   const body = JSON.parse(atlas.body)
   assert.equal(body.report.coveredStates.length, 9, '素材仍应完整')
+})
+
+await ok('⭐ cordis 语义下取端口走 ctx.get()，不读会抛的 ctx.webServer', async () => {
+  // 回归测试，对应一次真实事故：`launcher.js` 用 `ctx?.webServer` 取端口，
+  // 而 cordis 对未声明服务用 Proxy getter —— 读取**抛** `cannot get property ... without inject`。
+  // 可选链防不住，异常被 apply 的 try/catch 吞掉后，exe 永远起不来（真机表现"桌宠不出现"）。
+  //
+  // 注意断言方式：**不能**只断言 apply() 不抛（那层 try/catch 一定会兜住，测不出真伪）。
+  // 这里直接盯住"端口是怎么拿到的"：baseUrlOf 必须拿到 webServer，
+  // 也就是 launcher 走了 ctx.get() 这条路。`readWebServer` 计数即证据。
+  const { createLauncher } = await import('../src/pet/launcher.js')
+
+  const webServer = { port: 51999, host: '127.0.0.1' }
+  let getCalls = 0
+  let reads = 0
+  // 复刻 cordis：读未声明服务**抛**；ctx.get('webServer') 正常返回。
+  const cordisCtx = new Proxy({
+    logger: { info () {}, warn () {}, debug () {}, error () {} },
+    get (name) {
+      getCalls += 1
+      if (name === 'webServer') return webServer
+      if (name === 'subprocess') {
+        return { spawn () { return { kill () {}, unref () {}, on () {} } } }
+      }
+      return undefined
+    }
+  }, {
+    get (target, prop, recv) {
+      if (typeof prop === 'symbol' || prop in target) return Reflect.get(target, prop, recv)
+      // 任何未声明的服务属性：cordis 的 Proxy getter 行为
+      reads += 1
+      throw new Error(`cannot get property "${String(prop)}" without inject`)
+    }
+  })
+
+  const launcher = createLauncher({
+    ctx: cordisCtx,
+    pkgRoot: ROOT,
+    getSettings: () => ({ ...normalizeSettings({ enabled: true, mode: 'auto' }) }),
+    getSnapshot: () => ({ petState: 'idle' }),
+    token: 'f'.repeat(48),
+    logger: { info () {}, warn () {}, debug () {}, error () {} },
+    onStatus () {}
+  })
+
+  // 显式不带 runtime.url，强制走"自己推导端口"这条路径（事故发生的正是这条）
+  const started = launcher.start({ state: 'idle' })
+  // 不论 exe 二进制在不在（probe 可能先失败），关键断言：
+  // ① 读未声明属性这条路**一次都不该走**（reads === 0）
+  // ② 端口必须是用 ctx.get 拿到的
+  assert.equal(reads, 0, `不应读未声明的 ctx 属性（cordis 会抛）；实际读了 ${reads} 次`)
+  if (started === true) {
+    assert.ok(getCalls > 0, '启动时必须通过 ctx.get 取端口')
+  }
+  launcher.dispose?.()
 })
 
 /* ══════════════════════════════════════════════════════════════════════════
