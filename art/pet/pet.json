@@ -149,7 +149,6 @@
     },
     {
       "file": "bubble/new/01-bored.png",
-      "fileDark": "bubble/new/01-bored-dark.png",
       "h": 256,
       "hasText": true,
       "opaque": true,
@@ -157,7 +156,6 @@
     },
     {
       "file": "bubble/new/02-good-morning.png",
-      "fileDark": "bubble/new/02-good-morning-dark.png",
       "h": 256,
       "hasText": true,
       "opaque": true,
@@ -165,7 +163,6 @@
     },
     {
       "file": "bubble/new/03-dazed.png",
-      "fileDark": "bubble/new/03-dazed-dark.png",
       "h": 256,
       "hasText": true,
       "opaque": true,
@@ -173,7 +170,6 @@
     },
     {
       "file": "bubble/new/04-definitely.png",
-      "fileDark": "bubble/new/04-definitely-dark.png",
       "h": 256,
       "hasText": true,
       "opaque": true,
@@ -181,7 +177,6 @@
     },
     {
       "file": "bubble/new/05-wink.png",
-      "fileDark": "bubble/new/05-wink-dark.png",
       "h": 256,
       "hasText": true,
       "opaque": true,
@@ -189,7 +184,6 @@
     },
     {
       "file": "bubble/new/06-brain-overload.png",
-      "fileDark": "bubble/new/06-brain-overload-dark.png",
       "h": 256,
       "hasText": true,
       "opaque": true,
@@ -197,7 +191,6 @@
     },
     {
       "file": "bubble/new/07-wants.png",
-      "fileDark": "bubble/new/07-wants-dark.png",
       "h": 256,
       "hasText": true,
       "opaque": true,
@@ -205,7 +198,6 @@
     },
     {
       "file": "bubble/new/08-miss-you.png",
-      "fileDark": "bubble/new/08-miss-you-dark.png",
       "h": 256,
       "hasText": true,
       "opaque": true,
@@ -213,7 +205,6 @@
     },
     {
       "file": "bubble/new/09-got-it.png",
-      "fileDark": "bubble/new/09-got-it-dark.png",
       "h": 256,
       "hasText": true,
       "opaque": true,
@@ -221,7 +212,6 @@
     },
     {
       "file": "bubble/new/10-hate-you.png",
-      "fileDark": "bubble/new/10-hate-you-dark.png",
       "h": 256,
       "hasText": true,
       "opaque": true,
@@ -229,7 +219,6 @@
     },
     {
       "file": "bubble/new/11-sneak-snack.png",
-      "fileDark": "bubble/new/11-sneak-snack-dark.png",
       "h": 256,
       "hasText": true,
       "opaque": true,
@@ -237,7 +226,6 @@
     },
     {
       "file": "bubble/new/12-wake-up.png",
-      "fileDark": "bubble/new/12-wake-up-dark.png",
       "h": 192,
       "hasText": true,
       "opaque": true,
@@ -245,7 +233,6 @@
     },
     {
       "file": "bubble/new/13-so-good.png",
-      "fileDark": "bubble/new/13-so-good-dark.png",
       "h": 256,
       "hasText": true,
       "opaque": true,
@@ -253,7 +240,6 @@
     },
     {
       "file": "bubble/new/14-so-strong.png",
-      "fileDark": "bubble/new/14-so-strong-dark.png",
       "h": 256,
       "hasText": true,
       "opaque": true,
@@ -261,7 +247,6 @@
     },
     {
       "file": "bubble/new/15-so-loud.png",
-      "fileDark": "bubble/new/15-so-loud-dark.png",
       "h": 256,
       "hasText": true,
       "opaque": true,
@@ -269,7 +254,6 @@
     },
     {
       "file": "bubble/new/16-knock-knock.png",
-      "fileDark": "bubble/new/16-knock-knock-dark.png",
       "h": 256,
       "hasText": true,
       "opaque": true,
@@ -277,7 +261,6 @@
     },
     {
       "file": "bubble/new/17-crying.png",
-      "fileDark": "bubble/new/17-crying-dark.png",
       "h": 256,
       "hasText": true,
       "opaque": true,
@@ -285,7 +268,6 @@
     },
     {
       "file": "bubble/new/18-disgusted.png",
-      "fileDark": "bubble/new/18-disgusted-dark.png",
       "h": 256,
       "hasText": true,
       "opaque": true,
@@ -293,7 +275,6 @@
     },
     {
       "file": "bubble/new/19-slacking.png",
-      "fileDark": "bubble/new/19-slacking-dark.png",
       "h": 256,
       "hasText": true,
       "opaque": true,
@@ -301,7 +282,6 @@
     },
     {
       "file": "bubble/new/20-unhappy.png",
-      "fileDark": "bubble/new/20-unhappy-dark.png",
       "h": 256,
       "hasText": true,
       "opaque": true,

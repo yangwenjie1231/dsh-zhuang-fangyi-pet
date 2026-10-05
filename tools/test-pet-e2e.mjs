@@ -477,6 +477,46 @@ await ok('art/pet/pet.json 存在（素材管线已跑过）', async () => {
   assert.ok(fs.existsSync(path.join(ART, 'pet.json')), '缺少 pet.json，请先跑 tools/prepare-pet.py')
 })
 
+await ok('⭐ 深色模式**直接用原图**：真实清单里一个 fileDark 都没有', async () => {
+  // 用户实测反馈："深色模式气泡表情反转太诡异了，直接原图还挺好的"
+  //          "深色模式不用单独的表情包"。
+  //
+  // 原因是结构性的，不是算法调参能救的：那批贴纸是**白纸上的墨线**，
+  // 白色不只是背景，**还是脸和衣服的填充色**。翻明度之后整张脸变黑、
+  // 只有轮廓发白 —— 那是**底片**，不是"深色贴纸"。人眼对"脸是黑的"极度敏感。
+  //
+  // 这条断言盯的是**真实产物**（磁盘 pet.json + HTTP 两处），
+  // 因为"管线不再生成"与"清单里确实没有"是两件事：
+  // 只要有人把 dark=True 加回去，或旧产物没被清理，这里就会红。
+  const onDisk = JSON.parse(fs.readFileSync(path.join(ART, 'pet.json'), 'utf8'))
+  const withDark = (onDisk.bubble ?? []).filter(b => b.fileDark)
+  assert.equal(withDark.length, 0,
+    `清单里不该有 fileDark，实际 ${withDark.length} 张：${withDark.map(b => b.file).join(', ')}`)
+
+  // HTTP 这一跳也要查（只测磁盘不够 —— files 字段就吃过这个亏）。
+  const r = await get('/api/zhuang-fangyi/pet/atlas')
+  const body = JSON.parse(r.body)
+  const httpDark = (body.bubble ?? []).filter(b => b.fileDark)
+  assert.equal(httpDark.length, 0, `HTTP 清单里也不该有 fileDark，实际 ${httpDark.length} 张`)
+
+  // 画廊（用户主动浏览全部表情的那条路）同样不该有条目指向深色文件。
+  const g = JSON.parse((await get('/api/zhuang-fangyi/pet/gallery')).body)
+  const galleryDark = (g.items ?? []).filter(it => it.fileDark)
+  assert.equal(galleryDark.length, 0, `画廊里也不该有 fileDark，实际 ${galleryDark.length} 条`)
+
+  // 磁盘上也不该留 `-dark.png` 孤儿（管线会清理未引用产物）。
+  const strays = []
+  const walk = dir => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name)
+      if (e.isDirectory()) walk(p)
+      else if (e.name.endsWith('-dark.png')) strays.push(path.relative(ART, p))
+    }
+  }
+  walk(path.join(ART, 'bubble'))
+  assert.equal(strays.length, 0, `磁盘上残留深色变体：${strays.join(', ')}`)
+})
+
 await ok('GET /pet/atlas 返回清单 + 覆盖率报告', async () => {
   const r = await get('/api/zhuang-fangyi/pet/atlas')
   assert.equal(r.status, 200)
