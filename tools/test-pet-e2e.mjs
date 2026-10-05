@@ -324,6 +324,10 @@ await ok('⭐ 有 sessionController 时：list() 的标题进快照，指定会�
   assert.ok(byId.has('s-titled'), '状态机记的会话必须在列表里')
   assert.equal(byId.get('s-titled').title, '桌宠开发', '有标题就用标题')
   assert.equal(byId.get('s-cwd-only')?.title, 'beta', '没标题用工作目录名')
+  // ⭐ 层级分组：会话要带 project（工作目录名），选择器才能按项目分层。
+  // 用户反馈"选择对话的时候没有层级" —— 385 个会话大量同名，平铺一串选不出来。
+  assert.equal(byId.get('s-cwd-only')?.project, 'beta', '带 cwd 的会话应有 project')
+  assert.equal(byId.get('s-titled')?.project, 'alpha', 'project 取自 cwd 的目录名')
   assert.equal(byId.get('s-bare-1234567890')?.title, 's-bare-1', '都没有用 id 前缀')
   // ⭐ 重名消歧：真机截图里 11 个对话同名，光看名字选不出该发哪个。
   const dupA = byId.get('s-dup-aaaaaaaa')

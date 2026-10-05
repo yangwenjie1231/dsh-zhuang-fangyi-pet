@@ -756,7 +756,22 @@ namespace DshZhuangFangyiPet
             bool above = fy < 1000;                                            // 在桌宠上方
             Check(centered && above, "输入窗跟随桌宠：水平居中 + 贴在桌宠上方",
                   "目标=(" + fx.ToString("0") + "," + fy.ToString("0") + ") 宽=" + picker.DiagWidth.ToString("0") +
-                  "（桌宠 1000,1000 200x200，中心 x=1100）");            bool sel1 = picker.SelectedSessionId() == "s-a";
+                  "（桌宠 1000,1000 200x200，中心 x=1100）");            // ⭐ 选择器显示要带**项目前缀**（用户反馈"选择对话的时候没有层级"）。
+            // 真机 385 个会话大量同名，平铺一串根本选不出来。
+            PetSessionChoice hier = new PetSessionChoice();
+            hier.SessionId = "s-hier";
+            hier.Title = "精确中文画面文字转录（OCR） · s-dup-aa";
+            hier.Project = "demac-e2e-cef";
+            hier.Running = true;
+            string disp = hier.Display;
+            bool hierOk = disp.Contains("[demac-e2e-cef]") && disp.Contains("●") && disp.Contains("s-dup-aa");
+            Check(hierOk, "选择器显示带项目前缀与运行标记（形成层级）", disp);
+            // 没有 project 时不显示空方括号
+            PetSessionChoice noProj = new PetSessionChoice();
+            noProj.SessionId = "s-x"; noProj.Title = "无项目";
+            bool noProjOk = !noProj.Display.Contains("[");
+            Check(noProjOk, "选择器：没有项目时不显示空方括号", noProj.Display);
+            bool sel1 = picker.SelectedSessionId() == "s-a";
             // 换一批（模拟会话结束），选择必须落到新列表里存在的项上
             List<PetSessionChoice> chs2 = new List<PetSessionChoice>();
             PetSessionChoice c3 = new PetSessionChoice(); c3.SessionId = "s-c"; c3.Title = "丙";

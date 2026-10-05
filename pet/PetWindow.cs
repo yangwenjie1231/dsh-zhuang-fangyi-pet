@@ -538,6 +538,14 @@ namespace DshZhuangFangyiPet
         /// </summary>
         public Action<bool> VisibilityChanged = delegate { };
 
+        /// <summary>
+        /// 拖动**过程中**每次移动都触发（不是拖动结束）。
+        ///
+        /// 用途：让气泡窗与输入窗实时跟随。`PositionReported` 只在拖动结束时发一次
+        /// （它要 POST 给 Host，不能每帧发），所以拖动中的跟随必须走这条轻量回调。
+        /// </summary>
+        public Action DragMoved = delegate { };
+
         public void SetBubbleVisibleState(bool visible)
         {
             if (visible) ShowPet(); else HidePet();
@@ -692,6 +700,10 @@ namespace DshZhuangFangyiPet
                 if (dpi <= 0) dpi = 1.0;
                 Left = screen.X / dpi - _dragOffsetDip.X;
                 Top = screen.Y / dpi - _dragOffsetDip.Y;
+                // ⭐ 拖动**过程中**就通知（用户反馈"移动桌宠时气泡和输入框不跟着走"）。
+                // 原先只有"拖动结束"（PositionReported → POST /pet/position）才通知，
+                // 于是气泡/输入窗在整个拖动期间都杵在原地，松手才跳一下。
+                try { DragMoved(); } catch { }
             }
             catch { }
             e.Handled = true;

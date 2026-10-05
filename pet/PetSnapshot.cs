@@ -38,6 +38,8 @@ namespace DshZhuangFangyiPet
         public string Title;
         /// <summary>契约 §2 v5：是否在跑。旧快照缺省 = false。</summary>
         public bool Running;
+        /// <summary>契约 §2 v5：所属项目（工作目录名），供选择器做层级分组。</summary>
+        public string Project;
     }
 
     /// <summary>
@@ -252,6 +254,7 @@ namespace DshZhuangFangyiPet
                     // v5：标题与运行位（旧 Host 没有这两个字段 → null/false，向后兼容）。
                     si.Title = sv.Str("title", null);
                     si.Running = sv.Bool("running", false);
+                    si.Project = sv.Str("project", null);
                     s.Sessions.Add(si);
                 }
             }

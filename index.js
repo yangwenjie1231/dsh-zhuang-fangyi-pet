@@ -464,7 +464,11 @@ export function apply (ctx, config) {
                   updatedAt: typeof it.updatedAt === 'number' ? it.updatedAt : null,
                   // 层级信息：子代理会话不是"对话"，选择器要排除它们。
                   subagent: it.origin === 'subagent' || typeof it.parentSessionId === 'string',
-                  blank: it.blank === true
+                  blank: it.blank === true,
+                  // 项目分组：同一 cwd 下的会话归一组（用户说"没有层级"，
+                  // 而会话天然是按项目聚在一起的 —— 385 个会话里绝大多数 cwd 相同）。
+                  cwd: typeof it.cwd === 'string' ? it.cwd : null,
+                  project: basenameOf(it.cwd)
                 }))
             }
           })
@@ -488,6 +492,8 @@ export function apply (ctx, config) {
         state: s.state,
         running: meta?.running === true || s.state === 'working' || s.state === 'thinking',
         updatedAt: meta?.updatedAt ?? null,
+        // 项目分组（选择器按它做层级）
+        project: meta?.project ?? null,
         // 保留状态机原有的字段：老渲染方（旧 exe/overlay）只认这几个，不能丢。
         toolsInFlight: s.toolsInFlight ?? 0
       })
@@ -502,15 +508,23 @@ export function apply (ctx, config) {
     //  · 只留最近活跃的一小批（用户要发消息的多半是最近在聊的）。
     const rest = [...byId.values()]
       .filter(it => it.subagent !== true && it.blank !== true)
-      .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
-      .slice(0, 12)
+      // 按**项目**聚拢（同项目相邻），项目内按更新时间倒序 —— 这样选择器分组后
+      // 顺序稳定，用户能靠"位置"记住常发的那个对话。
+      .sort((a, b) => {
+        const pa = a.project ?? ''
+        const pb = b.project ?? ''
+        if (pa !== pb) return pa < pb ? -1 : 1
+        return (b.updatedAt ?? 0) - (a.updatedAt ?? 0)
+      })
+      .slice(0, 20)
     for (const it of rest) {
       out.push({
         sessionId: it.sessionId,
         title: it.title,
         state: 'idle',
         running: it.running === true,
-        updatedAt: it.updatedAt
+        updatedAt: it.updatedAt,
+        project: it.project ?? null
       })
     }
     return disambiguate(out)

@@ -714,6 +714,8 @@ window.__ModuleLoader__.load({
                       onChange: event => setTargetSessionId(event.target.value)
                     }, sessionChoices.map(s =>
                       h('option', { key: s.sessionId, value: s.sessionId },
+                        // 带项目前缀形成层级：真机 385 个会话大量同名，平铺选不出来。
+                        (s.project ? '[' + s.project + '] ' : '') +
                         (s.running === true ? '● ' : '') + (s.title || s.sessionId))
                     ))
                   ])

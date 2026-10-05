@@ -396,11 +396,25 @@ namespace DshZhuangFangyiPet
         /// <summary>给用户看的名字（Host 已回退过：标题 → 目录名 → id 前缀）。</summary>
         public string Title;
         public bool Running;
+        /// <summary>所属项目（会话的工作目录名）。用于在下拉里做层级分组。</summary>
+        public string Project;
 
-        /// <summary>下拉里显示的文字（在跑的加个圆点，一眼看出哪个在忙）。</summary>
+        /// <summary>
+        /// 下拉里显示的文字。
+        ///
+        /// 用户反馈"选择对话的时候没有层级" —— 真机上 385 个会话大量同名，
+        /// 平铺一串根本选不出来。所以带上**项目前缀**形成层级观感：
+        ///   `[demac-e2e-cef] ● 精确中文画面文字转录（OCR） · s-dup-aa`
+        /// 在跑的用圆点标记，一眼看出哪个在忙。
+        /// </summary>
         public string Display
         {
-            get { return (Running ? "● " : "") + (string.IsNullOrEmpty(Title) ? SessionId : Title); }
+            get
+            {
+                string name = string.IsNullOrEmpty(Title) ? SessionId : Title;
+                string prefix = string.IsNullOrEmpty(Project) ? "" : "[" + Project + "] ";
+                return prefix + (Running ? "● " : "") + name;
+            }
         }
     }
 }

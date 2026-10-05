@@ -280,6 +280,13 @@ namespace DshZhuangFangyiPet
             _win.PetContextMenuRequested = OnPetContextMenu;
             _win.FocusDshRequested = OnFocusDsh;
             _win.PositionReported = OnPositionReported;
+            // 拖动**过程中**实时跟随：气泡贴回桌宠旁边，输入窗跟着挪。
+            // （PositionReported 只在松手时发一次，拖动中靠这条。）
+            _win.DragMoved = delegate
+            {
+                try { _bubble.PlaceNearPet(); } catch { }
+                FollowInputWindow();
+            };
             _win.OnDisplayChanged = OnDisplayChanged;
             _win.ScaleAdjusted = OnScaleAdjusted;       // task-6：滚轮缩放 → 去抖上报 + 托盘刷新
             _win.DoubleClickInvoked = OnPetDoubleClick; // task-6：双击行为由 settings.doubleClick 决定
@@ -468,9 +475,17 @@ namespace DshZhuangFangyiPet
             // task-6：先应用 snapshot.settings（可能改尺寸/穿透/主题，气泡定位要用新尺寸）。
             // 逐字段 diff，值没变就不动（避免每帧重复 SetScale 抖动）。
             ApplySettings(snap.Settings);
-            // 首帧就把气泡外壳配色对齐（ApplySettings 只在**变化**时才换色；
-            // 启动时主题没变过的话，气泡会用构造期的浅色默认值）。
+            // 首帧就把气泡对齐（ApplySettings 只在**变化**时才动，启动时"没变过"会全被跳过）。
+            //
+            // ⚠️ 这里踩过两个坑，都是"diff 判定把首帧跳过了"：
+            //   ① 配色：气泡用构造期的浅色默认值；
+            //   ② **缩放**：exe 是带着 `--scale` 启动的，本体天生就是对的，
+            //      于是 `ApplySettings` 里 `Math.Abs(s - _win.Scale) > 0.001` 判定"没变"
+            //      → `_bubble.SetScale()` 从未被调用 → **气泡保持 1.0 尺寸**，
+            //      而本体已是用户设的 0.8 —— 表现就是"第一次启动气泡不按大小缩放"。
+            // 首帧**无条件**同步一次，之后才交给 diff。
             try { _bubble.ApplyTheme(PetTheme.ResolveIsDark(_opt.DarkOverride, _settingsTheme)); } catch { }
+            try { _bubble.SetScale(_win.Scale); } catch (Exception ex) { PetLog.Warn("首帧气泡缩放失败: " + PetLog.Describe(ex)); }
 
             // 输入窗开着时，会话列表跟着快照走（新开/结束的对话要即时反映）
             if (_input != null) ApplySendChoices();
