@@ -39,6 +39,7 @@ import {
   pickEmoteFile,
   emoteCoverage
 } from '../src/pet/emotes.js'
+import { shortIdsFor } from '../src/pet/shortid.js'
 import {
   fromSessionEvent,
   fromAgentStatus,
@@ -1154,6 +1155,103 @@ ok('排除名单里的图**不该**出现在随机回落里（语义太强）', 
   for (const f of EMOTE_EXCLUDE_FROM_RANDOM) {
     assert.ok(typeof f === 'string' && f.startsWith('bubble/'), `排除名单项格式不对：${f}`)
   }
+})
+section('13.7 会话短标识（shortid.js）—— 同名消歧')
+
+ok('⭐⭐ 真实 DSH id：互不相同且不假设 session- 前缀', () => {
+  // 这条断言的价值在于**不依赖字面格式**。
+  // 前两版实现分别错在：① slice(0,8) 恒得 "session-"；② 硬编码剥 "session-" 前缀。
+  // 现在算法从数据推公共前缀，所以下面任意一种 id 形式都必须成立。
+  const cases = [
+    ['session-001d93a5-52f0-477e-b58b-b2d9a2862236',
+     'session-007ce55a-ae81-4bdf-a3b4-d67b77487932'],
+    // 无前缀形式
+    ['abc-11112222', 'abc-33334444'],
+    // 完全无分隔符
+    ['aabbccdd1111', 'aabbccdd2222'],
+    // 前缀差异很大
+    ['one', 'two']
+  ]
+  for (const ids of cases) {
+    const m = shortIdsFor(ids)
+    assert.equal(m.size, ids.length, `每个 id 都应有短标识：${ids.join(',')}`)
+    const vals = [...m.values()]
+    assert.equal(new Set(vals).size, ids.length,
+      `短标识必须两两不同（否则用户选不出来）：${ids.join(' / ')} → ${vals.join(' / ')}`)
+    for (const v of vals) {
+      assert.ok(typeof v === 'string' && v.length > 0,
+        `短标识不能为空（空串会让标题变空白）：${ids.join(',')}`)
+    }
+  }
+})
+
+ok('⭐ 单个会话不产生空串（必须留最后一个字符）', () => {
+  // 踩过：公共前缀会吃掉整串 → 短标识成空串 → 标题空白。
+  // 调用方用 `?? id` 判断，而空串不是 nullish，挡不住。
+  const m = shortIdsFor(['session-only-one'])
+  const v = m.get('session-only-one')
+  assert.ok(typeof v === 'string' && v.length > 0, `不该是空串，实际 ${JSON.stringify(v)}`)
+})
+
+ok('⭐ id 只有末位不同时加长重试（宁长勿撞）', () => {
+  // 公共前缀会吃掉相同部分，只剩最后一位 → 长度不足时要加长，
+  // 但这两个 id 本身就只有末位不同，所以短标识就是那一位（仍互不相同）。
+  const m = shortIdsFor(['session-aaaaaaaa-1', 'session-aaaaaaaa-2'])
+  const vals = [...m.values()]
+  assert.equal(new Set(vals).size, 2, `必须区分开：${vals.join(' / ')}`)
+  assert.ok(vals.every(v => v.length > 0), '不能为空串')
+})
+
+ok('重复 id 不误判为撞车（同一 id 映射到同一短标识）', () => {
+  const m = shortIdsFor(['session-aaa111-x', 'session-aaa111-x', 'session-bbb222-y'])
+  assert.equal(m.size, 2, '去重后应只有 2 个条目')
+  assert.notEqual(m.get('session-aaa111-x'), m.get('session-bbb222-y'))
+})
+
+ok('空输入与非法输入安全返回', () => {
+  assert.equal(shortIdsFor([]).size, 0)
+  assert.equal(shortIdsFor(null).size, 0)
+  assert.equal(shortIdsFor(undefined).size, 0)
+  const m = shortIdsFor(['ok-id-1', '', null, 123, undefined, 'ok-id-2'])
+  assert.equal(m.size, 2, '非字符串与非空串都应被过滤')
+})
+
+ok('⭐⭐ 加长重试真的必要：三个 id 在不同位置才分叉', () => {
+  // 这是**唯一**能证明"加长重试"有价值的场景，也是我第一版测试漏掉的：
+  // 公共前缀去掉后，**任意两个** id 必定在紧随其后的那一位不同 ——
+  // 所以只有当 ≥3 个 id **在不同位置**才分叉时，固定长度才会撞车。
+  //
+  //   sess-123456zzz
+  //   sess-123456yyy   ← 与上者前 6 位相同（都 123456）
+  //   sess-999qrst     ← 与上两者第 1 位就不同
+  //
+  // 去公共前缀 `sess-` 后：`123456zzz` / `123456yyy` / `999qrst`。
+  // 取 6 位 → `123456` / `123456` / `999qrs` → **撞车**；
+  // 必须加长到 8 位才区分得开。没有加长重试的实现在这里会失败。
+  const ids = ['sess-123456zzz', 'sess-123456yyy', 'sess-999qrst']
+  const m = shortIdsFor(ids)
+  const vals = [...m.values()]
+  assert.equal(new Set(vals).size, 3,
+    `三个 id 必须两两不同（否则用户选不出来）：${vals.join(' / ')}`)
+  assert.ok(vals.every(v => v.length > 0), '不能有空串')
+  // ⭐ 关键判据：**必须真的加长重试**，而不是走"退回完整 id"的兜底。
+  //
+  // 光断言"两两不同"是抓不住问题的：兜底分支（宁长勿撞）也会让它们不同，
+  // 只是每项都退化成完整 id（14 字符）—— 下拉里会重新变得又长又挤，
+  // 用户问题（"太乱"）原样复发。所以要断言**短**：
+  // 有加长重试 → 8 字符；没有 → 14 字符（完整 id）。
+  const maxLen = Math.max(...vals.map(v => v.length))
+  assert.ok(maxLen < ids[0].length,
+    `短标识必须比完整 id 短（说明加长重试生效，而非走兜底）：最长 ${maxLen}，完整 id ${ids[0].length}`)
+  assert.ok(maxLen <= 10, `短标识应保持可读长度（≤10），实际 ${maxLen}`)
+})
+ok('⭐ 消歧在子集上也算得对（只对重名项调用）', () => {
+  // index.js 的 disambiguate 只把**重名那批** id 传进来 ——
+  // 算法在这种子集上同样要给出互不相同的后缀。
+  const dups = ['session-00aa1111-x', 'session-00aa2222-y', 'session-00aa3333-z']
+  const m = shortIdsFor(dups)
+  const vals = [...m.values()]
+  assert.equal(new Set(vals).size, 3, `子集消歧失败：${vals.join(' / ')}`)
 })
 section('14. 素材清单与路径安全（atlas.js）')
 

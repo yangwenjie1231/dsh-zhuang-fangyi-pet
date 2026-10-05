@@ -575,23 +575,6 @@ namespace DshZhuangFangyiPet
         /// <summary>给用户看的名字（Host 已回退过：标题 → 目录名 → id 前缀）。</summary>
         public string Title;
         public bool Running;
-        /// <summary>
-        /// 自检诊断用：短标识算法（与 Host 的 `shortId` 同一规则）。
-        ///
-        /// 真机踩过：sessionId 形如 `session-001d93a5-…`，**全部以 `session-` 开头**，
-        /// 取前 8 字符恒为 `session-` → 消歧后缀完全相同 → 等于没消歧。
-        /// 所以这里剥掉固定前缀，取 UUID 的第一段。
-        /// </summary>
-        public static string DiagShortId(string id)
-        {
-            string s = id == null ? "" : id;
-            if (s.Length == 0) return "";
-            string stripped = s;
-            if (stripped.StartsWith("session-", StringComparison.OrdinalIgnoreCase))
-                stripped = stripped.Substring("session-".Length);
-            // 与 Host 的 shortId 同一规则：剥前缀后取前 8 字符。
-            return stripped.Length > 8 ? stripped.Substring(0, 8) : stripped;
-        }
         /// <summary>对话级显示（项目已在上一级下拉里，这里不再重复前缀）。</summary>
         public string ShortDisplay
         {

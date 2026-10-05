@@ -42,6 +42,7 @@ import { activityConfig } from './src/pet/activity.js'
 import { bridgeHostEvents } from './src/pet/events.js'
 import { loadAtlas, artForState, bubbleArt, bubbleArtByFile, atlasReport } from './src/pet/atlas.js'
 import { pickEmoteFile, EMOTE_BY_KEY } from './src/pet/emotes.js'
+import { shortIdsFor } from './src/pet/shortid.js'
 import { createHub } from './src/pet/hub.js'
 import { createHandler, newToken, ROUTE_PREFIX } from './src/pet/routes.js'
 import { createLauncher } from './src/pet/launcher.js'
@@ -426,40 +427,19 @@ export function apply (ctx, config) {
 
   /** 短 id（无法命名时的最后回退）。 */
   /**
-   * 会话的**短标识**（用于同名消歧）。
-   *
-   * ⚠️ 不能取前 N 个字符：真实 sessionId 形如
-   *   `session-001d93a5-52f0-477e-b58b-b2d9a2862236`
-   * **全部以 `session-` 开头**，`slice(0,8)` 恒为 `session-` ——
-   * 于是"同名消歧"产出的后缀完全相同，等于没消歧
-   *（用户截图里一整列 `demac-e2e-cef · session-` 就是这个）。
-   *
-   * 正确做法：剥掉固定的 `session-` 前缀，取后面 UUID 的**第一段**（8 位十六进制）。
-   */
-  const shortId = id => {
-    const s = String(id ?? '')
-    if (s === '') return ''
-    // 剥掉固定的 `session-` 前缀后再取前 8 字符。
-    // 不剥前缀的话真实 id 全都得到 `session-`（见上面的说明）；
-    // 而"取第一个 `-` 之前"又太脆：非标准 id（如测试用的 `s-dup-aaaaaaaa`）
-    // 会只剩一个 `s`，两个不同会话又撞在一起。
-    const stripped = s.replace(/^session-/i, '')
-    return stripped.length > 8 ? stripped.slice(0, 8) : stripped
-  }
-
-  /**
    * 给会话起个能认出来的名字。纯函数（测试直接断言回退顺序），不碰 IO。
    * @param {object} item - `SessionSummary`
    * @returns {string} 一定有值（最差是 id 前缀）
    */
-  const titleOfSummary = item => {
+  const titleOfSummary = (item, short) => {
     if (item === null || typeof item !== 'object') return ''
     const proj = item.projections?.values
     const t = proj?.title
     if (typeof t === 'string' && t.trim() !== '') return t.trim()
     const base = basenameOf(item.cwd)
     if (base !== null) return base
-    return shortId(item.sessionId)
+    // 最差回落到短标识（由调用方**整批**算好，见 shortIdsFor）
+    return short ?? item.sessionId ?? ''
   }
 
   /**
@@ -478,13 +458,15 @@ export function apply (ctx, config) {
           .then(() => svc.list({}))
           .then(value => {
             const items = Array.isArray(value?.items) ? value.items : (Array.isArray(value) ? value : [])
+            // 整批算短标识：算法要看到**全部** id 才能推出公共前缀（见 shortIdsFor）
+            const shortMap = shortIdsFor(items.map(it => it?.sessionId))
             sessionListCache = {
               at: Date.now(),
               items: items
                 .filter(it => it !== null && typeof it === 'object' && typeof it.sessionId === 'string')
                 .map(it => ({
                   sessionId: it.sessionId,
-                  title: titleOfSummary(it),
+                  title: titleOfSummary(it, shortMap.get(it.sessionId)),
                   running: it.running === true,
                   updatedAt: typeof it.updatedAt === 'number' ? it.updatedAt : null,
                   // 层级信息：子代理会话不是"对话"，选择器要排除它们。
@@ -506,14 +488,33 @@ export function apply (ctx, config) {
     }
 
     // 以**状态机记的活跃会话**为准（它是实时的），标题从缓存里补。
+    //
+    // 先把最终要发出去的**全部**会话 id 收齐，再整批算短标识 ——
+    // 算法依赖"看到全集"才能推出公共前缀（见 shortIdsFor）。
     const byId = new Map(sessionListCache.items.map(it => [it.sessionId, it]))
+    const liveReal = live.filter(s => s.sessionId !== 'unknown')
+    const rest = [...byId.values()]
+      .filter(it => it.subagent !== true && it.blank !== true)
+      // 按**项目**聚拢（同项目相邻），项目内按更新时间倒序 —— 这样选择器分组后
+      // 顺序稳定，用户能靠"位置"记住常发的那个对话。
+      .sort((a, b) => {
+        const pa = a.project ?? ''
+        const pb = b.project ?? ''
+        if (pa !== pb) return pa < pb ? -1 : 1
+        return (b.updatedAt ?? 0) - (a.updatedAt ?? 0)
+      })
+      .slice(0, 20)
+    const shortAll = shortIdsFor([
+      ...liveReal.map(s => s.sessionId),
+      ...rest.map(it => it.sessionId)
+    ])
+
     const out = []
-    for (const s of live) {
-      if (s.sessionId === 'unknown') continue      // 不是真实会话，绝不能发给它
+    for (const s of liveReal) {
       const meta = byId.get(s.sessionId)
       out.push({
         sessionId: s.sessionId,
-        title: meta?.title ?? shortId(s.sessionId),
+        title: meta?.title ?? shortAll.get(s.sessionId) ?? s.sessionId,
         state: s.state,
         running: meta?.running === true || s.state === 'working' || s.state === 'thinking',
         updatedAt: meta?.updatedAt ?? null,
@@ -526,22 +527,11 @@ export function apply (ctx, config) {
     }
     // 缓存里有、状态机没记的（例如刚重启过）也列出来，按更新时间排在后面。
     //
-    // ⚠️ 这里必须**限量且过滤子代理**：真机上 `list()` 能返回 300+ 个历史会话，
+    // ⚠️ 必须**限量且过滤子代理**：真机上 `list()` 能返回 300+ 个历史会话，
     // 全塞进下拉里既没法选（大量同名）也不是用户想发消息的对象。
     //  · 子代理会话（origin=subagent / 有 parentSessionId）**不是对话**，排除；
     //  · 空会话（blank）没有内容，排除；
     //  · 只留最近活跃的一小批（用户要发消息的多半是最近在聊的）。
-    const rest = [...byId.values()]
-      .filter(it => it.subagent !== true && it.blank !== true)
-      // 按**项目**聚拢（同项目相邻），项目内按更新时间倒序 —— 这样选择器分组后
-      // 顺序稳定，用户能靠"位置"记住常发的那个对话。
-      .sort((a, b) => {
-        const pa = a.project ?? ''
-        const pb = b.project ?? ''
-        if (pa !== pb) return pa < pb ? -1 : 1
-        return (b.updatedAt ?? 0) - (a.updatedAt ?? 0)
-      })
-      .slice(0, 20)
     for (const it of rest) {
       out.push({
         sessionId: it.sessionId,
@@ -570,12 +560,16 @@ export function apply (ctx, config) {
   const disambiguate = list => {
     const seen = new Map()
     for (const it of list) {
-      const key = it.title
-      seen.set(key, (seen.get(key) ?? 0) + 1)
+      seen.set(it.title, (seen.get(it.title) ?? 0) + 1)
     }
+    const dupIds = list.filter(it => (seen.get(it.title) ?? 0) > 1).map(it => it.sessionId)
+    if (dupIds.length === 0) return list
+    // 只对**重名的那批**算短标识：算法在子集上求公共前缀，
+    // 所以这批之间一定拿得到互不相同的后缀（这正是消歧需要的）。
+    const shorts = shortIdsFor(dupIds)
     for (const it of list) {
       if ((seen.get(it.title) ?? 0) > 1) {
-        it.title = `${it.title} · ${shortId(it.sessionId)}`
+        it.title = `${it.title} · ${shorts.get(it.sessionId) ?? it.sessionId}`
       }
     }
     return list

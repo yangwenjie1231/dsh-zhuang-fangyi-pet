@@ -330,14 +330,28 @@ await ok('⭐ 有 sessionController 时：list() 的标题进快照，指定会�
   assert.equal(byId.get('s-titled')?.project, 'alpha', 'project 取自 cwd 的目录名')
   // 既无标题也无 cwd → 用**短标识**回落（剥掉固定的 `session-` 前缀后取前 8 字符）。
   // 这个桩 id 没有该前缀，所以剥前后都是前 8 字符。
-  assert.equal(byId.get('s-bare-1234567890')?.title, 's-bare-1', '都没有用短标识回落')
+  // 短标识由 `shortIdsFor` **从数据推导公共前缀**后取定长（不再硬编码任何前缀）。
+  // 本桩里全部 id 的公共前缀是 `s-`，故 `s-bare-1234567890` 的短标识是 `bare-1`。
+  // 注意断言的是"有值且不等于完整 id"，不绑定具体字面 —— 具体值由算法决定。
+  const bareTitle = byId.get('s-bare-1234567890')?.title
+  assert.ok(typeof bareTitle === 'string' && bareTitle !== '' &&
+            bareTitle !== 's-bare-1234567890',
+    `都没有标题/cwd 时应回落到**短**标识，实际 ${JSON.stringify(bareTitle)}`)
   // ⭐ 重名消歧：真机截图里 11 个对话同名，光看名字选不出该发哪个。
   const dupA = byId.get('s-dup-aaaaaaaa')
   const dupB = byId.get('s-dup-bbbbbbbb')
   assert.ok(dupA && dupB, '重名会话都应在列表里')
   assert.ok(dupA.title.includes('精确中文画面文字转录'), '标题保留原样，只补后缀')
   assert.notEqual(dupA.title, dupB.title, '重名必须消歧（否则用户选不出来）')
-  assert.ok(dupA.title.includes('s-dup-aa'), '消歧后缀是短 id（稳定且唯一）')
+  // 后缀**不绑定字面**：算法从数据推公共前缀（本桩公共前缀 `s-dup-`），
+  // 所以后缀是 `aaaaaaaa` / `bbbbbbbb` 之类。断言"后缀存在且互不相同"即可 ——
+  // 写死具体值等于把测试焊在实现细节上（前两版就是这么被硬编码带偏的）。
+  const suffixA = dupA.title.split(' · ').pop()
+  const suffixB = dupB.title.split(' · ').pop()
+  assert.ok(suffixA && suffixB && suffixA !== suffixB,
+    `消歧后缀必须存在且互不相同：${suffixA} / ${suffixB}`)
+  assert.ok(suffixA.length < 's-dup-aaaaaaaa'.length,
+    `后缀应是**短**标识而非完整 id：${suffixA}`)
 
   // ⭐ 子代理会话不是"对话"，空会话没内容 —— 都不该出现在可发列表里
   assert.ok(!byId.has('s-subagent-1111'), '子代理会话不该出现在发送选择器里')

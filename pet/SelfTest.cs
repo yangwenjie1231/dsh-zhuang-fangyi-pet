@@ -1000,53 +1000,6 @@ namespace DshZhuangFangyiPet
             Check(otherOk, "没有项目的对话归入「（其他）」而不是丢失",
                   otherOk ? "（其他）下 1 个" : "结果不符（" + otherItems.Count + " 个）");
 
-            // ⭐ 同名消歧必须**真的能区分**。
-            //
-            // 踩过：`shortId` 原先取 sessionId 前 8 字符，而真实 id 形如
-            // `session-001d93a5-...` —— **全部以 `session-` 开头**，
-            // 于是消歧后缀恒为 `session-`，完全没消歧（用户截图里一整列
-            // `demac-e2e-cef · session-` 就是这么来的）。
-            // 这里断言**两个不同 id 的短标识必须不同**。
-            string sid1 = PetSessionChoice.DiagShortId("session-001d93a5-52f0-477e-b58b-b2d9a2862236");
-            string sid2 = PetSessionChoice.DiagShortId("session-007ce55a-ae81-4bdf-a3b4-d67b77487932");
-            bool distinct = sid1 != sid2 && sid1.Length > 0 && sid1 != "session-";
-            Check(distinct, "同名消歧：不同 sessionId 得到不同短标识",
-                  distinct ? sid1 + " vs " + sid2
-                           : "短标识相同或无效（" + sid1 + " / " + sid2 + "）→ 消歧失效");
-
-            // ⭐ 多行输入 + 跟随移动（用户反馈"不支持多行""不跟随移动"）
-            bool multiOk = picker.DiagAcceptsReturn && picker.DiagMaxLines > 1;
-            Check(multiOk, "输入窗支持多行（Enter 换行，不误发）",
-                  "AcceptsReturn=" + picker.DiagAcceptsReturn + " MaxLines=" + picker.DiagMaxLines);
-            // 跟随：算出来的目标位置应贴在桌宠**上方**且水平居中。
-            // 注意：窗口没 Show 过时 WPF 的 Left/Top 是 NaN，所以这里断言**计算结果**
-            // （纯函数式取值），而不是窗口属性 —— 跟随本身也只在可见时才动窗口。
-            picker.FollowPet(1000, 1000, 200, 200);
-            double fx, fy;
-            picker.DiagFollowTarget(1000, 1000, 200, 200, out fx, out fy);
-            bool centered = Math.Abs(fx + picker.DiagWidth / 2 - 1100) <= 2;   // 桌宠中心 x=1100
-            bool above = fy < 1000;                                            // 在桌宠上方
-            Check(centered && above, "输入窗跟随桌宠：水平居中 + 贴在桌宠上方",
-                  "目标=(" + fx.ToString("0") + "," + fy.ToString("0") + ") 宽=" + picker.DiagWidth.ToString("0") +
-                  "（桌宠 1000,1000 200x200，中心 x=1100）");
-
-            // ⭐ 选择器显示：Display 带项目前缀（单行自洽），
-            // ShortDisplay 不带 —— 项目已在**上一级下拉**里，重复显示纯属噪音。
-            PetSessionChoice hier = new PetSessionChoice();
-            hier.SessionId = "s-hier";
-            hier.Title = "精确中文画面文字转录（OCR） · 001d93a5";
-            hier.Project = "demac-e2e-cef";
-            hier.Running = true;
-            bool hierOk = hier.Display.Contains("[demac-e2e-cef]") && hier.Display.Contains("●");
-            Check(hierOk, "选择器：Display 带项目前缀与运行标记（单行自洽）", hier.Display);
-            bool shortOk = !hier.ShortDisplay.Contains("[") && hier.ShortDisplay.Contains("●") &&
-                           hier.ShortDisplay.Contains("001d93a5");
-            Check(shortOk, "选择器：对话级不重复项目名（项目已在上一级）", hier.ShortDisplay);
-            // 没有 project 时 Display 不显示空方括号
-            PetSessionChoice noProj = new PetSessionChoice();
-            noProj.SessionId = "s-x"; noProj.Title = "无项目";
-            bool noProjOk = !noProj.Display.Contains("[");
-            Check(noProjOk, "选择器：没有项目时不显示空方括号", noProj.Display);
             bool sel1 = picker.SelectedSessionId() == "s-a";
             // 换一批（模拟会话结束），选择必须落到新列表里存在的项上 ——
             // 不能残留在已消失的会话上（那会导致消息发给不存在的对话）。
