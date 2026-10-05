@@ -813,6 +813,23 @@ namespace DshZhuangFangyiPet
             try { _bubble.PlaceNearPet(); } catch { }
         }
 
+        /// <summary>
+        /// 桌宠移动时让输入窗跟着走。
+        ///
+        /// 用户反馈"输入框不跟随移动" —— 输入窗是独立窗口，桌宠拖走了它还杵在原地。
+        /// 拖动过程中桌宠每帧上报位置，这里顺带把它拉过去（只挪，不改尺寸）。
+        /// </summary>
+        private void FollowInputWindow()
+        {
+            if (_input == null) return;
+            try
+            {
+                int x, y, w, h;
+                _win.GetScreenRect(out x, out y, out w, out h);
+                _input.FollowPet(x, y, w, h);
+            }
+            catch (Exception ex) { PetLog.Warn("输入窗跟随失败: " + PetLog.Describe(ex)); }
+        }
         private void OnPositionReported(int x, int y)
         {
             if (_http == null) return;
@@ -831,6 +848,7 @@ namespace DshZhuangFangyiPet
             // 契约 §3：拖动结束 POST /pet/position。
             // 回响环修复：body 不带 scale（缩放走 /pet/settings 专用通道），且仅在位置变化时触发。
             _http.PostPosition(x, y, bx, by);
+            FollowInputWindow();   // 输入窗跟着桌宠走（用户反馈过它杵在原地）
             PetLog.Info("上报位置 x=" + x + " y=" + y);
         }
 

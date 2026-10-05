@@ -439,7 +439,10 @@ export function apply (ctx, config) {
                   sessionId: it.sessionId,
                   title: titleOfSummary(it),
                   running: it.running === true,
-                  updatedAt: typeof it.updatedAt === 'number' ? it.updatedAt : null
+                  updatedAt: typeof it.updatedAt === 'number' ? it.updatedAt : null,
+                  // 层级信息：子代理会话不是"对话"，选择器要排除它们。
+                  subagent: it.origin === 'subagent' || typeof it.parentSessionId === 'string',
+                  blank: it.blank === true
                 }))
             }
           })
@@ -469,8 +472,17 @@ export function apply (ctx, config) {
       byId.delete(s.sessionId)
     }
     // 缓存里有、状态机没记的（例如刚重启过）也列出来，按更新时间排在后面。
-    const rest = [...byId.values()].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
-    for (const it of rest.slice(0, 20)) {
+    //
+    // ⚠️ 这里必须**限量且过滤子代理**：真机上 `list()` 能返回 300+ 个历史会话，
+    // 全塞进下拉里既没法选（大量同名）也不是用户想发消息的对象。
+    //  · 子代理会话（origin=subagent / 有 parentSessionId）**不是对话**，排除；
+    //  · 空会话（blank）没有内容，排除；
+    //  · 只留最近活跃的一小批（用户要发消息的多半是最近在聊的）。
+    const rest = [...byId.values()]
+      .filter(it => it.subagent !== true && it.blank !== true)
+      .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+      .slice(0, 12)
+    for (const it of rest) {
       out.push({
         sessionId: it.sessionId,
         title: it.title,
@@ -479,7 +491,33 @@ export function apply (ctx, config) {
         updatedAt: it.updatedAt
       })
     }
-    return out
+    return disambiguate(out)
+  }
+
+  /**
+   * 同名消歧。
+   *
+   * ── 为什么需要 ──────────────────────────────────────────────────────────
+   *
+   * 真机上会话标题大量重复（截图里 11 个都叫「精确中文画面文字转录（OCR）」）——
+   * 因为标题默认取自首条消息，而用户会反复发同一句话。
+   * 光看名字根本选不出该发哪一个，这正是用户说的"没有展示层级"的实际后果。
+   *
+   * 做法：**只在重名时**给这些项补一个短 id 后缀（唯一且稳定）。
+   * 名字唯一时不加后缀，保持清爽。
+   */
+  const disambiguate = list => {
+    const seen = new Map()
+    for (const it of list) {
+      const key = it.title
+      seen.set(key, (seen.get(key) ?? 0) + 1)
+    }
+    for (const it of list) {
+      if ((seen.get(it.title) ?? 0) > 1) {
+        it.title = `${it.title} · ${shortId(it.sessionId)}`
+      }
+    }
+    return list
   }
 
   /** 快照 + 设置 = 广播帧（exe 与 overlay 共用同一帧）。 */

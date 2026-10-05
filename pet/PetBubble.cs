@@ -65,10 +65,16 @@ namespace DshZhuangFangyiPet
         /// <summary>当前缩放（0.3~3.0，与本体一致）。</summary>
         private double _scale = 1.0;
 
-        private Thickness DefaultPadding;
-        private Thickness DefaultBorderWidth;
-        private double DefaultImageMaxH;
-        private double DefaultImageMaxW;
+        // ⚠️ **必须有初值**（= scale 1.0 时的基准值）。
+        // 踩过：把常量改成字段时漏了初值，字段默认全 0 → 图片上限 0（图片被压成 0 高，
+        // 表现为"气泡里什么都没有"）、内边距/边框 0（没有底色）——
+        // 而**图片解码日志全是成功的**，光看日志根本看不出来。
+        // 另一个坑：`UpdateMetrics()` 原先只在 `SetScale()` 里调用，构造函数从不调用，
+        // 所以"从没缩放过"的气泡一直用着这份 0 值。构造末尾已补一次 UpdateMetrics()。
+        private Thickness DefaultPadding = new Thickness(BasePaddingX, BasePaddingY, BasePaddingX, BasePaddingY);
+        private Thickness DefaultBorderWidth = new Thickness(BaseBorderWidth);
+        private double DefaultImageMaxH = BaseImageMaxH;
+        private double DefaultImageMaxW = BaseImageMaxW;
         private Brush _defaultBackground;
         private Brush _defaultBorderBrush;
         /// <summary>当前配色（ApplyTheme 时更新）。</summary>
@@ -106,6 +112,8 @@ namespace DshZhuangFangyiPet
             }
             catch { return null; }
         }
+        /// <summary>自检诊断用：气泡内边距左值（判断"外观是否初始化过"）。</summary>
+        internal double DiagPaddingLeft { get { return _border == null ? 0 : _border.Padding.Left; } }
         /// <summary>自检诊断用：图片上限高度（缩放断言用）。</summary>
         internal double DiagImageMaxH { get { return _image == null ? 0 : _image.MaxHeight; } }
         public bool Showing { get; private set; }
@@ -267,6 +275,9 @@ namespace DshZhuangFangyiPet
             _root.Background = Brushes.Transparent;
             _root.Children.Add(_border);
             Content = _root;
+
+            // 用基准值把外观尺寸初始化好（见字段处的注释：漏了这步会让图片上限停在 0）。
+            UpdateMetrics();
 
             _hideTimer = new DispatcherTimer(DispatcherPriority.Normal);
             _hideTimer.Tick += OnHideTick;

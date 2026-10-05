@@ -293,7 +293,14 @@ await ok('⭐ 有 sessionController 时：list() 的标题进快照，指定会�
           // 无标题、有 cwd → 用目录名（照抄 DSH 的 displayTitleOf 回退）
           { sessionId: 's-cwd-only', updatedAt: 200, running: false, cwd: 'D:\\work\\beta' },
           // 都没有 → 用 id 前缀
-          { sessionId: 's-bare-1234567890', updatedAt: 100, running: false }
+          { sessionId: 's-bare-1234567890', updatedAt: 100, running: false },
+          // 重名（真机上大量出现：标题取自首条消息，用户会反复发同一句）
+          { sessionId: 's-dup-aaaaaaaa', updatedAt: 90, running: false, cwd: 'D:\\w\\p', projections: { values: { title: '精确中文画面文字转录（OCR）' } } },
+          { sessionId: 's-dup-bbbbbbbb', updatedAt: 80, running: false, cwd: 'D:\\w\\p', projections: { values: { title: '精确中文画面文字转录（OCR）' } } },
+          // 子代理会话：不是"对话"，必须被排除
+          { sessionId: 's-subagent-1111', updatedAt: 999, running: false, origin: 'subagent', cwd: 'D:\\w\\p' },
+          // 空会话：没有内容，必须被排除
+          { sessionId: 's-blank-2222', updatedAt: 998, running: false, blank: true, cwd: 'D:\\w\\p' }
         ]
       }
     },
@@ -318,6 +325,17 @@ await ok('⭐ 有 sessionController 时：list() 的标题进快照，指定会�
   assert.equal(byId.get('s-titled').title, '桌宠开发', '有标题就用标题')
   assert.equal(byId.get('s-cwd-only')?.title, 'beta', '没标题用工作目录名')
   assert.equal(byId.get('s-bare-1234567890')?.title, 's-bare-1', '都没有用 id 前缀')
+  // ⭐ 重名消歧：真机截图里 11 个对话同名，光看名字选不出该发哪个。
+  const dupA = byId.get('s-dup-aaaaaaaa')
+  const dupB = byId.get('s-dup-bbbbbbbb')
+  assert.ok(dupA && dupB, '重名会话都应在列表里')
+  assert.ok(dupA.title.includes('精确中文画面文字转录'), '标题保留原样，只补后缀')
+  assert.notEqual(dupA.title, dupB.title, '重名必须消歧（否则用户选不出来）')
+  assert.ok(dupA.title.includes('s-dup-aa'), '消歧后缀是短 id（稳定且唯一）')
+
+  // ⭐ 子代理会话不是"对话"，空会话没内容 —— 都不该出现在可发列表里
+  assert.ok(!byId.has('s-subagent-1111'), '子代理会话不该出现在发送选择器里')
+  assert.ok(!byId.has('s-blank-2222'), '空会话不该出现在发送选择器里')
 
   // 指定会话发送 → prompt 必须收到**那个**会话
   const okRes = await fetch(`${base}/api/zhuang-fangyi/pet/send`, {

@@ -698,13 +698,40 @@ namespace DshZhuangFangyiPet
                          : "解析结果不符：" + (withSess == null ? "null" : withSess.Sessions.Count.ToString()));
 
             // ⭐ 选择器：选中项回传的 sessionId 必须与列表项对应（发错对话就是这里出的错）。
+            // ⭐ **新建**的气泡就必须有正常的图片上限与内边距。
+            //
+            // 这条是被真实事故逼出来的：把外观常量改成"随缩放变化"的字段时漏了初值，
+            // 字段默认全 0 → 图片上限 0（图片被压成 0 高，气泡里空空如也）、
+            // 内边距/边框 0（没有底色）——而**图片解码日志全是成功的**，
+            // 只看日志完全看不出问题。断言必须查"没缩放过"的初始状态。
+            PetBubble freshBubble = new PetBubble();
+            double freshImgH = freshBubble.DiagImageMaxH;
+            double freshPadX = freshBubble.DiagPaddingLeft;
+            bool freshOk = freshImgH > 100 && freshPadX > 5;
+            Check(freshOk, "新建气泡就有正常外观（图片上限/内边距不为 0）",
+                  "图片上限=" + freshImgH.ToString("0") + "（期望 >100）  内边距=" + freshPadX.ToString("0") + "（期望 >5）");
+            try { freshBubble.ForceClose(); } catch { }
             PetInput picker = new PetInput(new PetHttp("http://127.0.0.1:1/", "t"));
             List<PetSessionChoice> chs = new List<PetSessionChoice>();
             PetSessionChoice c1 = new PetSessionChoice(); c1.SessionId = "s-a"; c1.Title = "甲"; c1.Running = true;
             PetSessionChoice c2 = new PetSessionChoice(); c2.SessionId = "s-b"; c2.Title = "乙";
             chs.Add(c1); chs.Add(c2);
             picker.SetChoices(chs);
-            bool sel1 = picker.SelectedSessionId() == "s-a";
+            // ⭐ 多行输入 + 跟随移动（用户反馈"不支持多行""不跟随移动"）
+            bool multiOk = picker.DiagAcceptsReturn && picker.DiagMaxLines > 1;
+            Check(multiOk, "输入窗支持多行（Enter 换行，不误发）",
+                  "AcceptsReturn=" + picker.DiagAcceptsReturn + " MaxLines=" + picker.DiagMaxLines);
+            // 跟随：算出来的目标位置应贴在桌宠**上方**且水平居中。
+            // 注意：窗口没 Show 过时 WPF 的 Left/Top 是 NaN，所以这里断言**计算结果**
+            // （纯函数式取值），而不是窗口属性 —— 跟随本身也只在可见时才动窗口。
+            picker.FollowPet(1000, 1000, 200, 200);
+            double fx, fy;
+            picker.DiagFollowTarget(1000, 1000, 200, 200, out fx, out fy);
+            bool centered = Math.Abs(fx + picker.DiagWidth / 2 - 1100) <= 2;   // 桌宠中心 x=1100
+            bool above = fy < 1000;                                            // 在桌宠上方
+            Check(centered && above, "输入窗跟随桌宠：水平居中 + 贴在桌宠上方",
+                  "目标=(" + fx.ToString("0") + "," + fy.ToString("0") + ") 宽=" + picker.DiagWidth.ToString("0") +
+                  "（桌宠 1000,1000 200x200，中心 x=1100）");            bool sel1 = picker.SelectedSessionId() == "s-a";
             // 换一批（模拟会话结束），选择必须落到新列表里存在的项上
             List<PetSessionChoice> chs2 = new List<PetSessionChoice>();
             PetSessionChoice c3 = new PetSessionChoice(); c3.SessionId = "s-c"; c3.Title = "丙";

@@ -12,7 +12,7 @@ namespace DshZhuangFangyiPet
 {
     /// <summary>
     /// task-7：发消息输入窗（悬停 ✎ 打开）。
-    /// 无边框/置顶/SizeToContent，出现在桌宠附近；Enter 发送、Esc 取消、失焦自动关闭。
+    /// 无边框/置顶/SizeToContent，出现在桌宠附近；**Ctrl+Enter 发送**（Enter 换行）、Esc 关闭。`r`n        /// 桌宠移动时跟着走（FollowPet）；失焦不再自动关闭（多行输入时误关很恼人，改为显式关闭）。
     /// 失败**不关窗、不清输入**，就地显示错误；成功关闭并由 Program 用气泡提示「已发送」。
     /// 纯展示 + 单次发送，不做排队/打断（排队语义在 Host 侧 followup）。
     /// </summary>
@@ -35,6 +35,40 @@ namespace DshZhuangFangyiPet
         private bool _sending;
         private bool _reallyClosing;
 
+        /// <summary>自检诊断用：窗口宽度（DIP；未 Show 时用测量值）。</summary>
+        public double DiagWidth
+        {
+            get
+            {
+                if (ActualWidth > 0) return ActualWidth;
+                try { return _chrome.DesiredSize.Width; } catch { return 300; }
+            }
+        }
+
+        /// <summary>
+        /// 自检诊断用：算出"跟随桌宠"的目标位置（物理像素）。与 FollowPet 同一套规则，
+        /// 但不写窗口属性 —— 没 Show 过的窗口 Left/Top 是 NaN，断言无从比较。
+        /// </summary>
+        public void DiagFollowTarget(int petX, int petY, int petW, int petH, out double x, out double y)
+        {
+            double dpi = _hwnd == IntPtr.Zero ? 1.0 : PetNative.GetDpiForWindowSafe(_hwnd) / 96.0;
+            if (dpi <= 0) dpi = 1.0;
+            int w = (int)Math.Round(DiagWidth * dpi);
+            int h = 60;
+            x = petX + petW / 2 - w / 2;
+            y = petY - h - 8;
+            PetNative.WorkArea scr = PetNative.NearestScreen(petX + petW / 2, petY + petH / 2);
+            if (y < scr.Y + 4) y = petY + petH + 8;
+            int maxX = scr.Right - w - 4;
+            if (maxX < scr.X + 4) maxX = scr.X + 4;
+            if (x > maxX) x = maxX;
+            if (x < scr.X + 4) x = scr.X + 4;
+            if (y + h > scr.Bottom - 4) y = scr.Bottom - h - 4;
+        }
+        /// <summary>自检诊断用：是否支持多行（AcceptsReturn）。</summary>
+        public bool DiagAcceptsReturn { get { return _box != null && _box.AcceptsReturn; } }
+        /// <summary>自检诊断用：最大行数。</summary>
+        public int DiagMaxLines { get { return _box == null ? 0 : _box.MaxLines; } }
         /// <summary>发送成功（HTTP 2xx）后回调一次（Program 用气泡显示「已发送」）。</summary>
         public Action Sent = delegate { };
         /// <summary>窗关闭回调（Program 用来清 ✎ 的打开标记）。</summary>
@@ -87,12 +121,21 @@ namespace DshZhuangFangyiPet
             _box.MinWidth = 260;
             _box.Margin = new Thickness(12, 4, 12, 4);
             _box.VerticalContentAlignment = VerticalAlignment.Center;
+            // 多行输入（用户反馈"不支持多行"）：
+            //   · AcceptsReturn=true → Enter 换行，不再被当成"发送"
+            //   · Ctrl+Enter 发送（下方 KeyDown 处理），Esc 关闭
+            //   · 高度随内容长到 6 行，超过则内部滚动（不无限撑高挡住桌面）
+            _box.AcceptsReturn = true;
+            _box.TextWrapping = TextWrapping.Wrap;
+            _box.MinLines = 1;
+            _box.MaxLines = 6;
+            _box.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
             // 占位提示：无字时显示（TextBox 原生没有 placeholder，用 Tag+灰字绘制太重，这里用提示行+样式兜底）
             _box.KeyDown += OnBoxKeyDown;
             _box.TextChanged += delegate { SetHint(); };
 
             _hint = new TextBlock();
-            _hint.Text = "Enter 发送 · Esc 取消";
+            _hint.Text = "Ctrl+Enter 发送 · Esc 关闭";
             _hint.FontSize = 11;
             _hint.Foreground = new SolidColorBrush(Color.FromArgb(160, 90, 100, 120));
             _hint.Margin = new Thickness(14, 0, 14, 8);
@@ -121,7 +164,10 @@ namespace DshZhuangFangyiPet
             Content = _chrome;
 
             Loaded += OnLoaded;
-            Deactivated += delegate { CloseSelf(); };
+            // ⚠️ **不再"失焦自动关闭"**。
+            // 单行时代它还行，现在有三处会误关：① 多行输入时点别处看资料；
+            // ② 点「发给」下拉（焦点离开 TextBox）；③ 桌宠跟随途中焦点抖动。
+            // 改为显式关闭：Esc、✕ 按钮、或发送成功后自动关。
             Closed += delegate
             {
                 _reallyClosing = true;
@@ -146,6 +192,34 @@ namespace DshZhuangFangyiPet
             SetHint();
         }
 
+        /// <summary>
+        /// 桌宠移动时把输入窗跟着挪过去（用户反馈"输入框不跟随移动"）。
+        ///
+        /// **只挪位置、不重排**：输入窗尺寸由内容决定，跟随途中重算尺寸会闪烁。
+        /// 走的是与 OpenNear 同一套"贴桌宠上方、放不下就下方、再 clamp 进工作区"的规则。
+        /// </summary>
+        public void FollowPet(int petX, int petY, int petW, int petH)
+        {
+            if (!IsVisible) return;
+            double dpi = _hwnd == IntPtr.Zero ? 1.0 : PetNative.GetDpiForWindowSafe(_hwnd) / 96.0;
+            if (dpi <= 0) dpi = 1.0;
+            int w = (int)Math.Round(ActualWidth * dpi);
+            int h = (int)Math.Round(ActualHeight * dpi);
+            if (w <= 0 || h <= 0) return;
+
+            int x = petX + petW / 2 - w / 2;
+            int y = petY - h - 8;
+            PetNative.WorkArea scr = PetNative.NearestScreen(petX + petW / 2, petY + petH / 2);
+            if (y < scr.Y + 4) y = petY + petH + 8;
+            int maxX = scr.Right - w - 4;
+            if (maxX < scr.X + 4) maxX = scr.X + 4;
+            if (x > maxX) x = maxX;
+            if (x < scr.X + 4) x = scr.X + 4;
+            if (y + h > scr.Bottom - 4) y = scr.Bottom - h - 4;
+
+            Left = x / dpi;
+            Top = y / dpi;
+        }
         /// <summary>打开并定位到桌宠附近（默认桌宠上方，clamp 进工作区）。</summary>
         public void OpenNear(int petX, int petY, int petW, int petH)
         {
@@ -230,16 +304,23 @@ namespace DshZhuangFangyiPet
             int n = _box.Text == null ? 0 : _box.Text.Length;
             if (n > 0)
                 _hint.Text = n.ToString(CultureInfo.InvariantCulture) + " / " +
-                             PetHttp.SendTextMax.ToString(CultureInfo.InvariantCulture) + " · Enter 发送 · Esc 取消";
+                             PetHttp.SendTextMax.ToString(CultureInfo.InvariantCulture) + " · Ctrl+Enter 发送 · Esc 关闭";
             else
-                _hint.Text = "发给庄方宜…（Enter 发送 · Esc 取消）";
+                _hint.Text = "发给庄方宜…（Ctrl+Enter 发送 · Esc 关闭）";
         }
 
         private void OnBoxKeyDown(object sender, KeyEventArgs e)
         {
             if (e.Key != Key.Enter) return;
-            e.Handled = true;
-            SendNow();
+            // 多行语义：Enter 换行，**Ctrl+Enter 发送**（与多数聊天框一致）。
+            // 单行时代的"Enter 直接发送"会让用户没法写第二行。
+            bool ctrl = (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control;
+            if (ctrl)
+            {
+                e.Handled = true;
+                SendNow();
+            }
+            // 不按 Ctrl 时：放行给 TextBox，由 AcceptsReturn 插入换行
         }
 
         private void SendNow()
