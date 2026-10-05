@@ -54,8 +54,18 @@ namespace DshZhuangFangyiPet
         private const double BasePaddingX = 10;
         private const double BasePaddingY = 7;
         private const double BaseBorderWidth = 1;
+        // ⭐ 气泡大小按**桌宠的比例**定，不再写死绝对像素。
+        //
+        // 原先写死 160/200/240 DIP 再乘 scale —— 但**漏了 DPI 换算**：
+        // 在 150% 缩放下桌宠窗口是 256 × scale × (96/144) ≈ 136 DIP，
+        // 而气泡上限仍有 192 DIP（满幅贴纸）= 桌宠的 **141%** —— 比桌宠还大。
+        // 用户反馈"气泡相对于桌宠太大了"就是这个。
+        //
+        // 改成比例后，任何 DPI / 缩放档位下"气泡 : 桌宠"都恒定。
         private const double BaseImageMaxH = 160;
         private const double BaseImageMaxW = 200;
+        /// <summary>气泡（含透明抠图）相对桌宠**显示宽度**的上限比例。</summary>
+        private const double BubbleToPetRatio = 0.70;
         private const double BaseTextMaxW = 240;
         private const double BaseFontSize = 13;
         private const double BaseBadgeFontSize = 11;
@@ -83,6 +93,9 @@ namespace DshZhuangFangyiPet
         // 契约 §4 opaque=true：不透明满幅贴纸本身就是整张卡片（含文字），
         // 160px 高度下 baked-in 中文读不清 → 放宽到 240（窗口 SizeToContent 自适应）。
         private double OpaqueImageMaxH = 240;
+        /// <summary>满幅贴纸的圆角半径（基准 × scale）。实测那批图四角 alpha=255（方形硬边），必须裁。</summary>
+        private const double BaseOpaqueCornerRadius = 10;
+        private double OpaqueCornerRadius = BaseOpaqueCornerRadius;
         private double OpaqueImageMaxW = 240;
 
         /// <summary>取本体窗的屏幕矩形（物理像素），由 Program 注入。</summary>
@@ -111,6 +124,24 @@ namespace DshZhuangFangyiPet
                 };
             }
             catch { return null; }
+        }
+        /// <summary>自检诊断用：当前气泡图上限（DIP）。用于断言"相对桌宠的比例"。</summary>
+        internal double DiagImageCap { get { return _image == null ? 0 : _image.MaxHeight; } }
+        /// <summary>自检诊断用：满幅贴纸是否挂了圆角裁剪。</summary>
+        internal bool DiagOpaqueClipped
+        {
+            get
+            {
+                RectangleGeometry rg = _border == null ? null : _border.Clip as RectangleGeometry;
+                return rg != null && rg.RadiusX > 0.5;
+            }
+        }
+        /// <summary>自检诊断用：喂入本体尺寸后按比例算出的上限。</summary>
+        internal double DiagCapForPet(int frameW, int frameH, double dpi, double scale)
+        {
+            SetPetMetrics(frameW, frameH, dpi);
+            SetScale(scale);
+            return _image == null ? 0 : _image.MaxHeight;
         }
         /// <summary>自检诊断用：气泡内边距左值（判断"外观是否初始化过"）。</summary>
         internal double DiagPaddingLeft { get { return _border == null ? 0 : _border.Padding.Left; } }
@@ -463,13 +494,80 @@ namespace DshZhuangFangyiPet
                 _border.CornerRadius = new CornerRadius(0);
                 _image.MaxHeight = OpaqueImageMaxH;
                 _image.MaxWidth = OpaqueImageMaxW;
+                // ⭐ 满幅贴纸要**裁圆角**。
+                //
+                // 这批 F4 贴纸是**方形硬边**（实测四角 alpha 全 255），
+                // 原先 `CornerRadius(0)` + 无裁剪 → 一个直角方块直接贴在桌面上，
+                // 用户反馈"有的气泡没有圆角"。
+                // 注意：`Border.CornerRadius` 对 `Image` **不生效**（它只裁自己的
+                // 背景/边框），所以必须用 `Clip` 裁图片本身。
+                ApplyOpaqueCornerClip();
             }
             else
             {
+                // ⚠️ 必须**先撤掉**贴纸的圆角裁剪：气泡窗是复用的，
+                // 上一条满幅贴纸留下的 Clip 会继续切普通气泡的四角
+                //（实测踩过：漏了这步，普通气泡的直角被切掉一块）。
+                ClearOpaqueCornerClip();
                 ApplyDefaultChrome();
             }
         }
 
+        /// <summary>
+        /// 给满幅贴纸裁圆角。
+        ///
+        /// **为什么裁 `_border` 而不是 `_image`**：`Border.CornerRadius` 只影响它自己的
+        /// 背景与边框，**不会裁剪子元素**；而这批贴纸是「图片铺满整窗」，所以要给
+        /// 容纳它的 `_border` 挂一个圆角矩形 `Clip`，把图片四角切掉。
+        ///
+        /// 尺寸随实际排布走（`SizeChanged` 同步），不写死像素 ——
+        /// 写死的话缩放后圆角会被拉变形。
+        /// </summary>
+        private void ApplyOpaqueCornerClip()
+        {
+            try
+            {
+                _border.SizeChanged -= OnChromeSizeChanged;
+                _border.SizeChanged += OnChromeSizeChanged;
+                UpdateOpaqueClip();
+            }
+            catch (Exception ex) { PetLog.Warn("贴纸圆角裁剪失败: " + PetLog.Describe(ex)); }
+        }
+
+        private void OnChromeSizeChanged(object sender, SizeChangedEventArgs e)
+        {
+            UpdateOpaqueClip();
+        }
+
+        /// <summary>按当前实际尺寸刷新圆角裁剪矩形。</summary>
+        private void UpdateOpaqueClip()
+        {
+            double w = _border.ActualWidth, h = _border.ActualHeight;
+            if (w <= 0 || h <= 0)
+            {
+                // 还没完成排布（`Show` 里 ApplyBubbleChrome 早于 UpdateLayout）——
+                // 用测量出来的期望尺寸兜底，否则这一步会被静默跳过、圆角不生效。
+                Size want = _border.DesiredSize;
+                w = want.Width; h = want.Height;
+            }
+            if (w <= 0 || h <= 0) return;   // 真的还没有尺寸，等 SizeChanged
+            double r = Math.Max(1, OpaqueCornerRadius);
+            // 圆角不能超过短边的一半，否则会画成诡异形状
+            double limit = Math.Min(w, h) / 2;
+            if (r > limit) r = limit;
+            _border.Clip = new RectangleGeometry(new Rect(0, 0, w, h), r, r);
+        }
+
+        /// <summary>清掉满幅贴纸的裁剪（回到透明抠图气泡时要还原，气泡窗是复用的）。</summary>
+        private void ClearOpaqueCornerClip()
+        {
+            try
+            {
+                _border.SizeChanged -= OnChromeSizeChanged;
+                _border.Clip = null;
+            }
+            catch { }
+        }
         /// <summary>
         /// 按当前缩放重算所有外观尺寸（字号/内边距/图片上限/圆角/徽标/按钮）。
         ///
@@ -477,6 +575,33 @@ namespace DshZhuangFangyiPet
         /// 而字号与图片上限是布局的输入。只改窗口大小是没用的 ——
         /// 必须改这些"内容尺寸"，窗口才会跟着缩。
         /// </summary>
+        /// <summary>桌宠本体单帧宽度（物理像素）；由 Program 在素材就绪时喂入。</summary>
+        private int _petFrameW;
+        /// <summary>桌宠本体单帧高度（物理像素）。</summary>
+        private int _petFrameH = 256;
+        private double _petDpi = 96;
+
+        /// <summary>Program 喂入桌宠帧尺寸与 DPI（气泡按它算比例）。</summary>
+        public void SetPetMetrics(int frameW, int frameH, double dpi)
+        {
+            if (frameW > 0) _petFrameW = frameW;
+            if (frameH > 0) _petFrameH = frameH;
+            if (dpi > 0) _petDpi = dpi;
+            UpdateMetrics();
+            if (IsVisible) PlaceNearPet();
+        }
+
+        /// <summary>
+        /// 桌宠在当前 DPI 下的**显示宽度**（DIP）。
+        /// 与 `PetWindow.ApplyDipSizeFor` 同一套换算：物理像素 × scale × (96/dpi)。
+        /// 拿不到帧尺寸时回落到一个保守默认值，避免比例失真成 0。
+        /// </summary>
+        private double PetDisplayWidthDip()
+        {
+            double frameW = _petFrameW > 0 ? _petFrameW : 256;
+            double dpi = _petDpi > 0 ? _petDpi : 96.0;
+            return frameW * _scale * (96.0 / dpi);
+        }
         private void UpdateMetrics()
         {
             double s = _scale;
@@ -490,10 +615,16 @@ namespace DshZhuangFangyiPet
 
             DefaultPadding = new Thickness(BasePaddingX * s, BasePaddingY * s, BasePaddingX * s, BasePaddingY * s);
             DefaultBorderWidth = new Thickness(Math.Max(0.5, BaseBorderWidth * s));
-            DefaultImageMaxH = BaseImageMaxH * s;
-            DefaultImageMaxW = BaseImageMaxW * s;
-            OpaqueImageMaxH = 240 * s;
-            OpaqueImageMaxW = 240 * s;
+            // 气泡上限 = 桌宠显示尺寸 × 比例（见 BubbleToPetRatio 的注释：
+            // 写死绝对像素会在高 DPI 下反超桌宠）。
+            double petDip = PetDisplayWidthDip();
+            double cap = petDip * BubbleToPetRatio;
+            if (cap < 48) cap = 48;                 // 下限：太小看不清表情
+            DefaultImageMaxH = cap;
+            DefaultImageMaxW = cap;
+            OpaqueImageMaxH = cap;
+            OpaqueImageMaxW = cap;
+            OpaqueCornerRadius = Math.Max(3, BaseOpaqueCornerRadius * s);
             _badge.CornerRadius = new CornerRadius(Math.Max(2, 8 * s));
             _goBtn.CornerRadius = new CornerRadius(Math.Max(2, 6 * s));
         }

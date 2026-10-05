@@ -313,6 +313,10 @@ namespace DshZhuangFangyiPet
             // 独立窗口 + 纯展示：绝不能塞进本体窗，那会破坏"窗口尺寸=帧尺寸"与
             // 基于 ActualWidth 的 alpha 命中归一化（见 PetStatusLabel 类注释）。
             _status = new PetStatusLabel();
+
+            // 气泡大小按"桌宠显示宽度 × 70%"算，所以要把帧尺寸与 DPI 喂给气泡。
+            // 高 DPI 下写死绝对像素会让气泡反超桌宠（用户反馈过）。
+            PushPetMetricsToBubble();
             WireAttentionButton();   // task-8：「去处理」→ focus-dsh 链路
 
             _tray = new PetTray();
@@ -546,6 +550,8 @@ namespace DshZhuangFangyiPet
             {
                 if (_win.CurrentState != st) _stateChanges++;
                 _win.SetState(st);
+                // 不同状态的帧宽不同（实测 239~288）→ 气泡的比例基准要跟着更新
+                PushPetMetricsToBubble();
             }
 
             if (_bubbleOn && snap.Bubble != null && snap.Bubble.Id > _lastBubbleId)
@@ -884,6 +890,7 @@ namespace DshZhuangFangyiPet
 
         private void OnDisplayChanged()
         {
+            PushPetMetricsToBubble();   // DPI 可能变了 → 气泡比例基准跟着更新
             try { _bubble.PlaceNearPet(); } catch { }
         }
 
@@ -896,6 +903,19 @@ namespace DshZhuangFangyiPet
         /// 显隐规则在 `PetStatusLabel.ShouldShow`（与 overlay 逐条对齐）：
         /// `statusAlways` 常显 / `hint` 悬停显示 / 两个都关不显示 / `clickThrough` 不显示。
         /// </summary>
+        /// <summary>把本体帧尺寸/DPI 推给气泡（气泡据此按比例定尺寸）。</summary>
+        private void PushPetMetricsToBubble()
+        {
+            try
+            {
+                int fw, fh; double dpi;
+                if (_win.FrameMetrics(out fw, out fh, out dpi) && _bubble != null)
+                {
+                    _bubble.SetPetMetrics(fw, fh, dpi);
+                }
+            }
+            catch (Exception ex) { PetLog.Warn("推送本体尺寸失败: " + PetLog.Describe(ex)); }
+        }
         private void RefreshStatusLabel()
         {
             if (_status == null) return;

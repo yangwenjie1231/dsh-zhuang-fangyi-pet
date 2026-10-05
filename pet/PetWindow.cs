@@ -240,6 +240,28 @@ namespace DshZhuangFangyiPet
         public bool HasSprite { get { return _sheet != null; } }
 
         /// <summary>
+        /// 当前精灵帧的物理像素尺寸 + 窗口 DPI（气泡按它算"相对桌宠的比例"）。
+        ///
+        /// 气泡尺寸必须**跟着桌宠的实际显示大小**走 —— 写死绝对像素会在高 DPI 下
+        /// 反超桌宠（用户反馈过"气泡相对于桌宠太大"）。
+        /// 没有素材时返回 false，调用方保持上次的值。
+        /// </summary>
+        public bool FrameMetrics(out int frameW, out int frameH, out double dpi)
+        {
+            frameW = 0; frameH = 0; dpi = 96;
+            if (_sheet == null) return false;
+            frameW = _sheet.FrameW;
+            frameH = _sheet.FrameH;
+            try
+            {
+                double d = _hwnd == IntPtr.Zero ? 96.0 : PetNative.GetDpiForWindowSafe(_hwnd);
+                if (d > 0) dpi = d;
+            }
+            catch { }
+            return frameW > 0 && frameH > 0;
+        }
+
+        /// <summary>
         /// 最近一次的状态文字（快照的 `label`，已按 locale 本地化）。
         ///
         /// 状态文字窗是**独立窗口**，它拿不到快照 —— 由 Program 把 label 存进来，

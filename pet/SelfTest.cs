@@ -789,6 +789,59 @@ namespace DshZhuangFangyiPet
                   "目标=(" + tx.ToString("0") + "," + ty.ToString("0") + ") 宽=" + tbw +
                   "（本体 1000,1000 200x200，中心 x=1100，底边 1200）");
             try { lbl.ForceClose(); } catch { }
+            // ⭐ 气泡大小必须**相对桌宠**（用户反馈"气泡相对于桌宠太大了"）。
+            //
+            // 原先写死绝对像素（160/200/240 DIP）× scale，**漏了 DPI 换算**：
+            // 150% 缩放下桌宠窗口 ≈136 DIP，而满幅贴纸上限 192 DIP = 141% —— 比桌宠还大。
+            // 这条断言直接验"比例"，因此任何 DPI/缩放档位都能抓住回归。
+            PetBubble sizeProbe = new PetBubble();
+            // 模拟用户真实环境：DPI=144（150%）、scale=0.8、帧 256px
+            double cap = sizeProbe.DiagCapForPet(256, 256, 144, 0.8);
+            double petDip = 256 * 0.8 * (96.0 / 144.0);        // ≈136.5 DIP
+            double ratio = cap / petDip;
+            bool ratioOk = ratio > 0.6 && ratio < 0.8;
+            Check(ratioOk, "气泡大小约为桌宠的 70%（高 DPI 下不再反超）",
+                  "气泡上限=" + cap.ToString("0.#") + " DIP，桌宠=" + petDip.ToString("0.#") +
+                  " DIP，比例=" + (ratio * 100).ToString("0") + "%（期望 60~80%）");
+            // 换个 DPI 与缩放档，比例必须**恒定**（这正是"按比例"的意义）
+            double cap2 = sizeProbe.DiagCapForPet(256, 256, 96, 1.0);
+            double pet2 = 256 * 1.0 * (96.0 / 96.0);
+            double ratio2 = cap2 / pet2;
+            bool stableOk = Math.Abs(ratio - ratio2) < 0.02;
+            Check(stableOk, "不同 DPI/缩放下气泡与桌宠的比例恒定",
+                  "150%×0.8 → " + (ratio * 100).ToString("0") + "%；100%×1.0 → " + (ratio2 * 100).ToString("0") + "%");
+            try { sizeProbe.ForceClose(); } catch { }
+
+            // ⭐ 满幅贴纸必须有圆角（用户反馈"有的气泡没有圆角"）。
+            // 那批 F4 贴纸是方形硬边（实测四角 alpha=255），原先 CornerRadius(0) 且无裁剪
+            // → 直角方块直接贴桌面。Border.CornerRadius 不裁子元素，必须挂 Clip。
+            PetBubble opaqueProbe = new PetBubble();
+            PetBubbleInfo opb = new PetBubbleInfo();
+            opb.Id = 88001;
+            opb.Kind = "image";
+            opb.Opaque = true;          // 满幅贴纸
+            opb.DurationMs = 60000;
+            // ⚠️ 必须给**真实位图**：满幅呈现的判据是 `hasImg && b.Opaque`，
+            // 传 null 的话 hasImg=false，根本走不到 opaque 分支（第一版就是这么写的，
+            // 结果断言红得莫名其妙 —— 其实是测试没搭对）。
+            BitmapSource opImg = MakeSolidBubbleBitmap(64);
+            opaqueProbe.Show(opb, opImg);
+            Pump(250);
+            bool clipped = opaqueProbe.DiagOpaqueClipped;
+            Check(clipped, "满幅方形贴纸被裁圆角（不再直角贴桌面）",
+                  clipped ? "已挂圆角 Clip" : "无圆角裁剪 → 会显示直角方块");
+            // 切回普通透明气泡时，裁剪必须撤掉（气泡窗是复用的）
+            PetBubbleInfo ntb = new PetBubbleInfo();
+            ntb.Id = 88002;
+            ntb.Kind = "text";
+            ntb.Text = "普通气泡";
+            ntb.DurationMs = 60000;
+            opaqueProbe.Show(ntb, null);
+            Pump(200);
+            bool cleared = !opaqueProbe.DiagOpaqueClipped;
+            Check(cleared, "切回透明气泡时撤销贴纸圆角裁剪（窗复用不留残留）",
+                  cleared ? "裁剪已清除" : "残留裁剪 → 普通气泡四角会被切掉");
+            try { opaqueProbe.ForceClose(); } catch { }
             PetInput picker = new PetInput(new PetHttp("http://127.0.0.1:1/", "t"));
             List<PetSessionChoice> chs = new List<PetSessionChoice>();
             PetSessionChoice c1 = new PetSessionChoice(); c1.SessionId = "s-a"; c1.Title = "甲"; c1.Running = true;
