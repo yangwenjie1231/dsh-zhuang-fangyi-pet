@@ -76,6 +76,8 @@ namespace DshZhuangFangyiPet
                 PetJson.Atlas atlas = TestAtlas(artDir);
                 TestPriority();
                 TestBubbleOpaqueAndDark();
+                TestSettingsScaleDoubleClickTheme();
+                TestPositionReportBody();
                 SpriteSheet sheet = TestSprite(artDir, atlas);
                 TestFilesMapCompat();
                 TestClamp();
@@ -511,6 +513,132 @@ namespace DshZhuangFangyiPet
             Check(covOk, "深色判定：--dark 覆盖生效，auto 跟随注册表（读不到按浅色，绝不崩）",
                   "本机注册表 SystemPrefersDark()=" + (sysDark ? "深色" : "浅色") +
                   "（Lead 实测本机 AppsUseLightTheme=0；浅色机器上同样通过）");
+        }
+
+        /// <summary>
+        /// task-6：滚轮缩放夹取（滚轮事件无法脚本化 → 测的就是 OnMouseWheel 用的
+        /// 同一个纯函数 StepScale/ClampScale）、snapshot.settings 解析与向后兼容、
+        /// doubleClick 三值解析、theme 优先级矩阵（argv &gt; settings &gt; 注册表）。
+        /// </summary>
+        private static void TestSettingsScaleDoubleClickTheme()
+        {
+            // (1) 缩放夹取：0.3~3.0，NaN/Infinity 回落 1.0
+            bool clampOk =
+                PetOptions.ClampScale(0.3) == 0.3 &&
+                PetOptions.ClampScale(3.0) == 3.0 &&
+                PetOptions.ClampScale(1.55) == 1.55 &&
+                PetOptions.ClampScale(0.0) == 0.3 &&
+                PetOptions.ClampScale(-2.0) == 0.3 &&
+                PetOptions.ClampScale(100.0) == 3.0 &&
+                PetOptions.ClampScale(double.NaN) == 1.0 &&
+                PetOptions.ClampScale(double.PositiveInfinity) == 1.0;
+            Check(clampOk, "缩放夹取 0.3~3.0（settings/argv/滚轮共用 ClampScale）",
+                  "0.3/3.0 原样；0→0.3；100→3.0；NaN/∞→1.0");
+
+            // (2) 滚轮一步 ±0.1（OnMouseWheel 调用的就是这个函数，事件本身无法脚本化）
+            bool stepOk =
+                PetOptions.StepScale(1.0, 120) == 1.1 &&
+                Math.Abs(PetOptions.StepScale(1.0, -120) - 0.9) < 1e-9 &&
+                PetOptions.StepScale(0.3, -120) == 0.3 &&
+                PetOptions.StepScale(3.0, 120) == 3.0 &&
+                PetOptions.StepScale(2.95, 120) == 3.0 &&
+                Math.Abs(PetOptions.StepScale(0.35, -120) - 0.3) < 1e-9;
+            Check(stepOk, "滚轮一步 ±0.1 + 边界不再动（StepScale）",
+                  "1.0+轮→1.1；1.0-轮→0.9；0.3-轮→0.3；3.0+轮→3.0；2.95+轮→3.0（夹回）；0.35-轮→0.3");
+
+            // (3) snapshot.settings：块缺失 → null（现状不动）
+            PetSnapshot noSt = PetSnapshot.Parse("{\"rev\":1,\"petState\":\"idle\"}");
+            Check(noSt != null && noSt.Settings == null,
+                  "settings 块缺失 → Settings=null（旧 Host 快照零回归）",
+                  noSt != null && noSt.Settings == null ? "Settings=null" : "误建对象");
+
+            // (4) settings={} → 全部 Has*=false（逐字段「缺 = 不动现状」）
+            PetSnapshot emptySt = PetSnapshot.Parse("{\"rev\":2,\"settings\":{}}");
+            PetSettingsInfo es = emptySt == null ? null : emptySt.Settings;
+            bool emptyOk = es != null && !es.HasScale && !es.HasOpacity && !es.HasClickThrough &&
+                           !es.HasTopmost && !es.HasBubble && !es.HasDoubleClick && !es.HasTheme;
+            Check(emptyOk, "settings={} → 全部字段缺省（逐字段不动现状）",
+                  emptyOk ? "7 个 Has* 全为 false" : "误置 Has*");
+
+            // (5) 完整 settings → 逐字段解析
+            PetSnapshot full = PetSnapshot.Parse(
+                "{\"rev\":3,\"settings\":{\"scale\":2,\"opacity\":0.5,\"clickThrough\":true," +
+                "\"topmost\":false,\"bubble\":false,\"doubleClick\":\"emote\",\"theme\":\"dark\"}}");
+            PetSettingsInfo fs = full == null ? null : full.Settings;
+            bool fullOk = fs != null &&
+                fs.HasScale && fs.Scale == 2 &&
+                fs.HasOpacity && fs.Opacity == 0.5 &&
+                fs.HasClickThrough && fs.ClickThrough &&
+                fs.HasTopmost && !fs.Topmost &&
+                fs.HasBubble && !fs.Bubble &&
+                fs.HasDoubleClick && fs.DoubleClick == "emote" &&
+                fs.HasTheme && fs.Theme == "dark";
+            Check(fullOk, "settings 全字段解析",
+                  fullOk ? "scale=2 opacity=0.5 clickThrough=1 topmost=0 bubble=0 doubleClick=emote theme=dark"
+                         : "解析失败");
+
+            // (6) 部分 settings → 只出现的字段生效
+            PetSnapshot part = PetSnapshot.Parse("{\"rev\":4,\"settings\":{\"scale\":0.4}}");
+            PetSettingsInfo ps = part == null ? null : part.Settings;
+            bool partOk = ps != null && ps.HasScale && Math.Abs(ps.Scale - 0.4) < 1e-9 &&
+                          !ps.HasOpacity && !ps.HasClickThrough && !ps.HasTopmost &&
+                          !ps.HasBubble && !ps.HasDoubleClick && !ps.HasTheme;
+            Check(partOk, "settings 只给 scale → 其余字段不动现状",
+                  partOk ? "HasScale=true，其余 6 个 Has*=false" : "解析失败");
+
+            // (7) doubleClick 三值 + 非法值回落 focus-dsh
+            bool dcOk = PetSettingsInfo.NormalizeDoubleClick("focus-dsh") == "focus-dsh" &&
+                        PetSettingsInfo.NormalizeDoubleClick("emote") == "emote" &&
+                        PetSettingsInfo.NormalizeDoubleClick("none") == "none" &&
+                        PetSettingsInfo.NormalizeDoubleClick("xyz") == "focus-dsh" &&
+                        PetSettingsInfo.NormalizeDoubleClick(null) == "focus-dsh";
+            Check(dcOk, "doubleClick 解析：focus-dsh/emote/none，非法回落 focus-dsh",
+                  "xyz/null → focus-dsh（= 现状行为）");
+
+            // (8) theme 非法值回落 auto
+            bool thOk = PetSettingsInfo.NormalizeTheme("auto") == "auto" &&
+                        PetSettingsInfo.NormalizeTheme("light") == "light" &&
+                        PetSettingsInfo.NormalizeTheme("dark") == "dark" &&
+                        PetSettingsInfo.NormalizeTheme("bogus") == "auto" &&
+                        PetSettingsInfo.NormalizeTheme(null) == "auto";
+            Check(thOk, "theme 解析：auto/light/dark，非法回落 auto", "bogus/null → auto");
+
+            // (9) 主题优先级矩阵：argv --dark 0|1 > settings.theme > 注册表
+            bool sysDark = PetTheme.SystemPrefersDark();
+            bool matrixOk =
+                PetTheme.ResolveIsDark(true, "light") &&            // argv 强深色压过 settings.light
+                !PetTheme.ResolveIsDark(false, "dark") &&           // argv 强浅色压过 settings.dark
+                PetTheme.ResolveIsDark(null, "dark") &&             // settings.dark 生效
+                !PetTheme.ResolveIsDark(null, "light") &&           // settings.light 生效
+                PetTheme.ResolveIsDark(null, "auto") == sysDark &&  // auto → 注册表
+                PetTheme.ResolveIsDark(null, null) == sysDark &&    // 无 settings → 注册表
+                PetTheme.ResolveIsDark(null, "bogus") == sysDark;   // 非法 → 注册表
+            string e2;
+            PetOptions dk1 = PetOptions.Parse(new string[] { "--dark", "1" }, out e2);
+            PetOptions dk0 = PetOptions.Parse(new string[] { "--dark", "0" }, out e2);
+            bool comboOk = dk1 != null && dk1.DarkOverride == true &&
+                           dk0 != null && dk0.DarkOverride == false &&
+                           PetTheme.ResolveIsDark(dk1.DarkOverride, "light") &&
+                           !PetTheme.ResolveIsDark(dk0.DarkOverride, "dark");
+            Check(matrixOk && comboOk, "主题优先级矩阵：argv --dark > settings.theme > 注册表",
+                  "argv(1/0) 压过 settings(light/dark)；auto/缺失/非法 → 注册表（本机=" +
+                  (sysDark ? "深色" : "浅色") + "）");
+        }
+
+        /// <summary>
+        /// 回响环修复（task-6）：/pet/position 的 body **不得含 scale** ——
+        /// 位置与设置两个上报通道职责分离。body 由 PetHttp.BuildPositionBody
+        /// 纯函数构造（PostPosition 实际调用的就是它），这里序列化后断言无该键。
+        /// </summary>
+        private static void TestPositionReportBody()
+        {
+            string body = PetHttp.BuildPositionBody(12, 34, 56, 78);
+            bool noScale = body.IndexOf("scale", StringComparison.Ordinal) < 0;
+            bool fieldsOk = body.IndexOf("\"x\":12", StringComparison.Ordinal) >= 0 &&
+                            body.IndexOf("\"y\":34", StringComparison.Ordinal) >= 0 &&
+                            body.IndexOf("\"bubbleX\":56", StringComparison.Ordinal) >= 0 &&
+                            body.IndexOf("\"bubbleY\":78", StringComparison.Ordinal) >= 0;
+            Check(noScale && fieldsOk, "位置上报 body 不含 scale（回响环修复：位置/设置通道分离）", body);
         }
 
         private static void TestClamp()

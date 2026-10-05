@@ -177,6 +177,17 @@ async function get (p) {
   return { status: res.status, body: text, headers: res.headers }
 }
 
+/** 同源 POST（JSON body）。 */
+async function post2 (p, body) {
+  const res = await fetch(`${BASE}${p}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body)
+  })
+  const text = await res.text()
+  return { status: res.status, body: text, headers: res.headers }
+}
+
 /* ══════════════════════════════════════════════════════════════════════════
  * 1. 装配与路由
  * ══════════════════════════════════════════════════════════════════════════ */
@@ -202,6 +213,39 @@ await ok('GET /pet/state 返回契约 §2 形状的快照', async () => {
   for (const key of ['rev', 'petState', 'label', 'since', 'sessions', 'nativeAvailable', 'nativeError']) {
     assert.ok(key in snap, `快照缺字段 ${key}`)
   }
+})
+
+await ok('⭐ 快照带 settings 块（exe 实时应用的依据，契约 §2）', async () => {
+  const r = await get('/api/zhuang-fangyi/pet/state')
+  const snap = JSON.parse(r.body)
+  assert.ok(snap.settings && typeof snap.settings === 'object', '快照应有 settings 块')
+  for (const key of ['scale', 'opacity', 'clickThrough', 'topmost', 'bubble', 'doubleClick', 'theme']) {
+    assert.ok(key in snap.settings, `settings 缺 ${key}`)
+  }
+})
+
+await ok('⭐ POST /pet/settings 是合并语义：裸 {scale} 不许抹掉其它设置', async () => {
+  // 对应一个实测抓到的数据丢失缺陷：exe 滚轮缩放只 POST {"scale": n}，
+  // 若 Host 按整体替换处理（按默认值归一化），用户的透明度/穿透/主题/双击会被全抹回默认。
+  // 实测：POST {scale:0.5} 之后 theme/doubleClick 直接回到默认。
+  const post = async body => post2('/api/zhuang-fangyi/pet/settings', body)
+
+  // 先放一组"用户设置"
+  await post({ opacity: 0.6, theme: 'dark', doubleClick: 'emote', clickThrough: true })
+  // 模拟 exe 滚轮上报：只带一个字段
+  const r = await post({ scale: 1.75 })
+  assert.equal(r.status, 200, `状态码 ${r.status}`)
+  const after = JSON.parse(r.body).settings
+  assert.equal(after.scale, 1.75, 'scale 应生效')
+  assert.equal(after.opacity, 0.6, 'opacity 不许被抹掉')
+  assert.equal(after.theme, 'dark', 'theme 不许被抹掉')
+  assert.equal(after.doubleClick, 'emote', 'doubleClick 不许被抹掉')
+  assert.equal(after.clickThrough, true, 'clickThrough 不许被抹掉')
+  // 非法值回落默认而不是报错
+  const r2 = await post({ scale: 999, theme: 'psychedelic' })
+  const after2 = JSON.parse(r2.body).settings
+  assert.equal(after2.scale, 3, 'scale 夹到上限 3')
+  assert.equal(after2.theme, 'auto', '非法 theme 回落 auto')
 })
 
 await ok('GET /pet/diag 暴露 build 标记（用于判断宿主是否重载过）', async () => {

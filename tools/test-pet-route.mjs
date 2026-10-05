@@ -503,7 +503,7 @@ await okAsync('SSE 的 data 行是单行 JSON（不能含裸换行）', async ()
  * ═════════════════════════════════════════════════════════════════════════ */
 section('5. 位置回报与命令')
 
-await okAsync('POST /position 落盘位置', async () => {
+await okAsync('POST /position 只落 x/y（scale 绝不经过这里）', async () => {
   positionPatch = null
   const r = await call(`${ROUTE_PREFIX}/position`, {
     method: 'POST',
@@ -513,7 +513,11 @@ await okAsync('POST /position 落盘位置', async () => {
   assert.equal(r.status, 200)
   assert.equal(positionPatch.x, 101, '应四舍五入')
   assert.equal(positionPatch.y, 200)
-  assert.equal(positionPatch.scale, 1.25)
+  // ⭐ scale **不属于** /pet/position：它属于 /pet/settings（滚轮缩放走那里）。
+  // 这里若回写 scale 会形成回响环 —— exe 应用 scale → ReclampPosition →
+  // POST position{scale} → 写进 settings → 广播 → exe 再应用 → 再上报……
+  // 实测 pet.log 里 scale 会永远震荡停不下来。
+  assert.equal(positionPatch.scale, undefined, 'scale 必须被忽略（回响环防线）')
 })
 
 await okAsync('POST /position 忽略非法字段（不崩）', async () => {

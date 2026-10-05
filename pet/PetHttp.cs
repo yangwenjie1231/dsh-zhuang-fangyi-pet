@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -500,23 +500,43 @@ namespace DshZhuangFangyiPet
             });
         }
 
-        /// <summary>契约 §3：拖动结束 POST /pet/position。</summary>
-        public void PostPosition(int x, int y, double scale, int bubbleX, int bubbleY)
+        /// <summary>
+        /// 契约 §3：拖动结束 POST /pet/position。
+        /// 回响环修复（task-6）：body **不含 scale** —— 位置就是位置；scale 的上报走专用通道
+        /// PostSettingsScale（滚轮去抖 → POST /pet/settings）。两个通道职责分开，
+        /// Host 端 /position 不再回写 settings，"上报 → 广播 → 应用 → 再上报"的环才断得干净。
+        /// </summary>
+        public void PostPosition(int x, int y, int bubbleX, int bubbleY)
+        {
+            PostJson("/api/zhuang-fangyi/pet/position", BuildPositionBody(x, y, bubbleX, bubbleY));
+        }
+
+        /// <summary>构造 /pet/position body 的纯函数（SelfTest 断言其中无 scale 键）。</summary>
+        public static string BuildPositionBody(int x, int y, int bubbleX, int bubbleY)
         {
             StringBuilder sb = new StringBuilder();
             sb.Append("{\"x\":").Append(x.ToString(CultureInfo.InvariantCulture));
             sb.Append(",\"y\":").Append(y.ToString(CultureInfo.InvariantCulture));
-            sb.Append(",\"scale\":").Append(scale.ToString("0.###", CultureInfo.InvariantCulture));
             sb.Append(",\"bubbleX\":").Append(bubbleX.ToString(CultureInfo.InvariantCulture));
             sb.Append(",\"bubbleY\":").Append(bubbleY.ToString(CultureInfo.InvariantCulture));
             sb.Append('}');
-            PostJson("/api/zhuang-fangyi/pet/position", sb.ToString());
+            return sb.ToString();
         }
 
         /// <summary>契约 §3：/pet/command，command ∈ focus-dsh|reload-art|quit|hide|show。</summary>
         public void PostCommand(string command)
         {
             PostJson("/api/zhuang-fangyi/pet/command", "{\"command\":\"" + Escape(command) + "\"}");
+        }
+
+        /// <summary>
+        /// task-6：滚轮缩放去抖后的上报（POST /pet/settings，body 只带 scale —— 其余字段不动）。
+        /// 复用 PostJson（自带 Bearer 令牌头、异步、失败只记日志），与 POST /pet/position 同一写法。
+        /// </summary>
+        public void PostSettingsScale(double scale)
+        {
+            PostJson("/api/zhuang-fangyi/pet/settings",
+                     "{\"scale\":" + scale.ToString("0.###", CultureInfo.InvariantCulture) + "}");
         }
 
         /// <summary>

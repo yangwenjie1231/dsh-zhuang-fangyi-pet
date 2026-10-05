@@ -1,5 +1,6 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -40,7 +41,11 @@ namespace DshZhuangFangyiPet
         private readonly Border _fallback;
         private readonly TextBlock _fallbackText;
 
-        public Action<int, int, double> PositionReported = delegate { };
+        /// <summary>
+        /// 位置上报回调（物理像素 x,y）。回响环修复：**不含 scale** —— 缩放走
+        /// /pet/settings 专用通道；且 ReportPosition 内部按"值没变就不发"去重。
+        /// </summary>
+        public Action<int, int> PositionReported = delegate { };
 
         public PetWindow(PetOptions opt, PetHttp http, PetSpriteStore store)
         {
@@ -103,6 +108,7 @@ namespace DshZhuangFangyiPet
             MouseMove += OnMouseMove;
             MouseLeftButtonUp += OnMouseLeftButtonUp;
             MouseRightButtonUp += OnMouseRightButtonUp;
+            MouseWheel += OnMouseWheel;   // task-6：悬停滚轮缩放
 
             Loaded += OnLoaded;
             Closing += OnClosing;
@@ -343,18 +349,30 @@ namespace DshZhuangFangyiPet
             ReportPosition();
         }
 
+        // 上次已上报的位置（物理像素）；int.MinValue = 尚未上报过，首次必发。
+        private int _lastReportedX = int.MinValue;
+        private int _lastReportedY = int.MinValue;
+
+        /// <summary>
+        /// 上报当前所在位置。**值没变就不发**（回响环修复）：
+        /// ReclampPosition 在 SetScale / 显示器变化 / DPI 变化时都会走到这里，
+        /// 若位置实际没动就静默返回，避免设置应用路径反复 POST（风暴/回响）。
+        /// 只在位置真正变化时（拖动结束、clamp 把窗口推回屏内、滚轮放大到边缘）上报一次。
+        /// </summary>
         private void ReportPosition()
         {
             int x, y, w, h;
             GetScreenRect(out x, out y, out w, out h);
-            Action<int, int, double> h2 = PositionReported;
-            if (h2 != null) h2(x, y, _opt.Scale);
+            if (x == _lastReportedX && y == _lastReportedY) return;
+            _lastReportedX = x;
+            _lastReportedY = y;
+            Action<int, int> h2 = PositionReported;
+            if (h2 != null) h2(x, y);
         }
 
         public void SetScale(double scale)
         {
-            if (scale < PetOptions.ScaleMin) scale = PetOptions.ScaleMin;
-            if (scale > PetOptions.ScaleMax) scale = PetOptions.ScaleMax;
+            scale = PetOptions.ClampScale(scale);   // task-6：0.3~3.0，settings/滚轮共用
             _opt.Scale = scale;
             if (_sheet != null) ApplySizeForSheet();
             ReclampPosition(false);
@@ -362,8 +380,7 @@ namespace DshZhuangFangyiPet
 
         public void SetOpacity(double opacity)
         {
-            if (opacity < PetOptions.OpacityMin) opacity = PetOptions.OpacityMin;
-            if (opacity > PetOptions.OpacityMax) opacity = PetOptions.OpacityMax;
+            opacity = PetOptions.ClampOpacity(opacity);
             _opt.Opacity = opacity;
             Opacity = opacity;
         }
@@ -438,7 +455,7 @@ namespace DshZhuangFangyiPet
             if (e.ClickCount == 2)
             {
                 e.Handled = true;
-                FocusDshRequested();
+                DoubleClickInvoked();   // task-6：行为由 settings.doubleClick 决定（Program 装配）
                 return;
             }
             Point p = e.GetPosition(this);
@@ -448,6 +465,24 @@ namespace DshZhuangFangyiPet
             _dragOffsetDip = p;
             try { CaptureMouse(); } catch { }
             e.Handled = true;
+        }
+
+        // ------------------------------------------------------------------
+        // task-6：滚轮缩放（悬停在桌宠本体上）
+        // ------------------------------------------------------------------
+
+        /// <summary>滚轮调整缩放后触发（UI 线程）；Program 挂接去抖上报 /pet/settings 与托盘刷新。</summary>
+        public Action<double> ScaleAdjusted = delegate { };
+
+        private void OnMouseWheel(object sender, MouseWheelEventArgs e)
+        {
+            if (e.Delta == 0) return;
+            double ns = PetOptions.StepScale(_opt.Scale, e.Delta);
+            e.Handled = true;
+            if (Math.Abs(ns - _opt.Scale) < 0.001) return;   // 已到边界，不再动
+            SetScale(ns);   // 内部：ApplySizeForSheet + ReclampPosition
+            ScaleAdjusted(ns);
+            PetLog.Info("滚轮缩放 → " + ns.ToString("0.##", CultureInfo.InvariantCulture));
         }
 
         private void OnMouseMove(object sender, MouseEventArgs e)
@@ -498,6 +533,8 @@ namespace DshZhuangFangyiPet
         public Action<PetWindow, MouseButtonEventArgs> PetContextMenuRequested =
             delegate(PetWindow w, MouseButtonEventArgs e) { };
         public Action FocusDshRequested = delegate { };
+        /// <summary>task-6：双击本体（行为由 snapshot.settings.doubleClick 决定，Program 装配）。</summary>
+        public Action DoubleClickInvoked = delegate { };
 
         // ------------------------------------------------------------------
         // 窗口消息

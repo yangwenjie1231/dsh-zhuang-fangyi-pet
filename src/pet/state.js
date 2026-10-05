@@ -82,6 +82,8 @@ export const EVENT_TEXT = {
   'inbox/inserted': { zh: '收到新消息', en: 'New message' },
   'tool/failed': { zh: '工具出错了', en: 'A tool failed' },
   'turn/max-tokens': { zh: '输出被截断', en: 'Output truncated' },
+  /** `notifyComplete` 强提醒的文案。不是状态，只是"跑完了"的一声招呼。 */
+  'notify-complete': { zh: '完成啦！来看看～', en: 'All done — take a look!' },
   'native/error': { zh: '桌面窗口开不起来', en: 'Desktop window unavailable' }
 }
 
@@ -246,6 +248,14 @@ export function createPetState (options = {}) {
   let variantSeed = 0
   let bubble = null
   let bubbleSeq = 0
+  /**
+   * 最近一次「回合并干净结束」的时刻，与它已提醒到的位置。
+   * `notifyComplete` 打开时，`refresh` 里发现 `lastCompletedAt > completedNotifiedAt`
+   * 就**强制**弹一条提醒 —— 这是"AI 完成时通知我"的实现基础。
+   * 分开记两个值，保证同一次完成只提醒一次。
+   */
+  let lastCompletedAt = 0
+  let completedNotifiedAt = 0
   let nativeAvailable = false
   let nativeError = null
 
@@ -348,6 +358,24 @@ export function createPetState (options = {}) {
       }
     }
 
+    // ⭐ "AI 完成时提醒我"：一回合成干净结束（completed）就**强制**弹一条。
+    // 这是用户点名的功能 —— `happy` 闩锁气泡可能被静默期/优先级挡掉，
+    // 但"跑完了"这个事实值得立刻知道。所以绕过 requestBubble 的三条规则
+    //（等价于 `force: true`），只受 `notifyComplete` 与气泡总开关约束。
+    // **气泡总开关优先**：`bubbleStates: []` 表达"用户不想要任何气泡"，
+    // 提醒再重要也不能违背它 —— 否则关了气泡还会突然蹦一条，等于失控。
+    if (cfg.notifyComplete === true &&
+        cfg.bubbleStates.length > 0 &&
+        lastCompletedAt > completedNotifiedAt) {
+      completedNotifiedAt = lastCompletedAt
+      if (requestBubble('notify-complete', at, {
+        state: 'happy',
+        force: true,
+        priority: priorityOf('happy'),
+        table: EVENT_TEXT
+      })) changed = true
+    }
+
     // 气泡过期：清掉，让客户端收起气泡窗。
     if (bubble !== null && at >= bubble.at + bubble.durationMs) {
       bubble = null
@@ -443,6 +471,9 @@ export function createPetState (options = {}) {
         if (kind === 'completed') {
           rec.happyUntil = at + cfg.happyMs
           rec.error = null
+          // 记下"最近一次干净完成"的时刻，供 `notifyComplete` 强提醒用
+          //（refresh 里比较这个值，知道有没有**新的**完成要提醒）。
+          if (at > lastCompletedAt) lastCompletedAt = at
         } else if (kind === 'error' || kind === 'max-tokens') {
           rec.error = {
             text: kind === 'max-tokens'

@@ -170,6 +170,68 @@ ok('turn/end completed → happy', () => {
   assert.equal(machine.snapshot().petState, 'happy')
 })
 
+/* ── notifyComplete：AI 完成时强制提醒 ───────────────────────────────────
+ * 用户点名"在 ai 完成的时候发出提醒"。普通 happy 气泡可能被静默期/优先级挡掉，
+ * 提醒必须绕过这两条规则 —— 但不能绕过气泡总开关。
+ * ──────────────────────────────────────────────────────────────────────── */
+
+ok('⭐ notifyComplete：完成时强制弹提醒（文案来自 EVENT_TEXT）', () => {
+  const { machine } = makeMachine({ notifyComplete: true })
+  machine.apply({ type: 'agent/status', sessionId: 's1', status: 'running' })
+  machine.apply({ type: 'turn/end', sessionId: 's1', reason: { kind: 'completed' } })
+  const b = machine.snapshot().bubble
+  assert.ok(b !== null, '完成时应有气泡')
+  assert.equal(b.text, '完成啦！来看看～', '提醒有自己的文案，不是 key 原文')
+})
+
+ok('⭐ 静默期/优先级挡不住提醒（force 语义）', () => {
+  const { machine } = makeMachine({ notifyComplete: true, bubbleSilenceMs: 999999 })
+  // 先造一个 working 气泡占住位（working 优先级 90 高于 happy 50）
+  machine.apply({ type: 'agent/status', sessionId: 's1', status: 'running' })
+  machine.apply({ type: 'tool/call', sessionId: 's1', callId: 'c1' })
+  assert.ok(machine.snapshot().bubble !== null, 'working 气泡先弹出')
+  machine.apply({ type: 'turn/end', sessionId: 's1', reason: { kind: 'completed' } })
+  const b = machine.snapshot().bubble
+  assert.ok(b !== null, '提醒必须盖过低优先级/静默期')
+  assert.equal(b.text, '完成啦！来看看～')
+})
+
+ok('⭐ notifyComplete=false 时不强弹（旧气泡到期后归于安静）', () => {
+  const { machine, clock } = makeMachine({ notifyComplete: false, bubbleSilenceMs: 999999 })
+  machine.apply({ type: 'agent/status', sessionId: 's1', status: 'running' })
+  machine.apply({ type: 'tool/call', sessionId: 's1', callId: 'c1' })
+  machine.apply({ type: 'turn/end', sessionId: 's1', reason: { kind: 'completed' } })
+  // turn/end 时旧的 working 气泡还在显示期内（没到 6s），它**继续显示**是对的 ——
+  // 关掉提醒的含义是"不再**新增**提醒"，不是"立刻抹掉正在显示的气泡"。
+  assert.equal(machine.snapshot().bubble?.text, '正在调用工具…')
+  // 气泡到期 + happy 闩锁过期后：不再有新气泡
+  clock.advance(6000 + 1)
+  machine.tick()
+  assert.equal(machine.snapshot().bubble, null, '没有强提醒兜底，到期就该安静')
+})
+
+ok('⭐ 气泡总开关关闭时提醒也不弹（respect 用户意愿）', () => {
+  const { machine } = makeMachine({ notifyComplete: true, bubbleStates: [] })
+  machine.apply({ type: 'agent/status', sessionId: 's1', status: 'running' })
+  machine.apply({ type: 'turn/end', sessionId: 's1', reason: { kind: 'completed' } })
+  assert.equal(machine.snapshot().bubble, null, '气泡全关 = 用户不想要任何气泡')
+})
+
+ok('同一次完成只提醒一次（时间推进后不重复弹）', () => {
+  const { machine, clock } = makeMachine({ notifyComplete: true })
+  machine.apply({ type: 'agent/status', sessionId: 's1', status: 'running' })
+  machine.apply({ type: 'turn/end', sessionId: 's1', reason: { kind: 'completed' } })
+  assert.ok(machine.snapshot().bubble !== null)
+  clock.advance(100)
+  machine.tick()
+  const first = machine.snapshot().bubble
+  assert.ok(first !== null && first.text === '完成啦！来看看～')
+  // 再过很久（气泡早已到期）：没有第二次提醒
+  clock.advance(60000)
+  machine.tick()
+  assert.equal(machine.snapshot().bubble, null, '同一次完成只提醒一次')
+})
+
 ok('happy 在 happyMs 后过期回 idle', () => {
   const { machine, clock } = makeMachine({ happyMs: 3000 })
   machine.apply({ type: 'agent/status', sessionId: 's1', status: 'running' })

@@ -394,9 +394,43 @@ ok('null/垃圾输入回落默认值', () => {
   assert.equal(d.bubble, true)
 })
 
-ok('scale 被夹到 0.5~2', () => {
-  assert.equal(normalizePet({ scale: 99 }).scale, 2)
-  assert.equal(normalizePet({ scale: 0.01 }).scale, 0.5)
+ok('scale 被夹到 0.3~3（滚轮缩放同范围，三处必须一致）', () => {
+  assert.equal(normalizePet({ scale: 99 }).scale, 3)
+  assert.equal(normalizePet({ scale: 0.01 }).scale, 0.3)
+  assert.equal(normalizePet({ scale: 2.5 }).scale, 2.5, '范围内的值不能被夹掉')
+})
+
+ok('新增设置字段：气泡时长/间隔、双击、主题、状态显示、完成提醒', () => {
+  const n = normalizePet({
+    bubbleMs: 2500, bubbleGapMs: 0,
+    doubleClick: 'emote', theme: 'dark',
+    hint: false, statusAlways: true, notifyComplete: false
+  })
+  assert.equal(n.bubbleMs, 2500)
+  assert.equal(n.bubbleGapMs, 0, '0 = 不限，必须放行')
+  assert.equal(n.doubleClick, 'emote')
+  assert.equal(n.theme, 'dark')
+  assert.equal(n.hint, false)
+  assert.equal(n.statusAlways, true)
+  assert.equal(n.notifyComplete, false)
+})
+
+ok('新增字段越界/非法值回落默认（不整体丢弃）', () => {
+  const n = normalizePet({
+    bubbleMs: 99, bubbleGapMs: 999999,
+    doubleClick: 'hack', theme: 'psychedelic'
+  })
+  assert.equal(n.bubbleMs, 1000, '气泡时长下限 1s')
+  assert.equal(n.bubbleGapMs, 60000, '间隔上限 60s')
+  assert.equal(n.doubleClick, 'focus-dsh', '非法值回落默认')
+  assert.equal(n.theme, 'auto')
+  // 缺字段按默认（旧设置文件向后兼容）
+  const d = normalizePet({})
+  assert.equal(d.bubbleMs, 6000)
+  assert.equal(d.doubleClick, 'focus-dsh')
+  assert.equal(d.theme, 'auto')
+  assert.equal(d.statusAlways, false)
+  assert.equal(d.notifyComplete, true)
 })
 
 ok('opacity 被夹到 0.3~1', () => {

@@ -32,6 +32,36 @@ namespace DshZhuangFangyiPet
         public int ToolsInFlight;
     }
 
+    /// <summary>
+    /// 契约 §2（新增，additive）：snapshot.settings。
+    /// **每个字段都 optional**：Has* 为 false 表示本帧没给 → exe 对该字段「不动现状」。
+    /// 整个 settings 块缺失 → Settings = null → 全部不动（旧 Host 快照零回归）。
+    /// </summary>
+    internal sealed class PetSettingsInfo
+    {
+        public bool HasScale;        public double Scale;
+        public bool HasOpacity;      public double Opacity;
+        public bool HasClickThrough; public bool ClickThrough;
+        public bool HasTopmost;      public bool Topmost;
+        public bool HasBubble;       public bool Bubble;
+        public bool HasDoubleClick;  public string DoubleClick;  // 'focus-dsh'(默认) | 'emote' | 'none'
+        public bool HasTheme;        public string Theme;        // 'auto'(默认) | 'light' | 'dark'
+
+        /// <summary>非法/缺省值一律回落 focus-dsh（task-6 验收点）。</summary>
+        public static string NormalizeDoubleClick(string v)
+        {
+            if (v == "emote" || v == "none") return v;
+            return "focus-dsh";
+        }
+
+        /// <summary>非法/缺省值一律回落 auto（= 跟随注册表）。</summary>
+        public static string NormalizeTheme(string v)
+        {
+            if (v == "light" || v == "dark") return v;
+            return "auto";
+        }
+    }
+
     internal sealed class PetSnapshot
     {
         public long Rev = -1;
@@ -39,6 +69,7 @@ namespace DshZhuangFangyiPet
         public string Label = "";
         public long Since;
         public PetBubbleInfo Bubble;
+        public PetSettingsInfo Settings;
         public List<PetSessionInfo> Sessions = new List<PetSessionInfo>();
         public bool NativeAvailable = true;
         public string NativeError;
@@ -76,6 +107,50 @@ namespace DshZhuangFangyiPet
                 bi.Priority = b.Int("priority", 0);
                 if (bi.WantsImage && string.IsNullOrEmpty(bi.Image)) bi.Image = null;
                 s.Bubble = bi;
+            }
+
+            // 契约 §2 新增（additive）：settings 块。全部 optional，
+            // 块缺失 → null → ApplySnapshot 对所有设置「不动现状」。
+            PetJson.JVal st = root.Get("settings");
+            if (st != null && st.IsObj)
+            {
+                PetSettingsInfo si = new PetSettingsInfo();
+                if (st.Get("scale") != null && st.Get("scale").Kind == PetJson.JVal.TNum)
+                {
+                    si.Scale = st.Num("scale", 1);
+                    si.HasScale = true;
+                }
+                if (st.Get("opacity") != null && st.Get("opacity").Kind == PetJson.JVal.TNum)
+                {
+                    si.Opacity = st.Num("opacity", 1);
+                    si.HasOpacity = true;
+                }
+                if (st.Get("clickThrough") != null)
+                {
+                    si.ClickThrough = st.Bool("clickThrough", false);
+                    si.HasClickThrough = true;
+                }
+                if (st.Get("topmost") != null)
+                {
+                    si.Topmost = st.Bool("topmost", true);
+                    si.HasTopmost = true;
+                }
+                if (st.Get("bubble") != null)
+                {
+                    si.Bubble = st.Bool("bubble", true);
+                    si.HasBubble = true;
+                }
+                if (st.Get("doubleClick") != null && st.Get("doubleClick").IsStr)
+                {
+                    si.HasDoubleClick = true;
+                    si.DoubleClick = PetSettingsInfo.NormalizeDoubleClick(st.Str("doubleClick", null));
+                }
+                if (st.Get("theme") != null && st.Get("theme").IsStr)
+                {
+                    si.HasTheme = true;
+                    si.Theme = PetSettingsInfo.NormalizeTheme(st.Str("theme", null));
+                }
+                s.Settings = si;
             }
 
             PetJson.JVal sess = root.Get("sessions");

@@ -120,9 +120,25 @@ window.__ModuleLoader__.load({
         groupBubble: '气泡',
         bubble: '显示气泡',
         bubbleImages: '气泡显示表情图',
+        bubbleMs: '气泡显示时长',
+        bubbleGapMs: '两条气泡最小间隔',
+        bubbleGapHint: '调大可减少刷屏；0 = 不限',
+        notifyComplete: 'AI 完成时弹提醒',
+        notifyCompleteHint: '一回合并干净结束就强制弹一条（绕过上面的间隔）',
         groupBehavior: '行为',
         happyMs: '完成后的开心时长',
         sleepMs: '空闲多久后睡觉',
+        doubleClick: '双击桌宠',
+        doubleClickFocus: '打开 DSH 主窗口',
+        doubleClickEmote: '换一个随机表情',
+        doubleClickNone: '什么都不做',
+        theme: '贴纸深浅色',
+        themeAuto: '自动跟随系统',
+        themeLight: '强制浅色（白底）',
+        themeDark: '强制深色（黑底）',
+        hint: '悬停时显示状态',
+        statusAlways: '桌宠下方常显状态',
+        statusAlwaysHint: '开启后状态文字一直挂在桌宠下方，不用悬停',
         groupStatus: '运行状态',
         nativeOn: '桌面窗口运行中',
         nativeOff: '桌面窗口不可用',
@@ -150,9 +166,25 @@ window.__ModuleLoader__.load({
         groupBubble: 'Bubble',
         bubble: 'Show bubbles',
         bubbleImages: 'Show expression images in bubbles',
+        bubbleMs: 'Bubble duration',
+        bubbleGapMs: 'Min gap between bubbles',
+        bubbleGapHint: 'Raise it to reduce spam; 0 = unlimited',
+        notifyComplete: 'Notify when AI finishes',
+        notifyCompleteHint: 'Force a bubble on every clean turn end (bypasses the gap above)',
         groupBehavior: 'Behavior',
         happyMs: 'Happy duration after done',
         sleepMs: 'Idle time before sleeping',
+        doubleClick: 'Double-click pet',
+        doubleClickFocus: 'Open DSH main window',
+        doubleClickEmote: 'Show a random expression',
+        doubleClickNone: 'Do nothing',
+        theme: 'Sticker color scheme',
+        themeAuto: 'Auto (follow system)',
+        themeLight: 'Force light (white card)',
+        themeDark: 'Force dark (black card)',
+        hint: 'Show status on hover',
+        statusAlways: 'Always show status below pet',
+        statusAlwaysHint: 'Keeps the status text visible without hovering',
         groupStatus: 'Status',
         nativeOn: 'Desktop window running',
         nativeOff: 'Desktop window unavailable',
@@ -182,21 +214,39 @@ window.__ModuleLoader__.load({
         y: null,
         happyMs: 3000,
         sleepMs: 300000,
+        /** 气泡一次显示多久 / 两条之间最小间隔（与 Host 的 settings.js 同范围）。 */
+        bubbleMs: 6000,
+        bubbleGapMs: 8000,
+        /** 双击桌宠做什么。 */
+        doubleClick: 'focus-dsh',
+        /** 深浅色贴纸：auto 跟随渲染方环境。 */
+        theme: 'auto',
+        /** 悬停显示状态文字 / 桌宠下方常显状态。 */
+        hint: true,
+        statusAlways: false,
+        /** AI 完成一回合时弹提醒。 */
+        notifyComplete: true,
         locale: 'zh'
       }
       if (input === null || typeof input !== 'object') return base
       const out = { ...base }
       if (typeof input.enabled === 'boolean') out.enabled = input.enabled
       if (['auto', 'native', 'overlay'].includes(input.mode)) out.mode = input.mode
-      if (Number.isFinite(input.scale)) out.scale = Math.min(2, Math.max(0.5, input.scale))
+      // 0.3~3.0：与 Host 的 settings.js、exe 的滚轮缩放同一个范围（三处必须一致）。
+      if (Number.isFinite(input.scale)) out.scale = Math.min(3, Math.max(0.3, input.scale))
       if (Number.isFinite(input.opacity)) out.opacity = Math.min(1, Math.max(0.3, input.opacity))
-      for (const k of ['clickThrough', 'topmost', 'bubble', 'bubbleImages']) {
+      for (const k of ['clickThrough', 'topmost', 'bubble', 'bubbleImages',
+        'hint', 'statusAlways', 'notifyComplete']) {
         if (typeof input[k] === 'boolean') out[k] = input[k]
       }
       if (Number.isFinite(input.x)) out.x = Math.round(input.x)
       if (Number.isFinite(input.y)) out.y = Math.round(input.y)
       if (Number.isFinite(input.happyMs)) out.happyMs = Math.min(600000, Math.max(100, input.happyMs))
       if (Number.isFinite(input.sleepMs)) out.sleepMs = Math.min(86400000, Math.max(10000, input.sleepMs))
+      if (Number.isFinite(input.bubbleMs)) out.bubbleMs = Math.min(20000, Math.max(1000, input.bubbleMs))
+      if (Number.isFinite(input.bubbleGapMs)) out.bubbleGapMs = Math.min(60000, Math.max(0, input.bubbleGapMs))
+      if (['focus-dsh', 'emote', 'none'].includes(input.doubleClick)) out.doubleClick = input.doubleClick
+      if (['auto', 'light', 'dark'].includes(input.theme)) out.theme = input.theme
       if (input.locale === 'zh' || input.locale === 'en') out.locale = input.locale
       return out
     }
@@ -326,12 +376,12 @@ window.__ModuleLoader__.load({
       // 优先看外壳 presenter 设置的 `data-ds-theme-source`（DSH 主题可能是
       // system/light/dark 任一，用户也可能是强制深色）；读不到再退回系统
       // `prefers-color-scheme`。监听两处变化，主题切换**不重载页面**也能生效。
-      const [dark, setDark] = useState(() => prefersDarkNow())
+      const [darkAuto, setDarkAuto] = useState(() => prefersDarkNow())
       useEffect(() => {
         const mq = typeof matchMedia === 'function'
           ? matchMedia('(prefers-color-scheme: dark)')
           : null
-        const sync = () => setDark(prefersDarkNow())
+        const sync = () => setDarkAuto(prefersDarkNow())
         if (mq) { mq.addEventListener?.('change', sync); sync() }
         const root = typeof document !== 'undefined' ? document.documentElement : null
         const mo = (typeof MutationObserver === 'function' && root)
@@ -343,6 +393,12 @@ window.__ModuleLoader__.load({
           mo?.disconnect()
         }
       }, [])
+
+      // 用户手动覆盖（设置页 `theme`）：auto = 渲染方自判，light/dark 强制。
+      // exe 侧同一条设置走 snapshot.settings.theme，两半行为一致。
+      const dark = settings.theme === 'dark'
+        ? true
+        : settings.theme === 'light' ? false : darkAuto
 
       /* ---- 拖动：用 Pointer Events（不是 mouse），并捕获指针 ---- */
       const onPointerDown = useCallback(event => {
@@ -535,9 +591,14 @@ window.__ModuleLoader__.load({
                 ? null
                 : h('span', { key: 'bubble-text', className: 'zf-pet__bubble-text' }, bubble.text)
             ]),
-        settings.clickThrough
+        // 状态文字：`statusAlways` = 桌宠下方**常显**；`hint` = 仅悬停时露出。
+        // 两个都关 → 完全不渲染，桌宠最安静。穿透时也不渲染（挡不住鼠标）。
+        (settings.clickThrough || (!settings.statusAlways && !settings.hint))
           ? null
-          : h('div', { key: 'hint', className: 'zf-pet__hint' }, snapshot?.label ?? '')
+          : h('div', {
+              key: 'hint',
+              className: 'zf-pet__hint' + (settings.statusAlways ? ' zf-pet__hint--always' : '')
+            }, snapshot?.label ?? '')
       ])
     }
 
@@ -670,6 +731,34 @@ window.__ModuleLoader__.load({
           value: settings.bubbleImages,
           onChange: v => set({ bubbleImages: v })
         }),
+        h(Slider, {
+          key: 'bubbleMs',
+          label: t('bubbleMs'),
+          value: Math.round(settings.bubbleMs / 1000),
+          min: 1,
+          max: 20,
+          step: 1,
+          suffix: 's',
+          onChange: v => set({ bubbleMs: v * 1000 })
+        }),
+        h(Slider, {
+          key: 'bubbleGapMs',
+          label: t('bubbleGapMs'),
+          value: Math.round(settings.bubbleGapMs / 1000),
+          min: 0,
+          max: 60,
+          step: 1,
+          suffix: 's',
+          hint: t('bubbleGapHint'),
+          onChange: v => set({ bubbleGapMs: v * 1000 })
+        }),
+        h(Toggle, {
+          key: 'notifyComplete',
+          label: t('notifyComplete'),
+          hint: t('notifyCompleteHint'),
+          value: settings.notifyComplete,
+          onChange: v => set({ notifyComplete: v })
+        }),
 
         h('h3', { key: 'g4', className: 'zf-pet-settings__group' }, t('groupBehavior')),
         h(Slider, {
@@ -691,6 +780,45 @@ window.__ModuleLoader__.load({
           step: 1,
           suffix: 'min',
           onChange: v => set({ sleepMs: v * 60000 })
+        }),
+        h('label', { key: 'doubleClick', className: 'zf-pet-row' }, [
+          h('span', { key: 'l', className: 'zf-pet-row__label' }, t('doubleClick')),
+          h('select', {
+            key: 's',
+            className: 'zf-pet-row__input',
+            value: settings.doubleClick,
+            onChange: e => set({ doubleClick: e.target.value })
+          }, [
+            h('option', { key: 'focus-dsh', value: 'focus-dsh' }, t('doubleClickFocus')),
+            h('option', { key: 'emote', value: 'emote' }, t('doubleClickEmote')),
+            h('option', { key: 'none', value: 'none' }, t('doubleClickNone'))
+          ])
+        ]),
+        h('label', { key: 'theme', className: 'zf-pet-row' }, [
+          h('span', { key: 'l', className: 'zf-pet-row__label' }, t('theme')),
+          h('select', {
+            key: 's',
+            className: 'zf-pet-row__input',
+            value: settings.theme,
+            onChange: e => set({ theme: e.target.value })
+          }, [
+            h('option', { key: 'auto', value: 'auto' }, t('themeAuto')),
+            h('option', { key: 'light', value: 'light' }, t('themeLight')),
+            h('option', { key: 'dark', value: 'dark' }, t('themeDark'))
+          ])
+        ]),
+        h(Toggle, {
+          key: 'hint',
+          label: t('hint'),
+          value: settings.hint,
+          onChange: v => set({ hint: v })
+        }),
+        h(Toggle, {
+          key: 'statusAlways',
+          label: t('statusAlways'),
+          hint: t('statusAlwaysHint'),
+          value: settings.statusAlways,
+          onChange: v => set({ statusAlways: v })
         }),
 
         h('h3', { key: 'g5', className: 'zf-pet-settings__group' }, t('groupStatus')),
@@ -826,6 +954,9 @@ window.__ModuleLoader__.load({
   pointer-events:none;
 }
 .zf-pet:hover .zf-pet__hint{ opacity:1; }
+/* statusAlways：桌宠下方**常显**状态（用户点名"在底下显示一下状态"）。
+ * 不加投影/不换底色 —— 它是说明文字，不该比桌宠本体更抢眼。 */
+.zf-pet__hint--always{ opacity:1; }
 
 /* 尊重系统的减弱动效：停在第一帧。 */
 @media (prefers-reduced-motion:reduce){

@@ -350,7 +350,13 @@ export function createHandler (deps) {
         for (const key of ['x', 'y']) {
           if (Number.isFinite(parsed?.[key])) patch[key] = Math.round(parsed[key])
         }
-        if (Number.isFinite(parsed?.scale)) patch.scale = parsed.scale
+        // ⚠️ **只收 x/y，绝不收 scale**。scale 属于 `/pet/settings`（滚轮缩放走那里）。
+        // 这里若回写 scale 会形成回响环：exe 应用 scale → ReclampPosition →
+        // POST position{scale} → 这里写进 settings → 广播 → exe 再应用 → 再上报……
+        // 实测会无限震荡（pet.log 里 scale 在几个值之间永远停不下来）。
+        if ('scale' in (parsed ?? {})) {
+          logger?.warn?.('zhuang-fangyi-pet: /pet/position 收到 scale 字段，已忽略（scale 只走 /pet/settings）')
+        }
         deps.onPosition(patch)
         sendJson(res, 200, { ok: true, applied: patch })
         return

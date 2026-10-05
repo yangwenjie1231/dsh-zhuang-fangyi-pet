@@ -85,6 +85,29 @@ class JsonStore {
     this.log = log
     this.value = this.#read()
     this.timer = null
+    this.listeners = new Set()
+    /** 上次通知订阅者时的值（用于"没变化就不广播"这道闸）。 */
+    this.#lastEmitted = undefined
+  }
+
+  #lastEmitted
+
+  /**
+   * 订阅设置变化。**exe 的实时设置靠它**：用户在设置页改大小/透明度，
+   * Host 重新归一化后广播一帧快照，exe 侧 diff 出差异才应用 ——
+   * 没有这条通知，exe 只能等重启（这正是这次要修掉的缺陷）。
+   */
+  subscribe (fn) {
+    this.listeners.add(fn)
+    return () => this.listeners.delete(fn)
+  }
+
+  #emit () {
+    for (const fn of this.listeners) {
+      try {
+        fn(this.value)
+      } catch { /* 监听者坏了不能拖垮设置存储 */ }
+    }
   }
 
   #read () {
@@ -115,6 +138,7 @@ class JsonStore {
   update (patch) {
     this.value = this.normalize ? this.normalize({ ...this.value, ...patch }) : { ...this.value, ...patch }
     this.schedule()
+    this.#emitIfChanged()
     return this.value
   }
 
@@ -122,7 +146,30 @@ class JsonStore {
   replace (next) {
     this.value = this.normalize ? this.normalize(next) : next
     this.schedule()
+    this.#emitIfChanged()
     return this.value
+  }
+
+  /**
+   * 只在归一化后的值**真的变了**时才通知订阅者。
+   *
+   * 为什么必须有这道闸：exe 每次应用设置都会 ReclampPosition 并 POST 一次位置，
+   * 位置上报又走 `settings.update` —— 如果"没变化的 update"也广播，
+   * 每一次广播都会让 exe 再走一遍"应用 → 上报"，
+   * 广播风暴就是这么来的。逐字段浅比较足够（设置是平的）。
+   */
+  #emitIfChanged () {
+    const prev = this.#lastEmitted
+    if (prev !== undefined) {
+      const keys = new Set([...Object.keys(prev), ...Object.keys(this.value)])
+      let same = true
+      for (const k of keys) {
+        if (!Object.is(prev[k], this.value[k])) { same = false; break }
+      }
+      if (same) return
+    }
+    this.#lastEmitted = this.value
+    this.#emit()
   }
 
   schedule () {
@@ -198,6 +245,12 @@ export function apply (ctx, config) {
     config: {
       happyMs: settings.get().happyMs,
       sleepMs: settings.get().sleepMs,
+      /** 气泡一次显示多久、两条之间最小间隔（用户可在设置页调）。 */
+      bubbleMs: settings.get().bubbleMs,
+      bubbleSilenceMs: settings.get().bubbleGapMs,
+      /** AI 完成一回合时**强制**弹一条提醒（绕过静默期与优先级）。
+       *  但气泡总开关关掉时绝不强弹 —— `bubbleStates: []` 已表达"用户不想要气泡"。 */
+      notifyComplete: settings.get().notifyComplete,
       locale: settings.get().locale,
       // 只在**关闭**气泡时覆盖；开启时用默认的状态列表。
       // （传 undefined 会被状态机过滤掉，见 state.js 的说明。）
@@ -219,14 +272,47 @@ export function apply (ctx, config) {
     lastBubbleAt: null
   }
 
+  /**
+   * exe 关心的设置子集（契约 §2 `snapshot.settings`）。
+   *
+   * **为什么只挑这几个**：快照每次变化都会广播，别把整个设置对象塞进去 ——
+   * locale/happyMs/sleepMs 这类 exe 用不上的字段只会让 diff 噪音变大。
+   */
+  const exeSettings = () => {
+    const s = settings.get()
+    return {
+      scale: s.scale,
+      opacity: s.opacity,
+      clickThrough: s.clickThrough,
+      topmost: s.topmost,
+      bubble: s.bubble,
+      doubleClick: s.doubleClick,
+      theme: s.theme
+    }
+  }
+
+  /** 快照 + 设置 = 广播帧（exe 与 overlay 共用同一帧）。 */
+  const withSettings = snap => ({ ...snap, settings: exeSettings() })
+
   // 状态变化 → 广播。这是唯一的推送出口。
   const offChange = machine.on(snapshot => {
     diagnostics.lastChangeAt = new Date().toISOString()
     diagnostics.lastState = snapshot.petState
     if (snapshot.bubble !== null) diagnostics.lastBubbleAt = new Date().toISOString()
-    hub.broadcast(snapshot)
+    hub.broadcast(withSettings(snapshot))
   })
   ctx.effect(() => () => offChange(), 'zhuang-fangyi-pet: state subscription')
+
+  // 设置变化 → 也广播一帧。否则 exe 只能等下一次状态变化才知道设置改了
+  //（用户改完大小盯着桌宠看，半天没反应，会以为坏了）。
+  const offSettings = settings.subscribe(() => {
+    try {
+      hub.broadcast(withSettings(machine.snapshot()))
+    } catch (error) {
+      logger.warn?.(`zhuang-fangyi-pet: 设置变化广播失败（${error?.message ?? error}）`)
+    }
+  })
+  ctx.effect(() => () => offSettings(), 'zhuang-fangyi-pet: settings subscription')
 
   // ── 事件桥：根 Context 收全部 scoped 事件（见 events.js 文件头）──────────
   const offEvents = bridgeHostEvents(ctx, machine, logger)
@@ -264,7 +350,9 @@ export function apply (ctx, config) {
 
   // ── 路由 ────────────────────────────────────────────────────────────────
   const handler = createHandler({
-    snapshot: () => machine.snapshot(),
+    // `/pet/state` 与 SSE 帧必须**同构**（都带 settings）：exe 断线降级轮询时
+    // 拿到的设置不能和 SSE 推的不一样，否则轮询回退会把 scale 拉回旧值。
+    snapshot: () => withSettings(machine.snapshot()),
     atlas: () => atlas,
     artDir: ART_DIR,
     token,
@@ -289,9 +377,13 @@ export function apply (ctx, config) {
     },
     getSettings: () => settings.get(),
     setSettings: next => {
-      const applied = settings.replace(next)
+      // **必须是合并，不是整体替换**：exe 的滚轮缩放只 POST `{"scale": n}` 一个字段，
+      // 若走 replace（按默认值归一化），用户的透明度/穿透/主题/双击……会被**全部抹回默认**。
+      // 实测过：POST {scale:0.5} 之后 theme/doubleClick 直接回到默认 —— 那是数据丢失。
+      // `replace` 语义保留给"提交完整设置对象"的调用方；HTTP 补丁一律合并。
+      const applied = settings.update(next)
       settings.flush()
-      // 设置变了要让状态机跟着变（气泡开关、语言、时长）。
+      // 设置变了要让状态机跟着变（气泡开关、语言、时长、完成提醒）。
       machine.apply({ type: 'tick' })
       return applied
     },
@@ -333,7 +425,7 @@ export function apply (ctx, config) {
     // 为什么：hub 的 `hello` 只在**已有快照**时发送（绝不发空对象 `{}` ——
     // 那会让客户端拿到 undefined 的 petState/rev）。所以这里主动填一帧，
     // 让任何时刻连上来的客户端立刻知道现状，而不是干等下一次状态变化。
-    hub.broadcast(machine.snapshot())
+    hub.broadcast(withSettings(machine.snapshot()))
 
     // webServer 就绪 = 端口已知 = 可以启动 exe 了。
     if (settings.get().enabled && settings.get().mode !== 'overlay') {

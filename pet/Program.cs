@@ -193,6 +193,9 @@ namespace DshZhuangFangyiPet
 
         private DispatcherTimer _retryTimer;
         private DispatcherTimer _diagTimer;
+        /// <summary>task-6：滚轮缩放 → POST /pet/settings 的去抖定时器（300ms，快速滚动只发最后一次）。</summary>
+        private DispatcherTimer _scalePostTimer;
+        private double _pendingScalePost = double.NaN;
         private Dispatcher _ui;
 
         private long _lastRev = -1;
@@ -203,6 +206,10 @@ namespace DshZhuangFangyiPet
         private bool _quitting;
         private DateTime _started;
         private int _stateChanges;
+
+        // task-6：由 snapshot.settings 实时覆盖的运行时状态（argv 只提供初始值）
+        private string _settingsTheme = "auto";        // 'auto' | 'light' | 'dark'
+        private string _doubleClick = "focus-dsh";     // 'focus-dsh' | 'emote' | 'none'
 
         private static readonly string[] PreviewStates = new string[]
         {
@@ -216,6 +223,7 @@ namespace DshZhuangFangyiPet
             _baseDir = baseDir;
             _cacheDir = Path.Combine(baseDir, PetSpriteStore.CacheFolderName);
             _bubbleOn = opt.BubbleEnabled;
+            _doubleClick = PetSettingsInfo.NormalizeDoubleClick(opt.DoubleClick);
         }
 
         public int Run()
@@ -262,6 +270,8 @@ namespace DshZhuangFangyiPet
             _win.FocusDshRequested = OnFocusDsh;
             _win.PositionReported = OnPositionReported;
             _win.OnDisplayChanged = OnDisplayChanged;
+            _win.ScaleAdjusted = OnScaleAdjusted;       // task-6：滚轮缩放 → 去抖上报 + 托盘刷新
+            _win.DoubleClickInvoked = OnPetDoubleClick; // task-6：双击行为由 settings.doubleClick 决定
 
             _bubble = new PetBubble();
             _bubble.PetRectProvider = PetRect;
@@ -299,6 +309,10 @@ namespace DshZhuangFangyiPet
             _diagTimer.Interval = TimeSpan.FromSeconds(15);
             _diagTimer.Tick += OnDiagTick;
             _diagTimer.Start();
+
+            _scalePostTimer = new DispatcherTimer(DispatcherPriority.Background);
+            _scalePostTimer.Interval = TimeSpan.FromMilliseconds(300);   // task-6：去抖
+            _scalePostTimer.Tick += OnScalePostTick;
 
             if (_http != null) _http.Start();
 
@@ -349,6 +363,10 @@ namespace DshZhuangFangyiPet
                 Interlocked.Exchange(ref _lastRev, snap.Rev);
             }
 
+            // task-6：先应用 snapshot.settings（可能改尺寸/穿透/主题，气泡定位要用新尺寸）。
+            // 逐字段 diff，值没变就不动（避免每帧重复 SetScale 抖动）。
+            ApplySettings(snap.Settings);
+
             string st = snap.EffectiveState();
             if (!_previewMode)
             {
@@ -361,9 +379,9 @@ namespace DshZhuangFangyiPet
                 _lastBubbleId = snap.Bubble.Id;
                 BitmapSource img = null;
 
-                // 契约 §4 fileDark：只有渲染方知道实际主题 → exe 读系统深色模式选图。
-                // 深色且 snapshot.bubble.imageDark 非空 → 用变体；否则用 image。URL 拼法不变。
-                bool dark = PetTheme.IsDark(_opt.DarkOverride);
+                // 契约 §4 fileDark：只有渲染方知道实际主题 → exe 自己判深色选图。
+                // task-6 优先级：argv --dark 0|1 > settings.theme > 注册表。
+                bool dark = PetTheme.ResolveIsDark(_opt.DarkOverride, _settingsTheme);
                 string rel = PetTheme.SelectBubbleImageRel(
                     snap.Bubble.WantsImage, snap.Bubble.Image, snap.Bubble.ImageDark, dark);
 
@@ -386,12 +404,125 @@ namespace DshZhuangFangyiPet
                     }
                     PetLog.Info("气泡取图 rel=" + rel + " dark=" + (dark ? "1" : "0") +
                                 (img != null ? " → 解码成功" : " → 解码失败（走兜底）") +
-                                " opaque=" + (snap.Bubble.Opaque ? "1" : "0"));
+                                " opaque=" + (snap.Bubble.Opaque ? "1" : "0") +
+                                " theme=" + _settingsTheme);
                 }
 
                 try { _bubble.Show(snap.Bubble, img); }
                 catch (Exception ex) { PetLog.Warn("气泡显示失败: " + PetLog.Describe(ex)); }
             }
+        }
+
+        // ------------------------------------------------------------------
+        // task-6：snapshot.settings 实时应用（逐字段 diff）
+        // ------------------------------------------------------------------
+
+        /// <summary>
+        /// 把 snapshot.settings 里**出现且变化**的字段应用到窗口/托盘/气泡。
+        /// 字段缺失（Has*=false）→ 完全不动现状（additive 兼容）；块缺失（null）→ 整体跳过。
+        /// </summary>
+        private void ApplySettings(PetSettingsInfo st)
+        {
+            if (st == null) return;
+            bool changed = false;
+
+            if (st.HasScale)
+            {
+                double s = PetOptions.ClampScale(st.Scale);
+                if (Math.Abs(s - _win.Scale) > 0.001)
+                {
+                    _win.SetScale(s);   // 内部含 ApplySizeForSheet + ReclampPosition
+                    PetLog.Info("settings: scale → " + s.ToString("0.0#", CultureInfo.InvariantCulture));
+                    changed = true;
+                }
+            }
+            if (st.HasOpacity)
+            {
+                double o = PetOptions.ClampOpacity(st.Opacity);
+                if (Math.Abs(o - _opt.Opacity) > 0.001)
+                {
+                    _win.SetOpacity(o);
+                    PetLog.Info("settings: opacity → " + o.ToString("0.##", CultureInfo.InvariantCulture));
+                    changed = true;
+                }
+            }
+            if (st.HasClickThrough && st.ClickThrough != _win.ClickThrough)
+            {
+                _win.SetClickThrough(st.ClickThrough);
+                PetLog.Info("settings: clickThrough → " + (st.ClickThrough ? "1" : "0"));
+                changed = true;
+            }
+            if (st.HasTopmost && st.Topmost != _win.Topmost)
+            {
+                _win.SetTopmost(st.Topmost);
+                _tray.SetTopmostCheck(st.Topmost);
+                PetLog.Info("settings: topmost → " + (st.Topmost ? "1" : "0"));
+                changed = true;
+            }
+            if (st.HasBubble && st.Bubble != _bubbleOn)
+            {
+                _bubbleOn = st.Bubble;
+                if (!_bubbleOn) _bubble.HideNow();
+                PetLog.Info("settings: bubble → " + (st.Bubble ? "1" : "0"));
+                changed = true;
+            }
+            if (st.HasDoubleClick && st.DoubleClick != _doubleClick)
+            {
+                _doubleClick = st.DoubleClick;
+                PetLog.Info("settings: doubleClick → " + _doubleClick);
+                changed = true;
+            }
+            if (st.HasTheme && st.Theme != _settingsTheme)
+            {
+                _settingsTheme = st.Theme;
+                PetLog.Info("settings: theme → " + _settingsTheme + "（生效深色=" +
+                            (PetTheme.ResolveIsDark(_opt.DarkOverride, _settingsTheme) ? "1" : "0") + "）");
+                changed = true;
+            }
+
+            if (changed) _tray.Refresh();   // 托盘勾选状态（缩放档位/穿透/气泡）跟着真实值走
+        }
+
+        // ------------------------------------------------------------------
+        // task-6：滚轮缩放上报（去抖 300ms）与双击行为
+        // ------------------------------------------------------------------
+
+        /// <summary>滚轮改了缩放（UI 线程）：记下目标值，300ms 内没有后续滚动才 POST 一次。</summary>
+        private void OnScaleAdjusted(double newScale)
+        {
+            _pendingScalePost = newScale;
+            _scalePostTimer.Stop();
+            _scalePostTimer.Start();
+            _tray.Refresh();   // 缩放档位勾选立即对齐
+        }
+
+        private void OnScalePostTick(object sender, EventArgs e)
+        {
+            _scalePostTimer.Stop();
+            if (double.IsNaN(_pendingScalePost)) return;
+            if (_http != null)
+            {
+                _http.PostSettingsScale(_pendingScalePost);
+                PetLog.Info("滚轮缩放已上报 /pet/settings scale=" +
+                            _pendingScalePost.ToString("0.##", CultureInfo.InvariantCulture));
+            }
+            _pendingScalePost = double.NaN;
+        }
+
+        /// <summary>双击本体：按 settings.doubleClick 分派（缺省 focus-dsh = 现状）。</summary>
+        private void OnPetDoubleClick()
+        {
+            if (_doubleClick == "emote") { CycleEmote(); return; }
+            if (_doubleClick == "focus-dsh") { OnFocusDsh(); return; }
+            // "none"：什么都不做
+        }
+
+        /// <summary>轮换一个表情（托盘「切换表情预览」与双击 emote 共用同一机制）。</summary>
+        private void CycleEmote()
+        {
+            _previewMode = true;
+            _previewIndex = (_previewIndex + 1) % PreviewStates.Length;
+            _win.SetState(PreviewStates[_previewIndex]);
         }
 
         private void OnConnectionChanged(bool connected)
@@ -458,7 +589,7 @@ namespace DshZhuangFangyiPet
             try { _bubble.PlaceNearPet(); } catch { }
         }
 
-        private void OnPositionReported(int x, int y, double scale)
+        private void OnPositionReported(int x, int y)
         {
             if (_http == null) return;
             int bx = 0, by = 0;
@@ -473,9 +604,10 @@ namespace DshZhuangFangyiPet
                 by = (int)Math.Round(_bubble.Top * dpi);
             }
             catch { }
-            // 契约 §3：拖动结束 POST /pet/position
-            _http.PostPosition(x, y, scale, bx, by);
-            PetLog.Info("上报位置 x=" + x + " y=" + y + " scale=" + scale.ToString("0.###", CultureInfo.InvariantCulture));
+            // 契约 §3：拖动结束 POST /pet/position。
+            // 回响环修复：body 不带 scale（缩放走 /pet/settings 专用通道），且仅在位置变化时触发。
+            _http.PostPosition(x, y, bx, by);
+            PetLog.Info("上报位置 x=" + x + " y=" + y);
         }
 
         // ------------------------------------------------------------------
@@ -529,12 +661,7 @@ namespace DshZhuangFangyiPet
 
             MenuItem next = new MenuItem();
             next.Header = "切换表情预览(_N)";
-            next.Click += delegate
-            {
-                _previewMode = true;
-                _previewIndex = (_previewIndex + 1) % PreviewStates.Length;
-                _win.SetState(PreviewStates[_previewIndex]);
-            };
+            next.Click += delegate { CycleEmote(); };   // task-6：与双击 emote 共用同一机制
             m.Items.Add(next);
 
             MenuItem focus = new MenuItem();
@@ -584,6 +711,7 @@ namespace DshZhuangFangyiPet
             try { if (_http != null) _http.PostCommand("quit"); } catch { }
             try { if (_retryTimer != null) _retryTimer.Stop(); } catch { }
             try { if (_diagTimer != null) _diagTimer.Stop(); } catch { }
+            try { if (_scalePostTimer != null) _scalePostTimer.Stop(); } catch { }
 
             Dispatcher d = _ui;
             if (d != null && !d.CheckAccess())

@@ -62,6 +62,21 @@ namespace DshZhuangFangyiPet
         }
 
         /// <summary>
+        /// task-6：settings.theme 的优先级解析。
+        /// **argv `--dark 0|1`（测试用，最高）&gt; settings.theme（'light'/'dark'）&gt; 注册表**。
+        /// settingsTheme 为 null/'auto'/非法 → 跳过该级跟随注册表
+        /// （NormalizeTheme 已把非法值归一为 auto，这里再兜一次底）。
+        /// 纯函数，SelfTest 直接测优先级矩阵。
+        /// </summary>
+        public static bool ResolveIsDark(bool? argvOverride, string settingsTheme)
+        {
+            if (argvOverride.HasValue) return argvOverride.Value;
+            if (settingsTheme == "dark") return true;
+            if (settingsTheme == "light") return false;
+            return SystemPrefersDark();
+        }
+
+        /// <summary>
         /// 契约 §4：气泡选图。深色且给了非空变体 → 用变体；否则用原图。
         /// 纯函数（无 IO），Program 与 SelfTest 共用，保证自检测的就是运行路径。
         /// </summary>

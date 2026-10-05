@@ -15,13 +15,32 @@
 /** 桌宠运行模式。`auto` = 能开原生窗就开，否则回落窗口内 overlay。 */
 export const PET_MODES = ['auto', 'native', 'overlay']
 
-/** 缩放档位（托盘菜单也用它）。 */
-export const SCALE_MIN = 0.5
-export const SCALE_MAX = 2.0
+/**
+ * 缩放范围（托盘档位与滚轮缩放共用）。
+ *
+ * 上限 3.0：滚轮缩放是用户点名的功能，范围要够玩；再大会糊（源素材帧高 256px）。
+ * 下限 0.3：再小就点不中了。
+ */
+export const SCALE_MIN = 0.3
+export const SCALE_MAX = 3.0
 
 /** 不透明度范围。低于 0.3 就基本看不见了，没意义。 */
 export const OPACITY_MIN = 0.3
 export const OPACITY_MAX = 1.0
+
+/** 气泡一次显示多久（ms）。 */
+export const BUBBLE_MS_MIN = 1000
+export const BUBBLE_MS_MAX = 20000
+
+/** 两次气泡之间的最小间隔（ms），防刷屏。0 = 不限。 */
+export const BUBBLE_GAP_MIN = 0
+export const BUBBLE_GAP_MAX = 60000
+
+/** 双击桌宠的行为。 */
+export const DOUBLE_CLICK_ACTIONS = ['focus-dsh', 'emote', 'none']
+
+/** 深浅色贴纸选择。`auto` = 渲染方自己判断（exe 读系统、overlay 读外壳）。 */
+export const THEME_MODES = ['auto', 'light', 'dark']
 
 /** 设置结构版本。v1 为首个版本。 */
 export const SETTINGS_VERSION = 1
@@ -48,6 +67,20 @@ export function defaultSettings () {
     happyMs: 3000,
     /** 全局空闲多久算睡着（ms）。 */
     sleepMs: 300000,
+    /** 气泡一次显示多久（ms）。 */
+    bubbleMs: 6000,
+    /** 两次气泡之间的最小间隔（ms），防刷屏。0 = 不限。 */
+    bubbleGapMs: 8000,
+    /** 双击桌宠做什么。 */
+    doubleClick: 'focus-dsh',
+    /** 深浅色贴纸：auto 跟随渲染方环境，light/dark 强制。 */
+    theme: 'auto',
+    /** 悬停时是否显示状态文字。 */
+    hint: true,
+    /** 是否在桌宠**下方常显**状态文字（不止悬停才出现）。 */
+    statusAlways: false,
+    /** AI 完成一回合并时弹一条提醒气泡（force，绕过静默期）。 */
+    notifyComplete: true,
     /** 气泡文案语言；跟随 DSH 界面语言时可被客户端覆盖。 */
     locale: 'zh'
   }
@@ -84,7 +117,8 @@ export function normalizeSettings (input) {
   out.scale = clamp(input.scale, SCALE_MIN, SCALE_MAX, base.scale)
   out.opacity = clamp(input.opacity, OPACITY_MIN, OPACITY_MAX, base.opacity)
 
-  for (const key of ['clickThrough', 'topmost', 'bubble', 'bubbleImages']) {
+  for (const key of ['clickThrough', 'topmost', 'bubble', 'bubbleImages',
+    'hint', 'statusAlways', 'notifyComplete']) {
     if (typeof input[key] === 'boolean') out[key] = input[key]
   }
 
@@ -94,6 +128,11 @@ export function normalizeSettings (input) {
   // 时长给宽范围：测试想设 1ms 也不该被夹掉，但 0/负数无意义。
   out.happyMs = clamp(input.happyMs, 100, 600000, base.happyMs)
   out.sleepMs = clamp(input.sleepMs, 10000, 86400000, base.sleepMs)
+  out.bubbleMs = clamp(input.bubbleMs, BUBBLE_MS_MIN, BUBBLE_MS_MAX, base.bubbleMs)
+  out.bubbleGapMs = clamp(input.bubbleGapMs, BUBBLE_GAP_MIN, BUBBLE_GAP_MAX, base.bubbleGapMs)
+
+  if (DOUBLE_CLICK_ACTIONS.includes(input.doubleClick)) out.doubleClick = input.doubleClick
+  if (THEME_MODES.includes(input.theme)) out.theme = input.theme
 
   if (input.locale === 'zh' || input.locale === 'en') out.locale = input.locale
   out.version = SETTINGS_VERSION

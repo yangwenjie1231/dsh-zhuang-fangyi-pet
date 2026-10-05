@@ -14,7 +14,7 @@ namespace DshZhuangFangyiPet
         public string Url;                 // --url  http://127.0.0.1:<port>   （可缺省，缺省=离线模式）
         public string Token;               // --token <48位hex>
         public string State = "waking";    // --state <petState>
-        public double Scale = 1.0;         // --scale 0.5~2.0
+        public double Scale = 1.0;         // --scale 0.3~3.0
         public double Opacity = 1.0;       // --opacity 0.3~1.0
         public bool HasPos;                // --x/--y 是否给出
         public int X;
@@ -38,17 +38,49 @@ namespace DshZhuangFangyiPet
         public string ArtDir;
         public string ArtUrl;
 
-        public const double ScaleMin = 0.5;
-        public const double ScaleMax = 2.0;
+        /// <summary>双击本体行为（task-6）：'focus-dsh'(默认) | 'emote' | 'none'。
+        /// 实际生效值由 snapshot.settings.doubleClick 实时覆盖，本字段只是初始值。</summary>
+        public string DoubleClick = "focus-dsh";
+
+        // task-6：缩放范围统一 0.3~3.0（Host 侧 clamp 由 Lead 同步改）。
+        public const double ScaleMin = 0.3;
+        public const double ScaleMax = 3.0;
         public const double OpacityMin = 0.3;
         public const double OpacityMax = 1.0;
+
+        /// <summary>滚轮/设置共用的缩放夹取。NaN/Infinity 一律回落 1.0（安全默认）。</summary>
+        public static double ClampScale(double s)
+        {
+            if (double.IsNaN(s) || double.IsInfinity(s)) return 1.0;
+            if (s < ScaleMin) s = ScaleMin;
+            if (s > ScaleMax) s = ScaleMax;
+            return s;
+        }
+
+        /// <summary>滚轮缩放一步：wheelDelta&gt;0 放大 / &lt;0 缩小 ±0.1，round 2 位消浮点漂移后夹取。
+        /// 纯函数，PetWindow.OnMouseWheel 与 SelfTest 共用。</summary>
+        public static double StepScale(double current, double wheelDelta)
+        {
+            if (wheelDelta > 0) return ClampScale(Math.Round(current + 0.1, 2));
+            if (wheelDelta < 0) return ClampScale(Math.Round(current - 0.1, 2));
+            return ClampScale(current);
+        }
+
+        /// <summary>透明度夹取（settings.opacity / argv 共用）。NaN/Infinity 回落 1.0。</summary>
+        public static double ClampOpacity(double o)
+        {
+            if (double.IsNaN(o) || double.IsInfinity(o)) return 1.0;
+            if (o < OpacityMin) o = OpacityMin;
+            if (o > OpacityMax) o = OpacityMax;
+            return o;
+        }
 
         public static string Usage()
         {
             StringBuilder sb = new StringBuilder();
             sb.AppendLine("dsh-zhuang-fangyi-pet — 庄方宜桌宠原生窗口");
             sb.AppendLine("用法: dsh-zhuang-fangyi-pet.exe [--url <base>] [--token <hex>] [--state <name>]");
-            sb.AppendLine("        [--scale <0.5~2.0>] [--opacity <0.3~1.0>] [--x <int>] [--y <int>]");
+            sb.AppendLine("        [--scale <0.3~3.0>] [--opacity <0.3~1.0>] [--x <int>] [--y <int>]");
             sb.AppendLine("        [--topmost 0|1] [--click-through 0|1] [--bubble 0|1] [--dark auto|0|1]");
             sb.AppendLine("        [--art-dir <dir>] [--art-url <url>] [--selftest] [--verbose]");
             return sb.ToString();
