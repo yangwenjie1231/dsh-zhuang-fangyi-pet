@@ -943,12 +943,77 @@ namespace DshZhuangFangyiPet
                   "气泡 y=" + by.ToString("0") + "（上方）；输入窗 y=" + inY.ToString("0") + "（下方）");
             try { posProbe.Close(); } catch { }
             try { sideProbe.ForceClose(); } catch { }
+            // ⭐ 选择器是**两级折叠**：项目（文件夹）→ 该项目的对话。
+            //
+            // 被真实反馈逼出来的：同一个项目下能有十几个对话
+            //（用户截图一整列 `demac-e2e-cef · session-`），平铺一个下拉翻不到 ——
+            // 原话"对话一多，根本翻不到"。项目这一层就是折叠：
+            // 先把 N 个对话收敛成 M 个项目（M << N）。
             PetInput picker = new PetInput(new PetHttp("http://127.0.0.1:1/", "t"));
-            List<PetSessionChoice> chs = new List<PetSessionChoice>();
-            PetSessionChoice c1 = new PetSessionChoice(); c1.SessionId = "s-a"; c1.Title = "甲"; c1.Running = true;
-            PetSessionChoice c2 = new PetSessionChoice(); c2.SessionId = "s-b"; c2.Title = "乙";
-            chs.Add(c1); chs.Add(c2);
-            picker.SetChoices(chs);
+            List<PetSessionChoice> grouped = new List<PetSessionChoice>();
+            // alpha 项目 3 个对话（模拟同一文件夹下多个对话 —— 折叠要解决的就是这个）
+            for (int gi = 0; gi < 3; gi++)
+            {
+                PetSessionChoice g = new PetSessionChoice();
+                g.SessionId = "session-aaaa111" + gi + "-x";
+                g.Title = "alpha 对话" + gi;
+                g.Project = "alpha";
+                grouped.Add(g);
+            }
+            // beta 项目 1 个
+            PetSessionChoice gb = new PetSessionChoice();
+            gb.SessionId = "session-bbbb222-0-x";
+            gb.Title = "beta 对话";
+            gb.Project = "beta";
+            grouped.Add(gb);
+            // 没有项目的（应落进"（其他）"）
+            PetSessionChoice gn = new PetSessionChoice();
+            gn.SessionId = "session-cccc333-0-x";
+            gn.Title = "无项目对话";
+            grouped.Add(gn);
+
+            picker.SetChoices(grouped);
+            List<string> projItems = picker.DiagProjectItems();
+            List<string> sessItems = picker.DiagSessionItems();
+            // 折叠效果：7 个（含无项目）→ 3 个项目条目
+            bool collapsed = projItems.Count == 3 &&
+                             projItems[0].Contains("alpha") && projItems[0].Contains("3") &&
+                             projItems[1].Contains("beta") && projItems[2].Contains("其他");
+            Check(collapsed, "选择器折叠成项目级（N 个对话 → M 个项目）",
+                  collapsed ? "项目条目：" + string.Join(" / ", projItems)
+                            : "折叠结果不符：" + string.Join(" / ", projItems));
+            // 默认落在第一个项目，且只显示该项目下的对话
+            bool firstGroupOnly = sessItems.Count == 3;
+            Check(firstGroupOnly, "对话级只显示当前项目下的对话（不跨项目混排）",
+                  "当前项目对话数=" + sessItems.Count + "（alpha 应有 3 个）");
+            // 切到 beta → 对话级应只剩 1 个
+            List<string> betaItems = picker.DiagSwitchProject(1);
+            bool switched = betaItems.Count == 1 &&
+                            picker.SelectedSessionId() == "session-bbbb222-0-x";
+            Check(switched, "切项目后对话级跟着换，选中项回传正确",
+                  switched ? "beta 下 1 个，选中=" + picker.SelectedSessionId()
+                           : "切项目结果不符（" + betaItems.Count + " 个）");
+            // 切到"（其他）" → 无项目那 1 个
+            List<string> otherItems = picker.DiagSwitchProject(2);
+            bool otherOk = otherItems.Count == 1 &&
+                           picker.SelectedSessionId() == "session-cccc333-0-x";
+            Check(otherOk, "没有项目的对话归入「（其他）」而不是丢失",
+                  otherOk ? "（其他）下 1 个" : "结果不符（" + otherItems.Count + " 个）");
+
+            // ⭐ 同名消歧必须**真的能区分**。
+            //
+            // 踩过：`shortId` 原先取 sessionId 前 8 字符，而真实 id 形如
+            // `session-001d93a5-...` —— **全部以 `session-` 开头**，
+            // 于是消歧后缀恒为 `session-`，完全没消歧（用户截图里一整列
+            // `demac-e2e-cef · session-` 就是这么来的）。
+            // 这里断言**两个不同 id 的短标识必须不同**。
+            string sid1 = PetSessionChoice.DiagShortId("session-001d93a5-52f0-477e-b58b-b2d9a2862236");
+            string sid2 = PetSessionChoice.DiagShortId("session-007ce55a-ae81-4bdf-a3b4-d67b77487932");
+            bool distinct = sid1 != sid2 && sid1.Length > 0 && sid1 != "session-";
+            Check(distinct, "同名消歧：不同 sessionId 得到不同短标识",
+                  distinct ? sid1 + " vs " + sid2
+                           : "短标识相同或无效（" + sid1 + " / " + sid2 + "）→ 消歧失效");
+
             // ⭐ 多行输入 + 跟随移动（用户反馈"不支持多行""不跟随移动"）
             bool multiOk = picker.DiagAcceptsReturn && picker.DiagMaxLines > 1;
             Check(multiOk, "输入窗支持多行（Enter 换行，不误发）",
@@ -963,32 +1028,38 @@ namespace DshZhuangFangyiPet
             bool above = fy < 1000;                                            // 在桌宠上方
             Check(centered && above, "输入窗跟随桌宠：水平居中 + 贴在桌宠上方",
                   "目标=(" + fx.ToString("0") + "," + fy.ToString("0") + ") 宽=" + picker.DiagWidth.ToString("0") +
-                  "（桌宠 1000,1000 200x200，中心 x=1100）");            // ⭐ 选择器显示要带**项目前缀**（用户反馈"选择对话的时候没有层级"）。
-            // 真机 385 个会话大量同名，平铺一串根本选不出来。
+                  "（桌宠 1000,1000 200x200，中心 x=1100）");
+
+            // ⭐ 选择器显示：Display 带项目前缀（单行自洽），
+            // ShortDisplay 不带 —— 项目已在**上一级下拉**里，重复显示纯属噪音。
             PetSessionChoice hier = new PetSessionChoice();
             hier.SessionId = "s-hier";
-            hier.Title = "精确中文画面文字转录（OCR） · s-dup-aa";
+            hier.Title = "精确中文画面文字转录（OCR） · 001d93a5";
             hier.Project = "demac-e2e-cef";
             hier.Running = true;
-            string disp = hier.Display;
-            bool hierOk = disp.Contains("[demac-e2e-cef]") && disp.Contains("●") && disp.Contains("s-dup-aa");
-            Check(hierOk, "选择器显示带项目前缀与运行标记（形成层级）", disp);
-            // 没有 project 时不显示空方括号
+            bool hierOk = hier.Display.Contains("[demac-e2e-cef]") && hier.Display.Contains("●");
+            Check(hierOk, "选择器：Display 带项目前缀与运行标记（单行自洽）", hier.Display);
+            bool shortOk = !hier.ShortDisplay.Contains("[") && hier.ShortDisplay.Contains("●") &&
+                           hier.ShortDisplay.Contains("001d93a5");
+            Check(shortOk, "选择器：对话级不重复项目名（项目已在上一级）", hier.ShortDisplay);
+            // 没有 project 时 Display 不显示空方括号
             PetSessionChoice noProj = new PetSessionChoice();
             noProj.SessionId = "s-x"; noProj.Title = "无项目";
             bool noProjOk = !noProj.Display.Contains("[");
             Check(noProjOk, "选择器：没有项目时不显示空方括号", noProj.Display);
             bool sel1 = picker.SelectedSessionId() == "s-a";
-            // 换一批（模拟会话结束），选择必须落到新列表里存在的项上
+            // 换一批（模拟会话结束），选择必须落到新列表里存在的项上 ——
+            // 不能残留在已消失的会话上（那会导致消息发给不存在的对话）。
             List<PetSessionChoice> chs2 = new List<PetSessionChoice>();
-            PetSessionChoice c3 = new PetSessionChoice(); c3.SessionId = "s-c"; c3.Title = "丙";
+            PetSessionChoice c3 = new PetSessionChoice(); c3.SessionId = "s-c"; c3.Title = "丙"; c3.Project = "p3";
             chs2.Add(c3);
             picker.SetChoices(chs2);
             bool sel2 = picker.SelectedSessionId() == "s-c";
             picker.SetChoices(new List<PetSessionChoice>());
             bool sel3 = picker.SelectedSessionId() == null;
-            Check(sel1 && sel2 && sel3, "会话选择器：选中项回传正确、列表变化不残留旧选择",
-                  "首项=" + (sel1 ? "s-a" : "错") + " 换批=" + (sel2 ? "s-c" : "错") + " 空表=" + (sel3 ? "null" : "错"));
+            // 换批后不残留旧选择（chs2 只有一个会话，应自动选中它）
+            Check(sel2 && sel3, "会话选择器：列表变化不残留旧选择、空表返回 null",
+                  "换批=" + (sel2 ? "s-c" : "错") + " 空表=" + (sel3 ? "null" : "错"));
             try { picker.Close(); } catch { }
             string body1 = PetHttp.BuildSendBody("你好", null);
             string body2 = PetHttp.BuildSendBody("说\"引\"与\\反斜", null);

@@ -425,7 +425,27 @@ export function apply (ctx, config) {
   }
 
   /** 短 id（无法命名时的最后回退）。 */
-  const shortId = id => (typeof id === 'string' && id.length > 8 ? id.slice(0, 8) : String(id ?? ''))
+  /**
+   * 会话的**短标识**（用于同名消歧）。
+   *
+   * ⚠️ 不能取前 N 个字符：真实 sessionId 形如
+   *   `session-001d93a5-52f0-477e-b58b-b2d9a2862236`
+   * **全部以 `session-` 开头**，`slice(0,8)` 恒为 `session-` ——
+   * 于是"同名消歧"产出的后缀完全相同，等于没消歧
+   *（用户截图里一整列 `demac-e2e-cef · session-` 就是这个）。
+   *
+   * 正确做法：剥掉固定的 `session-` 前缀，取后面 UUID 的**第一段**（8 位十六进制）。
+   */
+  const shortId = id => {
+    const s = String(id ?? '')
+    if (s === '') return ''
+    // 剥掉固定的 `session-` 前缀后再取前 8 字符。
+    // 不剥前缀的话真实 id 全都得到 `session-`（见上面的说明）；
+    // 而"取第一个 `-` 之前"又太脆：非标准 id（如测试用的 `s-dup-aaaaaaaa`）
+    // 会只剩一个 `s`，两个不同会话又撞在一起。
+    const stripped = s.replace(/^session-/i, '')
+    return stripped.length > 8 ? stripped.slice(0, 8) : stripped
+  }
 
   /**
    * 给会话起个能认出来的名字。纯函数（测试直接断言回退顺序），不碰 IO。

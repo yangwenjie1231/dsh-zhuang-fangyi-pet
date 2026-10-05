@@ -328,7 +328,9 @@ await ok('⭐ 有 sessionController 时：list() 的标题进快照，指定会�
   // 用户反馈"选择对话的时候没有层级" —— 385 个会话大量同名，平铺一串选不出来。
   assert.equal(byId.get('s-cwd-only')?.project, 'beta', '带 cwd 的会话应有 project')
   assert.equal(byId.get('s-titled')?.project, 'alpha', 'project 取自 cwd 的目录名')
-  assert.equal(byId.get('s-bare-1234567890')?.title, 's-bare-1', '都没有用 id 前缀')
+  // 既无标题也无 cwd → 用**短标识**回落（剥掉固定的 `session-` 前缀后取前 8 字符）。
+  // 这个桩 id 没有该前缀，所以剥前后都是前 8 字符。
+  assert.equal(byId.get('s-bare-1234567890')?.title, 's-bare-1', '都没有用短标识回落')
   // ⭐ 重名消歧：真机截图里 11 个对话同名，光看名字选不出该发哪个。
   const dupA = byId.get('s-dup-aaaaaaaa')
   const dupB = byId.get('s-dup-bbbbbbbb')

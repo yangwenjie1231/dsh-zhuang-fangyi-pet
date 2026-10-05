@@ -886,6 +886,66 @@ ok('⭐ 多个对话时输入条出现「发给」选择器，且选项用 title
   assert.ok(String(opts[0].props.children).includes('●'), '在跑的加标记')
 })
 
+ok('⭐ 选择器按项目分组（<optgroup> 折叠，对话多了才翻得到）', () => {
+  // 真机上同一个项目下能有十几个对话（用户截图一整列同名），平铺一个下拉翻不到。
+  // 分组让"项目"成为天然的折叠层（等价于折叠展开）。
+  const l = loadClient()
+  l.exports.apply(l.ctx)
+  const { Pet, runtime } = l.exports.__test
+  runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 1, frameMs: 36 } } }
+  runtime.__state.snapshot = {
+    petState: 'idle', label: '',
+    send: { available: true, reason: null },
+    sessions: [
+      { sessionId: 's-a1', title: '甲1', project: 'alpha', running: true, state: 'working' },
+      { sessionId: 's-a2', title: '甲2', project: 'alpha', running: false, state: 'idle' },
+      { sessionId: 's-a3', title: '甲3', project: 'alpha', running: false, state: 'idle' },
+      { sessionId: 's-b1', title: '乙1', project: 'beta', running: false, state: 'idle' },
+      { sessionId: 's-x1', title: '无项目', running: false, state: 'idle' }
+    ]
+  }
+  runtime.__state.settings = normalizePet({})
+  const findPen = node => {
+    if (node === null || node === undefined || typeof node !== 'object') return null
+    if (Array.isArray(node)) { for (const c of node) { const r = findPen(c); if (r) return r } return null }
+    if (node.props) {
+      const cls = node.props.className
+      if (typeof cls === 'string' && cls.includes('zf-pet__send-btn')) return node
+      return findPen(node.props.children)
+    }
+    return null
+  }
+  l.react.resetHooks()
+  const pen = findPen(Pet({ runtime }))
+  l.react.resetHooks()
+  pen.props.onClick({ stopPropagation () {} })
+  const tree2 = Pet({ runtime })
+  const findSelect = node => {
+    if (node === null || node === undefined || typeof node !== 'object') return null
+    if (Array.isArray(node)) { for (const c of node) { const r = findSelect(c); if (r) return r } return null }
+    if (node.props) {
+      if (node.props.className === 'zf-pet__composer-select') return node
+      return findSelect(node.props.children)
+    }
+    return null
+  }
+  const select = findSelect(tree2)
+  assert.ok(select !== null, '多对话时应出现选择器')
+  const kids = select.props.children
+  // 期望结构：optgroup(alpha) + optgroup(beta) + option(无项目) = 3 个顶层节点
+  const groups = kids.filter(k => k !== null && k.props && k.props.label !== undefined)
+  const looseOpts = kids.filter(k => k !== null && k.props && k.props.value !== undefined)
+  assert.equal(groups.length, 2, `应有 2 个项目分组，实际 ${groups.length}`)
+  assert.equal(looseOpts.length, 1, '没有项目的会话直接作为 option（不套空 optgroup）')
+  const alpha = groups.find(g => g.props.label === 'alpha')
+  assert.ok(alpha, 'alpha 分组应存在')
+  assert.equal(alpha.props.children.length, 3, 'alpha 下应有 3 个对话（折叠后同组）')
+  // 组内不重复项目名前缀（项目名已由 optgroup 承担）
+  const firstOpt = alpha.props.children[0]
+  assert.ok(!String(firstOpt.props.children).includes('[alpha]'),
+    '组内选项不该重复项目名前缀')
+  assert.ok(String(firstOpt.props.children).includes('●'), '在跑的仍带标记')
+})
 ok('⭐ 只有一个对话时不显示选择器（不占地方）', () => {
   const l = loadClient()
   l.exports.apply(l.ctx)

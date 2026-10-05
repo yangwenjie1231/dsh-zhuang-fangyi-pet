@@ -217,6 +217,33 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /**
+     * 按项目把会话分组（overlay 选择器的"折叠"）。
+     *
+     * 真机上同一项目下能有十几个对话（用户截图一整列同名），平铺一个下拉翻不到，
+     * 所以用 `<optgroup>` 让"项目"成为天然的折叠层。
+     * 保持 Host 给的顺序（Host 已按项目聚拢），只做相邻切分。
+     * 没有 project 的归入一组 `project: null`（不套 optgroup）。
+     *
+     * @param {Array} sessions
+     * @returns {Array<{project: string|null, items: Array}>}
+     */
+    function groupByProject (sessions) {
+      const out = []
+      for (const s of sessions ?? []) {
+        const key = typeof s?.project === 'string' && s.project !== '' ? s.project : null
+        const last = out.length > 0 ? out[out.length - 1] : null
+        if (last !== null && last.project === key) last.items.push(s)
+        else out.push({ project: key, items: [s] })
+      }
+      return out
+    }
+
+    /** 单条会话的下拉选项（项目名由 optgroup 承担，不重复前缀）。 */
+    function sessionOption (s) {
+      return h('option', { key: s.sessionId, value: s.sessionId },
+        (s.running === true ? '● ' : '') + (s.title || s.sessionId))
+    }
     /* ------------------------------------------------------------------ *
      * 小工具
      * ------------------------------------------------------------------ */
@@ -712,12 +739,13 @@ window.__ModuleLoader__.load({
                       className: 'zf-pet__composer-select',
                       value: effectiveTargetId ?? '',
                       onChange: event => setTargetSessionId(event.target.value)
-                    }, sessionChoices.map(s =>
-                      h('option', { key: s.sessionId, value: s.sessionId },
-                        // 带项目前缀形成层级：真机 385 个会话大量同名，平铺选不出来。
-                        (s.project ? '[' + s.project + '] ' : '') +
-                        (s.running === true ? '● ' : '') + (s.title || s.sessionId))
-                    ))
+                    // 用 <optgroup> 按项目**折叠**：真机上同一项目下能有十几个对话
+                    //（用户截图一整列同名），平铺翻不到。分组让"项目"成为天然的折叠层。
+                    }, groupByProject(sessionChoices).map(g =>
+                      g.project === null
+                        ? g.items.map(s => sessionOption(s))
+                        : h('optgroup', { key: 'g-' + g.project, label: g.project }, g.items.map(s => sessionOption(s)))
+                    ).flat())
                   ])
                 : null,
               h('input', {

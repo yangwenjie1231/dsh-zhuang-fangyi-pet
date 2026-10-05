@@ -23,6 +23,12 @@ namespace DshZhuangFangyiPet
         private readonly Border _chrome;
         /// <summary>「发给哪个对话」选择器（会话列表由 Host 通过快照提供）。</summary>
         private readonly ComboBox _target;
+        /// <summary>项目（文件夹）下拉 —— 折叠层，减少一次性铺开的条目。</summary>
+        private readonly ComboBox _projectBox;
+        /// <summary>true = 正在程序化重建条目，忽略 SelectionChanged（防止重置用户选择）。</summary>
+        private bool _syncing;
+        /// <summary>按项目分组的会话（保持 Host 给的顺序，Host 已按项目聚拢）。</summary>
+        private List<SessionGroup> _groups = new List<SessionGroup>();
         private readonly TextBlock _targetLabel;
         private readonly StackPanel _targetRow;
         /// <summary>当前可选的会话（与 ComboBox 项一一对应）。</summary>
@@ -128,9 +134,27 @@ namespace DshZhuangFangyiPet
             _targetLabel.VerticalAlignment = VerticalAlignment.Center;
             _targetLabel.Margin = new Thickness(0, 0, 6, 0);
 
+            // ⭐ 两级选择器：先挑**文件夹**（项目），再挑该项目下的对话。
+            //
+            // 为什么必须折叠：真机上同一个项目下能有十几个对话
+            //（用户截图里一整列 `demac-e2e-cef · session-`），
+            // 平铺一个下拉根本翻不到 —— 用户原话"对话一多，根本翻不到"。
+            // 项目这一层就是"折叠"：先把 N 个对话收敛成 M 个项目（M << N）。
+            _projectBox = new ComboBox();
+            _projectBox.FontSize = 12;
+            _projectBox.MinWidth = 96;
+            _projectBox.MaxWidth = 150;
+            _projectBox.Margin = new Thickness(0, 0, 6, 0);
+            _projectBox.SelectionChanged += delegate
+            {
+                // 切项目 → 只重填"对话"那一级（不改变已选项目的会话选择逻辑）
+                if (_syncing) return;
+                RebuildSessionItems();
+            };
+
             _target = new ComboBox();
             _target.FontSize = 12;
-            _target.MinWidth = 210;
+            _target.MinWidth = 130;
             _target.Margin = new Thickness(0, 0, 0, 0);
             _target.SelectionChanged += delegate { SetHint(); };
 
@@ -138,6 +162,7 @@ namespace DshZhuangFangyiPet
             _targetRow.Orientation = Orientation.Horizontal;
             _targetRow.Margin = new Thickness(12, 10, 12, 0);
             _targetRow.Children.Add(_targetLabel);
+            _targetRow.Children.Add(_projectBox);
             _targetRow.Children.Add(_target);
 
             _box = new TextBox();
@@ -295,47 +320,163 @@ namespace DshZhuangFangyiPet
         }
 
         /// <summary>
-        /// 更新「发给哪个对话」的可选项（由 Program 在快照变化时喂进来）。
+        /// 更新选择器（由 Program 在快照变化时喂进来）。
         ///
-        /// 保持用户当前选择：优先按 sessionId 找回原来那项；找不回（会话结束）就选第一项。
-        /// 否则 ComboBox 会悄悄跳回第一项，用户没察觉，消息就发去了别处。
+        /// **两级结构**：项目（文件夹）→ 该项目的对话。
+        /// 用户反馈"对话一多根本翻不到"，所以先把 N 个对话折叠成 M 个项目。
+        ///
+        /// 两个都必须**保持用户当前选择**（会话结束时才回落）——
+        /// 否则 ComboBox 会悄悄跳回第一项，消息就发去了别处。
         /// </summary>
         public void SetChoices(List<PetSessionChoice> choices)
         {
             _choices = choices ?? new List<PetSessionChoice>();
+            // ⚠️ 必须**在重建 _groups 之前**读旧选择，但读的时候旧 _groups 与
+            // ComboBox 的 SelectedIndex 可能已经不同步（列表刚被换掉）——
+            // `SelectedSessionId` 内部已做越界保护，这里保持顺序即可。
             string keep = SelectedSessionId();
-            _target.Items.Clear();
+
+            // 按项目分组（Host 已按项目聚拢，这里只需顺序切分）
+            _groups = new List<SessionGroup>();
             for (int i = 0; i < _choices.Count; i++)
             {
-                _target.Items.Add(_choices[i].Display);
-            }
-            if (_choices.Count == 0)
-            {
-                _target.IsEnabled = false;
-                _target.Items.Add("（没有可发的对话）");
-                _target.SelectedIndex = 0;
-                SetHint();
-                return;
-            }
-            _target.IsEnabled = true;
-            int idx = 0;
-            if (!string.IsNullOrEmpty(keep))
-            {
-                for (int i = 0; i < _choices.Count; i++)
+                PetSessionChoice c = _choices[i];
+                string key = string.IsNullOrEmpty(c.Project) ? "（其他）" : c.Project;
+                SessionGroup g = _groups.Count > 0 ? _groups[_groups.Count - 1] : null;
+                if (g == null || g.Name != key)
                 {
-                    if (_choices[i].SessionId == keep) { idx = i; break; }
+                    g = new SessionGroup();
+                    g.Name = key;
+                    _groups.Add(g);
                 }
+                g.Items.Add(i);   // 存**全局下标**，选中后直接回查 _choices
             }
-            _target.SelectedIndex = idx;
+
+            _syncing = true;
+            try
+            {
+                _projectBox.Items.Clear();
+                for (int i = 0; i < _groups.Count; i++)
+                {
+                    _projectBox.Items.Add(_groups[i].Name + "（" +
+                        _groups[i].Items.Count.ToString(CultureInfo.InvariantCulture) + "）");
+                }
+
+                if (_choices.Count == 0)
+                {
+                    _projectBox.IsEnabled = false;
+                    _target.IsEnabled = false;
+                    _target.Items.Clear();
+                    _target.Items.Add("（没有可发的对话）");
+                    _target.SelectedIndex = 0;
+                    _projectBox.SelectedIndex = -1;
+                    return;
+                }
+
+                _projectBox.IsEnabled = _groups.Count > 1;
+                _target.IsEnabled = true;
+
+                // 优先落在"包含上次选中会话"的那个项目上
+                int wantGroup = 0;
+                if (!string.IsNullOrEmpty(keep))
+                {
+                    for (int gi = 0; gi < _groups.Count; gi++)
+                    {
+                        if (_groups[gi].Items.Exists(idx => _choices[idx].SessionId == keep))
+                        {
+                            wantGroup = gi;
+                            break;
+                        }
+                    }
+                }
+                _projectBox.SelectedIndex = wantGroup;
+            }
+            finally
+            {
+                _syncing = false;
+            }
+            // 再填对话级（它在 _syncing=false 之后做，保证 SelectedIndex 生效）
+            RebuildSessionItems(keep);
             SetHint();
+        }
+
+        /// <summary>
+        /// 按当前选中的项目重填"对话"下拉。
+        /// @param keep 尽量保持选中的会话 id；null = 保持当前选择
+        /// </summary>
+        private void RebuildSessionItems(string keep = null)
+        {
+            if (keep == null) keep = SelectedSessionId();
+            int gi = _projectBox.SelectedIndex;
+            _syncing = true;
+            try
+            {
+                _target.Items.Clear();
+                if (gi < 0 || gi >= _groups.Count) return;
+                SessionGroup g = _groups[gi];
+                for (int k = 0; k < g.Items.Count; k++)
+                {
+                    _target.Items.Add(_choices[g.Items[k]].ShortDisplay);
+                }
+                int sel = 0;
+                if (!string.IsNullOrEmpty(keep))
+                {
+                    for (int k = 0; k < g.Items.Count; k++)
+                    {
+                        if (_choices[g.Items[k]].SessionId == keep) { sel = k; break; }
+                    }
+                }
+                _target.SelectedIndex = sel;
+            }
+            finally
+            {
+                _syncing = false;
+            }
         }
 
         /// <summary>当前选中的会话 id；没有可选项时返回 null（Host 会自己挑最近活跃的）。</summary>
         public string SelectedSessionId()
         {
-            int i = _target == null ? -1 : _target.SelectedIndex;
-            if (i < 0 || i >= _choices.Count) return null;
-            return _choices[i].SessionId;
+            // 全程**越界保护**：`_groups` 会在 SetChoices 里被整体替换，
+            // 而 ComboBox 的 SelectedIndex 可能还指向旧列表的下标 ——
+            // 直接索引会抛 ArgumentOutOfRangeException（实测踩过）。
+            int gi = _projectBox == null ? -1 : _projectBox.SelectedIndex;
+            int si = _target == null ? -1 : _target.SelectedIndex;
+            if (gi < 0 || gi >= _groups.Count) return null;
+            SessionGroup g = _groups[gi];
+            if (si < 0 || si >= g.Items.Count) return null;
+            int globalIdx = g.Items[si];
+            if (globalIdx < 0 || globalIdx >= _choices.Count) return null;
+            return _choices[globalIdx].SessionId;
+        }
+
+        /// <summary>自检诊断用：当前项目下拉的条目（折叠后的项目名列表）。</summary>
+        internal List<string> DiagProjectItems()
+        {
+            List<string> r = new List<string>();
+            if (_projectBox == null) return r;
+            for (int i = 0; i < _projectBox.Items.Count; i++) r.Add(Convert.ToString(_projectBox.Items[i]));
+            return r;
+        }
+
+        /// <summary>自检诊断用：当前"对话"下拉的条目。</summary>
+        internal List<string> DiagSessionItems()
+        {
+            List<string> r = new List<string>();
+            if (_target == null) return r;
+            for (int i = 0; i < _target.Items.Count; i++) r.Add(Convert.ToString(_target.Items[i]));
+            return r;
+        }
+
+        /// <summary>自检诊断用：切到第 n 个项目并返回该项目的对话条目。</summary>
+        internal List<string> DiagSwitchProject(int n)
+        {
+            // 越界就返回当前状态，不抛 —— 自检里列表可能已被清空。
+            if (_projectBox != null && n >= 0 && n < _projectBox.Items.Count)
+            {
+                _projectBox.SelectedIndex = n;
+            }
+            return DiagSessionItems();
         }
         private void SetHint()
         {
@@ -434,6 +575,29 @@ namespace DshZhuangFangyiPet
         /// <summary>给用户看的名字（Host 已回退过：标题 → 目录名 → id 前缀）。</summary>
         public string Title;
         public bool Running;
+        /// <summary>
+        /// 自检诊断用：短标识算法（与 Host 的 `shortId` 同一规则）。
+        ///
+        /// 真机踩过：sessionId 形如 `session-001d93a5-…`，**全部以 `session-` 开头**，
+        /// 取前 8 字符恒为 `session-` → 消歧后缀完全相同 → 等于没消歧。
+        /// 所以这里剥掉固定前缀，取 UUID 的第一段。
+        /// </summary>
+        public static string DiagShortId(string id)
+        {
+            string s = id == null ? "" : id;
+            if (s.Length == 0) return "";
+            string stripped = s;
+            if (stripped.StartsWith("session-", StringComparison.OrdinalIgnoreCase))
+                stripped = stripped.Substring("session-".Length);
+            // 与 Host 的 shortId 同一规则：剥前缀后取前 8 字符。
+            return stripped.Length > 8 ? stripped.Substring(0, 8) : stripped;
+        }
+        /// <summary>对话级显示（项目已在上一级下拉里，这里不再重复前缀）。</summary>
+        public string ShortDisplay
+        {
+            get { return (Running ? "● " : "") + (string.IsNullOrEmpty(Title) ? SessionId : Title); }
+        }
+
         /// <summary>所属项目（会话的工作目录名）。用于在下拉里做层级分组。</summary>
         public string Project;
 
@@ -454,5 +618,15 @@ namespace DshZhuangFangyiPet
                 return prefix + (Running ? "● " : "") + name;
             }
         }
+    }
+
+    /// <summary>
+    /// 一个项目（文件夹）下的会话分组 —— 「折叠」的实现载体。
+    /// `Items` 存 `_choices` 的**全局下标**，选中后直接回查，避免复制对象。
+    /// </summary>
+    internal sealed class SessionGroup
+    {
+        public string Name;
+        public List<int> Items = new List<int>();
     }
 }

@@ -764,11 +764,18 @@ namespace DshZhuangFangyiPet
                         PetSessionChoice c = new PetSessionChoice();
                         c.SessionId = si.SessionId;
                         c.Title = si.Title;
+                        c.Project = si.Project;   // 折叠分组用（缺了它会全落进"（其他）"）
                         c.Running = si.Running || si.State == "working" || si.State == "thinking";
                         list.Add(c);
                     }
                     list.Sort(delegate(PetSessionChoice a, PetSessionChoice b)
                     {
+                        // ⚠️ 必须**先按项目**排序：分组是把相邻同类会话切在一起，
+                        // 项目不挨着的话同一个文件夹会被拆成好几个组。
+                        int byProject = string.Compare(a.Project ?? "", b.Project ?? "",
+                                                       StringComparison.CurrentCulture);
+                        if (byProject != 0) return byProject;
+                        // 组内：在跑的优先，再按名字
                         if (a.Running != b.Running) return a.Running ? -1 : 1;
                         return string.Compare(a.Title, b.Title, StringComparison.CurrentCulture);
                     });
