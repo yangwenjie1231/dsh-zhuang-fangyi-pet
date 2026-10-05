@@ -625,10 +625,43 @@ export function apply (ctx, config) {
   })
   ctx.effect(() => () => offChange(), 'zhuang-fangyi-pet: state subscription')
 
+  /**
+   * 原生窗口**该不该在跑** —— 唯一判据，启动与设置变化共用。
+   *
+   * 抽成纯函数是有意的：以前这个条件只写在启动那一刻，
+   * 于是"改设置"和"启动"会各判各的，早晚分叉（事实上已经分叉了：
+   * 关掉总开关只停了 overlay，桌面那只还在）。
+   */
+  const nativeWanted = () => {
+    const s = settings.get()
+    return s.enabled === true && s.mode !== 'overlay'
+  }
+
+  /** 让 exe 的存活状态与 `nativeWanted()` 一致（幂等：已一致就什么都不做）。 */
+  const syncNativeProcess = () => {
+    const want = nativeWanted()
+    const running = launcher.status.running === true
+    if (want === running) return
+    try {
+      if (want) {
+        const started = launcher.start()
+        boot(`exe 启动（设置变化触发）：started=${started}`)
+        if (!started) {
+          logger.warn?.('zhuang-fangyi-pet: 原生窗口不可用，浏览器半边将渲染窗口内桌宠')
+        }
+      } else {
+        launcher.stop()
+        boot('exe 已停止（enabled=false 或 mode=overlay）')
+      }
+    } catch (error) {
+      // 启停失败不该影响设置本身已生效这件事（overlay 仍会按新设置渲染）。
+      boot(`⚠️ exe 启停失败（已忽略）：${error?.stack ?? error}`)
+    }
+  }
+
   // 设置变化 → 也广播一帧。否则 exe 只能等下一次状态变化才知道设置改了
   //（用户改完大小盯着桌宠看，半天没反应，会以为坏了）。
-  const offSettings = settings.subscribe(() => {
-    try {
+  const offSettings = settings.subscribe(() => {    try {
       // 先让状态机吃到新配置（活跃度/气泡时长/完成提醒都要**立刻**生效），
       // 再广播 —— 顺序反了的话，这一帧推的还是旧行为，用户会看到"改完没反应"。
       machine.setConfig(machineConfig())
@@ -636,6 +669,10 @@ export function apply (ctx, config) {
     } catch (error) {
       logger.warn?.(`zhuang-fangyi-pet: 设置变化广播失败（${error?.message ?? error}）`)
     }
+    // 总开关与显示模式**必须在宿主侧生效** —— exe 是被 spawn 出来的进程，
+    // 它自己不认 `enabled`（宿主也没把这个字段发给它），所以"关掉总开关"
+    // 以前只停了 overlay，**桌面那只还杵在那儿**：用户会以为开关坏了。
+    syncNativeProcess()
   })
   ctx.effect(() => () => offSettings(), 'zhuang-fangyi-pet: settings subscription')
 
@@ -682,8 +719,20 @@ export function apply (ctx, config) {
       sessionId,
       content: [{ type: 'text', text }],
       // 每次发送一个唯一 id：Host 用它做去重（同 id 重试不会插入第二条）。
-      requestId: `zf-pet-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
-      // 不传 mode ⇒ 走 `agent.followup`（排队）
+      requestId: `zf-pet-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
+      // ⚠️ **`mode` 是必填**，不是可选。
+      //
+      // 曾经这里写的是"不传 mode ⇒ 走 `agent.followup`（排队）"—— **那是错的**，
+      // 真机上表现为**发送必 502**。上游 `dsh-api-session-controller` 的 zod schema
+      // （`typert.host.js` 实测）是：
+      //
+      //     'mode': z.union([z.literal("queue"), z.literal("steer")]).readonly(),
+      //
+      // **没有 `.optional()`** —— 少这个字段直接校验失败，被路由的兜底分支
+      // 映射成 502 `send-failed`。DSH 自己的客户端也永远显式传 mode。
+      //
+      // `'queue'` = 排在当前回合之后（就是我们要的"排队、不打断"）。
+      mode: 'queue'
     })
   }
 
@@ -861,7 +910,8 @@ export function apply (ctx, config) {
     hub.broadcast(withSettings(machine.snapshot()))
 
     // webServer 就绪 = 端口已知 = 可以启动 exe 了。
-    if (settings.get().enabled && settings.get().mode !== 'overlay') {
+    // 用与设置变化**同一个**判据（`nativeWanted`），两边不可能分叉。
+    if (nativeWanted()) {
       try {
         const started = launcher.start()
         if (!started) {

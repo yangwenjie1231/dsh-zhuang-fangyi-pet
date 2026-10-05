@@ -1167,6 +1167,53 @@ ok('运行时未装配时给出可读错误，而不是 undefined.t', () => {
   assert.throws(() => Pet({}), /运行时尚未装配/, '错误信息应指出运行时没装配')
 })
 
+/* ── 让位：原生窗口在跑时 overlay 必须完全不渲染 ──────────────────────────
+ *
+ * 契约 §2 对 `nativeAvailable` 的注释就是"供 overlay 判断是否让位"，
+ * 但此前**没有一处读它**。修好"客户端半边整片崩溃"之后这条会立刻显形：
+ * 屏幕上是**两只桌宠**（桌面一只、DSH 窗口里一只），各自记位置、各自响应拖动。
+ * ──────────────────────────────────────────────────────────────────────── */
+
+/** 渲染 Pet 并返回树（`nativeAvailable` 等按参数给）。 */
+function renderPetWith (snapshotPatch = {}, settingsPatch = {}) {
+  const l = loadClient()
+  l.exports.apply(l.ctx)
+  const { Pet, runtime } = l.exports.__test
+  runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 1 } } }
+  runtime.__state.snapshot = { petState: 'idle', label: '', bubble: null, ...snapshotPatch }
+  runtime.__state.settings = normalizePet(settingsPatch)
+  l.react.resetHooks()
+  return Pet({})
+}
+
+ok('⭐ 原生窗口在跑时 overlay 让位（否则屏幕上两只桌宠）', () => {
+  const tree = renderPetWith({ nativeAvailable: true })
+  assert.equal(tree, null, 'nativeAvailable=true 时不该渲染任何东西')
+})
+
+ok('⭐ mode=native 时 overlay 不渲染（用户只要桌面窗口）', () => {
+  const tree = renderPetWith({ nativeAvailable: false }, { mode: 'native' })
+  assert.equal(tree, null, 'mode=native 时 overlay 应让位')
+})
+
+ok('⭐ 总开关关掉时 overlay 不渲染（宿主不启 exe，overlay 也得停）', () => {
+  const tree = renderPetWith({ nativeAvailable: false }, { enabled: false })
+  assert.equal(tree, null, 'enabled=false 时应停')
+})
+
+ok('⭐ 原生窗不可用时 overlay 必须接管（这正是兜底的意义）', () => {
+  const tree = renderPetWith({ nativeAvailable: false }, { mode: 'auto' })
+  assert.ok(tree !== null, 'auto + exe 没起来 → overlay 必须渲染')
+})
+
+ok('mode=overlay 时不让位（用户显式选的 mode 优先于探测到的 exe 状态）', () => {
+  // 宿主只在**启动时**按 mode 决定起不起 exe，改设置不会停掉已在跑的 exe。
+  // 所以"从 auto 切到 overlay"后 nativeAvailable 可能仍是 true ——
+  // 这时让位就等于"用户选了窗口内，结果什么都不显示"。
+  const tree = renderPetWith({ nativeAvailable: true }, { mode: 'overlay' })
+  assert.ok(tree !== null, 'mode=overlay 是用户显式选择，应当渲染')
+})
+
 /* ══════════════════════════════════════════════════════════════════════════
  * 8. 运行时：数据来源
  * ═════════════════════════════════════════════════════════════════════════ */

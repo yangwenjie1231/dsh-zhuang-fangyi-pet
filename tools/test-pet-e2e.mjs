@@ -304,7 +304,27 @@ await ok('⭐ 有 sessionController 时：list() 的标题进快照，指定会�
         ]
       }
     },
-    async prompt (req) { prompts.push(req); return { accepted: true } }
+    /**
+     * ⭐ 桩**必须校验 `mode`**，否则测不出真机上的 502。
+     *
+     * 上游 `dsh-api-session-controller` 的 zod schema（`typert.host.js` 实测）：
+     *     'mode': z.union([z.literal("queue"), z.literal("steer")]).readonly(),
+     * **没有 `.optional()`** —— 少这个字段直接校验失败。
+     *
+     * 之前这个桩是 `async prompt (req) { prompts.push(req); return {accepted:true} }`，
+     * 什么都不检查，于是"漏传 mode"在测试里**永远绿**，真机上却必 502。
+     * 复刻校验是唯一能让这条断言有意义的方式。
+     */
+    async prompt (req) {
+      if (req?.mode !== 'queue' && req?.mode !== 'steer') {
+        throw new Error(
+          `RemoteError gateway/bad-request: prompt.mode 必须是 'queue' 或 'steer'，` +
+          `实际 ${JSON.stringify(req?.mode)}（上游 schema 无 .optional()）`
+        )
+      }
+      prompts.push(req)
+      return { accepted: true }
+    }
   })
   // 与文件顶部同一导入方式（模块命名空间直接有 apply，没有 default 包装）。
   const petIndex = await import(`file://${path.join(ROOT, 'index.js').replace(/\\/g, '/')}`)
@@ -365,6 +385,12 @@ await ok('⭐ 有 sessionController 时：list() 的标题进快照，指定会�
   assert.equal(okRes.status, 200, `期望 200，实际 ${okRes.status}`)
   assert.equal(prompts.length, 1, '应恰好投递一次')
   assert.equal(prompts[0].sessionId, 's-titled', '必须投给指定的会话，不能改投')
+  // ⭐ `mode` 必填（上游 zod schema 无 `.optional()`）。漏了它真机必 502 ——
+  // 用户实测报的就是"发送提示 502"。这里断言**值**也断言**存在**。
+  assert.equal(prompts[0].mode, 'queue', 'mode 必须是 queue（排队、不打断当前回合）')
+  // requestId 是去重键，必须每次都不同（否则第二次发送会被当成重试而丢弃）
+  assert.ok(typeof prompts[0].requestId === 'string' && prompts[0].requestId !== '',
+    'requestId 必须存在（Host 用它去重）')
 
   // 指定不存在的会话 → 409（**绝不静默改投别的会话**）
   const badRes = await fetch(`${base}/api/zhuang-fangyi/pet/send`, {
@@ -780,6 +806,148 @@ await ok('降级时其余功能照常（状态、素材、路由都可用）', a
   assert.equal(atlas.status, 200)
   const body = JSON.parse(atlas.body)
   assert.equal(body.report.coveredStates.length, 9, '素材仍应完整')
+})
+
+/* ── 总开关必须真的停掉桌面那只 ──────────────────────────────────────────
+ *
+ * 真机上炸过的形态：`enabled` 只被 overlay 读到（它据此不渲染），
+ * 而 exe 是宿主 spawn 的**独立进程**，宿主既没把 `enabled` 发给它、
+ * 也没在设置变化时停它 —— 于是"关掉总开关"之后桌面那只**还在**，
+ * 用户会以为开关坏了。
+ *
+ * ⚠️ **断言方式很关键（第三次踩同一个坑）**：
+ *
+ *   · 第一版断言 `launcher.status.running === false` —— 但本环境没有
+ *     `subprocess`，`start()` 必失败、`running` **恒为 false**，
+ *     所以这条断言**天然成立**，删掉同步逻辑后照样全绿。
+ *   · 第二版改断言"stop 被调用过" —— 但 `syncNativeProcess` 是**幂等**的：
+ *     `running` 已经是 false 时它正确地跳过 `stop()`，于是 `stop=0`，
+ *     断言又打在了不可能发生的条件上。
+ *
+ * 两次的根因是同一个：**环境里进程从来就没跑起来过**。
+ * 所以这一节**自己装一套 ctx**，带一个最小可用的 `subprocess` 桩，
+ * 让 `start()` 真的成功、`running` 真的变 true，然后才验证
+ * "改设置 → 真的把它停掉"。这才是运行路径。
+ * ──────────────────────────────────────────────────────────────────────── */
+section('4b. 总开关 / 显示模式必须真的作用到原生进程')
+
+await ok('⭐ 关掉总开关会真的 terminate 已运行的原生进程', async () => {
+  const ws = makeWebServer()
+  const local = makeCtx(ws)
+  // 最小可用的 subprocess 桩：spawn 成功、done 永不 settle（进程"一直在跑"）。
+  const spawned = []
+  local.provide('subprocess', {
+    spawn () {
+      const rec = { terminated: 0 }
+      spawned.push(rec)
+      return {
+        terminate () { rec.terminated += 1 },
+        kill () { rec.terminated += 1 },
+        unref () {},
+        on () {},
+        done: new Promise(() => {})
+      }
+    }
+  })
+  const petIndex = await import(`file://${path.join(ROOT, 'index.js').replace(/\\/g, '/')}`)
+  // ⚠️ **必须先 listen 再 apply**：exe 的启动发生在 `ctx.inject(['webServer'])`
+  // 回调里，而它需要 `webServer.port` 才能告诉 exe 连哪里。桩服务器没 listen
+  // 时 port 还是 0 → `baseUrlOf` 返回 null → `start()` 直接放弃、根本不 spawn。
+  // （这正是本用例第一次写错的原因：spawned=0。）
+  await ws.listen()
+  petIndex.apply(toCordisLike(local, ['webServer']), {})
+  const base = `http://127.0.0.1:${ws.port}`
+  const put = body => fetch(`${base}/api/zhuang-fangyi/pet/settings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: body })
+  })
+  const launcher = local.__services.get('zhuangFangyiPet').launcher
+
+  // 起始：enabled=true + auto → 启动时应当已经 spawn 了一个。
+  assert.equal(launcher.status.running, true,
+    `启动时就该有原生进程（spawned=${spawned.length}）`)
+
+  // 关总开关 → 必须**真的** terminate。
+  const res = await put({ enabled: false })
+  assert.equal(res.status, 200)
+  assert.equal(launcher.status.running, false, '关掉总开关后原生进程必须停')
+  assert.equal(spawned[0].terminated, 1, 'terminate() 必须被调用一次')
+
+  // 再打开 → 必须重新 spawn（不是停掉就再也不起）。
+  await put({ enabled: true, mode: 'auto' })
+  assert.equal(launcher.status.running, true, '重新打开后应再次启动')
+  assert.equal(spawned.length, 2, '应发生第二次 spawn')
+
+  for (const dispose of local.__effects) {
+    if (typeof dispose === 'function') assert.doesNotThrow(() => dispose())
+  }
+  await ws.close()
+})
+
+await ok('⭐ mode=overlay 会真的停掉原生进程（用户只要窗口内）', async () => {
+  const ws = makeWebServer()
+  const local = makeCtx(ws)
+  const spawned = []
+  local.provide('subprocess', {
+    spawn () {
+      const rec = { terminated: 0 }
+      spawned.push(rec)
+      return {
+        terminate () { rec.terminated += 1 },
+        kill () { rec.terminated += 1 },
+        unref () {},
+        on () {},
+        done: new Promise(() => {})
+      }
+    }
+  })
+  const petIndex = await import(`file://${path.join(ROOT, 'index.js').replace(/\\/g, '/')}`)
+  // 同上：必须先 listen，否则 port=0 → 不 spawn。
+  await ws.listen()
+  petIndex.apply(toCordisLike(local, ['webServer']), {})
+  const base = `http://127.0.0.1:${ws.port}`
+  const launcher = local.__services.get('zhuangFangyiPet').launcher
+
+  assert.equal(launcher.status.running, true, '起始应有原生进程')
+  await fetch(`${base}/api/zhuang-fangyi/pet/settings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: { mode: 'overlay' } })
+  })
+  assert.equal(launcher.status.running, false, 'mode=overlay 时原生进程必须停')
+  assert.equal(spawned[0].terminated, 1, 'terminate() 必须被调用')
+
+  for (const dispose of local.__effects) {
+    if (typeof dispose === 'function') assert.doesNotThrow(() => dispose())
+  }
+  await ws.close()
+})
+
+await ok('mode=overlay 时**启动阶段就不该** spawn（判据两处共用）', async () => {
+  const ws = makeWebServer()
+  const local = makeCtx(ws)
+  let spawnCount = 0
+  local.provide('subprocess', {
+    spawn () {
+      spawnCount += 1
+      return { terminate () {}, kill () {}, unref () {}, on () {}, done: new Promise(() => {}) }
+    }
+  })
+  const petIndex = await import(`file://${path.join(ROOT, 'index.js').replace(/\\/g, '/')}`)
+  // 起始设置就是 overlay：启动路径必须用与设置变化**同一个**判据。
+  const settingsFile = path.join(tmpHome, 'zhuang-fangyi-pet', 'settings.json')
+  fs.mkdirSync(path.dirname(settingsFile), { recursive: true })
+  fs.writeFileSync(settingsFile, JSON.stringify({ version: 1, enabled: true, mode: 'overlay' }))
+  petIndex.apply(toCordisLike(local, ['webServer']), {})
+  await ws.listen()
+
+  assert.equal(spawnCount, 0, 'mode=overlay 时启动阶段不该 spawn（否则两处判据分叉）')
+
+  for (const dispose of local.__effects) {
+    if (typeof dispose === 'function') assert.doesNotThrow(() => dispose())
+  }
+  await ws.close()
+  // 复原共享设置文件，避免影响后面的断言。
+  fs.writeFileSync(settingsFile, JSON.stringify({ version: 1, enabled: true, mode: 'auto' }))
 })
 
 await ok('⭐ cordis 语义下取端口走 ctx.get()，不读会抛的 ctx.webServer', async () => {

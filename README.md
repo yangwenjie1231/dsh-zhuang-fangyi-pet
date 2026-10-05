@@ -63,8 +63,10 @@
 
 ## 三、安装
 
-> **本机只有 Windows PowerShell 5.1，没有 `pwsh` 7** —— 所以下面的命令一律用
-> `powershell -NoProfile -File ...`。用 `pwsh` 会报"无法将 pwsh 项识别为 cmdlet"。
+> **`.ps1` 一律用 UTF-8 **with BOM**。** 本机同时有 Windows PowerShell 5.1 与
+> `pwsh` 7.6.6，而 5.1 会把**无 BOM** 的 UTF-8 `.ps1` 当 ANSI/GBK 解码，
+> 中文注释会让脚本**语法都过不了**。用 `powershell -NoProfile -File ...` 调 5.1
+> 时尤其要注意（`edit`/`write` 工具会剥掉 BOM，改完脚本要确认 BOM 还在）。
 
 ```powershell
 # 1. 编译原生窗口（离线，只需系统自带的 .NET Framework 4.8）
@@ -87,13 +89,14 @@ powershell -NoProfile -File tools\deploy.ps1
 
 ## 四、素材：PNG 优先，抠图交给你
 
-素材来源 `庄方宜素材\10-表情包\`，分三类：
+素材来源 `庄方宜素材\10-表情包\` 与 `fromQQ\新表情包\`，分四类：
 
 | 类别 | 文件 | 处置 |
 |---|---|---|
 | **已透明 PNG** | `wx\*.png`（8 张，240×240） | **首选**，直接用 |
 | **已透明 GIF** | `QQ表情\*.gif` 中干净的 **10 张** | 本体动画 |
-| **待抠图** | `QQ表情\*.png`（17 张纯白底 1000×1000） | ⚠️ **等你手动抠** |
+| **已抠图** | `cutout\`（17 张，1000×1000） | ✅ **已全部进池**（`bubble/08…25`） |
+| **黑白线稿贴纸** | `fromQQ\新表情包\庄方宜(未扣背景)\*.png`（20 张） | ✅ **已进池**（`bubble/new/*`，含深色变体） |
 
 ### 哪些 GIF 能用，哪些不能用
 
@@ -109,29 +112,54 @@ powershell -NoProfile -File tools\deploy.ps1
 > 洋红透过率会被"主体占满宽度"骗（02/26/29 都曾被误判为脏）。
 > 只有逐帧透明占比能直接回答"这一帧会不会显示成一个块"。
 
-### 你要做的：手动抠图
+### 当前素材状态
 
-1. 打开 `art/pet/src/raw/`，里面是 17 张待抠的纯白底 PNG（还有 `gif/` 里的 05、27）；
-2. 抠好后**保留 alpha**（RGBA PNG，**不要 flatten、不要贴白底** —— 否则透明区
-   残留 RGB 会变成彩色噪点），按状态命名放进 `art/pet/src/cutout/`：
+**17 张手动抠图已全部完成并进池**（`art/pet/src/cutout/` → `bubble/08…25`）。
+`pet.json` 的 `missing` 只剩 **2 项**，都卡在同一件事上：
 
-   ```
-   art/pet/src/cutout/
-     sleeping.png          ← 覆盖该状态的主素材
-     happy-2.png           ← 追加为该状态的变体
-     waiting.png
-     ...
-   ```
+```
+表情包_05_星空公式.gif   33/33 帧铺满不透明 → 播放会出现矩形块
+表情包_27_生气指人.gif   10/18 帧铺满不透明 → 同上
+```
 
-3. 重跑管线并重载：
+这两张是**动画**，不能像静态图那样只抠一张 —— 要**逐帧**抠（33 帧 / 18 帧），
+成本比静态图高得多，所以一直挂着。**不做也不影响使用**：41 张气泡表情已覆盖
+全部 12 个情境池，9/9 状态都有主素材。
 
-   ```powershell
-   python tools/prepare-pet.py
-   # 然后在 DSH 里 POST /api/zhuang-fangyi/pet/command  {"command":"reload-art"}
-   ```
+### 还想加图的话
 
-详细规则见 `art/pet/src/README.md`。**抠图不做也不会让桌宠坏掉** ——
-9 个状态目前都已覆盖，只是表情没那么多。
+抠好后**保留 alpha**（RGBA PNG，**不要 flatten、不要贴白底** —— 否则透明区
+残留 RGB 会变成彩色噪点），放进 `art/pet/src/cutout/`。
+
+⚠️ **只丢文件进去是没用的** —— 管线按**显式表**收录，不扫目录。两种用途：
+
+```
+art/pet/src/cutout/
+  state-sleeping.png    ← 覆盖该状态的主素材（`state-` 前缀，不会被当气泡图）
+  state-happy-2.png     ← 该状态的轮换变体
+  26-new-emote.png      ← 气泡表情，但**必须**在 prepare-pet.py 里登记
+```
+
+气泡表情要在 `tools/prepare-pet.py` 的表里加一行，**并且显式写 `hasText`**：
+
+```python
+BUBBLE_F2 = (
+    ...
+    ('new-emote', '26-new-emote.png', True),   # (语义名, 文件名, 图里是否自带文字)
+)
+```
+
+`hasText` **不能猜**：写 `True` 表示"文字已印在图上"，Host 就不会再叠一句
+（否则屏幕上会出现两段互相打架的文字）；不在表里的一律按 `False`。
+
+然后重跑管线并重载：
+
+```powershell
+python tools/prepare-pet.py
+# 然后在 DSH 里 POST /api/zhuang-fangyi/pet/command  {"command":"reload-art"}
+```
+
+详细规则见 `art/pet/src/README.md`。
 
 ### ⚠️ 变体几何：`pet.json` 的 `files` 映射
 
@@ -275,15 +303,22 @@ tools/build-pet.ps1   离线编译 exe
 ### 测试
 
 ```powershell
-node tools/test-pet-state.mjs    # 状态机 + 事件翻译 + 素材清单（96 项）
-node tools/test-pet-route.mjs    # 路由 + 三道安全围栏 + SSE 帧格式（52 项）
-node tools/test-pet-client.mjs   # 浏览器半边 + 渲染约束（47 项）
-node tools/test-pet-e2e.mjs      # 真实装配端到端（23 项）
+node tools/test-pet-state.mjs    # 状态机 + 事件翻译 + 素材清单（156 项）
+node tools/test-pet-route.mjs    # 路由 + 三道安全围栏 + SSE 帧格式（61 项）
+node tools/test-pet-client.mjs   # 浏览器半边 + 渲染约束 + 外壳真实 props（77 项）
+node tools/test-pet-e2e.mjs      # 真实装配端到端（37 项）
 ```
 
-四套共 **218 项断言**，无框架依赖（纯 `node:assert`）。
+四套共 **331 项断言**，无框架依赖（纯 `node:assert`）。
 端到端那套用**真实** `apply()` + **真实** `pet.json` + 真读 SSE 帧，
 验证「宿主事件 → 状态机 → 推送」整条链路。
+
+> **测组件必须用「外壳真实的调用形状」。** 真机上炸过一次：测试一直写
+> `Pet({ runtime })`，而外壳渲染 slot 条目时传的是
+> `{ ...kit, ...entry.inject, ...slotInjected.props, ...ownerProps }` —— **没有 `runtime`**。
+> 于是测试绿、真机上条目一渲染就抛错并被外壳 `abdicate`（逐出单元格），
+> 症状是桌宠不出现 + 设置页空白且不报错。现在 `test-pet-client.mjs` 的第 7b 节
+> 专门按外壳的形状（`Pet({})`、`Section({ close })`）断言。
 
 ### 两道接口契约
 

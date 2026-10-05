@@ -664,6 +664,32 @@ window.__ModuleLoader__.load({
       const viewW = Math.round(frameW * scale)
       const viewH = Math.round(frameH * scale)
 
+      /**
+       * **让位**：原生窗口在跑时，overlay 必须完全不渲染。
+       *
+       * 否则屏幕上会有**两只桌宠**（一只在桌面、一只在 DSH 窗口里），
+       * 而且它们各自记位置、各自响应拖动 —— 看起来就是坏了。
+       * 契约 §2 对 `nativeAvailable` 的注释就是"供 overlay 判断是否让位"。
+       *
+       * 三种情况让位：
+       *   · `enabled === false` —— 总开关关掉。宿主**不会**启动 exe，
+       *     但 overlay 是纯前端渲染，必须自己停，否则"关了还在"；
+       *   · `mode === 'native'` —— 用户明确只要桌面窗口；
+       *   · `mode === 'auto'` 且 `nativeAvailable === true` —— exe 真的在跑。
+       *
+       * ⚠️ **`mode === 'overlay'` 不让位**，哪怕 `nativeAvailable` 是 true。
+       * 原因：宿主只在**启动时**按 mode 决定起不起 exe（`index.js` 的
+       * `mode !== 'overlay'`），改设置**不会**停掉已经在跑的 exe。所以
+       * "从 auto 切到 overlay"之后 `nativeAvailable` 可能仍是 true ——
+       * 这时让位就等于"用户选了窗口内，结果什么都不显示"。
+       * 用户显式选的 mode 优先于探测到的状态。
+       */
+      const nativeRunning = snapshot?.nativeAvailable === true
+      const shouldYield = settings.enabled === false ||
+        settings.mode === 'native' ||
+        (settings.mode !== 'overlay' && nativeRunning)
+      if (shouldYield) return null
+
       return h('div', {
         className: 'zf-pet',
         'data-zf-pet-state': state,
