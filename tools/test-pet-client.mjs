@@ -983,6 +983,20 @@ ok('⭐ 只有一个对话时不显示选择器（不占地方）', () => {
   }
   assert.equal(findSelect(tree2), null, '只有一个对话时不该出现选择器')
 })
+ok('⭐ 气泡贴在本体左上角（不压头顶）—— 与原生窗同一规则', () => {
+  // 用户明确要求："气泡不应该优先在左上角而不是在头顶上吗"。
+  // 判据用 CSS 的定位属性（气泡是绝对定位，right:100% 表示"贴在本体左侧"）。
+  const css = fs.readFileSync(CLIENT, 'utf8')
+  const m = css.match(/\.zf-pet__bubble\{([\s\S]*?)\}/)
+  assert.ok(m, '应有 .zf-pet__bubble 规则')
+  const body = m[1]
+  assert.ok(/position\s*:\s*absolute/.test(body), '气泡应绝对定位（否则会挤进 flex 流、撑开容器）')
+  assert.ok(/right\s*:\s*100%/.test(body),
+    'right:100% = 气泡右边缘贴本体左边缘（左上角规则）；实际：' + body.replace(/\s+/g, ' ').slice(0, 120))
+  assert.ok(/bottom\s*:/.test(body), '需要 bottom 让它垂直靠上（不压头顶）')
+  // 不该再用"贴头顶"的写法
+  assert.ok(!/top\s*:\s*-100%/.test(body), '不该再贴正上方（会遮住角色的头）')
+})
 ok('⭐ attention 在 clickThrough 下仍显示（它是通知，不是交互）', () => {
   const l = loadClient()
   l.exports.apply(l.ctx)

@@ -1097,6 +1097,15 @@ window.__ModuleLoader__.load({
 
 /* 气泡：贴在本体右侧，不参与拖动命中测试之外的事。 */
 .zf-pet__bubble{
+  /* ⭐ 贴在本体**左上角**（与原生窗同一规则，见 PetBubble.ComputeBubbleTarget）：
+     气泡右下角对着本体左上角，像对话框的尾巴指向角色 ——
+     不再压在头顶遮住角色的头（用户明确要求）。
+     用绝对定位 + 负偏移，避免影响 flex 流里的精灵尺寸。 */
+  position:absolute;
+  right:100%;                 /* 气泡右边缘贴本体左边缘 */
+  bottom:75%;                 /* 气泡底边略高于本体顶边 */
+  margin-right:6px;           /* 与本体留缝，不糊在一起 */
+  z-index:1;
   max-width:220px;
   padding:7px 10px;border-radius:12px;
   background:var(--dsw-alias-bg-layer-1, #fff);

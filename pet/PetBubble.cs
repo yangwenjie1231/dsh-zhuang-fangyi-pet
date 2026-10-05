@@ -191,18 +191,8 @@ namespace DshZhuangFangyiPet
             int bh = (int)Math.Round(hDip * dpi);
             if (bw <= 0) bw = 200;
             if (bh <= 0) bh = 48;
-            x = px + pw - bw;                    // 右对齐本体
-            y = py - bh - 10;                    // 上方优先
-            PetNative.WorkArea scr = PetNative.NearestScreen(px + pw / 2, py + ph / 2);
-            if (y < scr.Y + 4)
-            {
-                y = py + ph + 10;                // 上方放不下 → 下方
-                if (y + bh > scr.Bottom - 4) y = scr.Y + 4;
-            }
-            int maxX = scr.Right - bw - 4;
-            if (maxX < scr.X + 4) maxX = scr.X + 4;
-            if (x > maxX) x = maxX;
-            if (x < scr.X + 4) x = scr.X + 4;
+            // **复用运行路径的算法**（不手抄副本 —— 上一轮的教训：副本让测试变成假绿）
+            ComputeBubbleTarget(px, py, pw, ph, bw, bh, out x, out y);
         }
         /// <summary>自检诊断用：气泡内边距左值（判断"外观是否初始化过"）。</summary>
         internal double DiagPaddingLeft { get { return _border == null ? 0 : _border.Padding.Left; } }
@@ -872,6 +862,36 @@ namespace DshZhuangFangyiPet
         // 定位（跟随本体窗，clamp 进工作区）
         // ------------------------------------------------------------------
 
+        /// <summary>
+        /// 气泡定位算法（**纯函数**，运行路径与自检共用）。
+        ///
+        /// ⚠️ 单独抽出来的原因（上一轮的血泪）：`DiagTargetFor` 曾经是 `PlaceNearPet`
+        /// 的**手抄副本**，结果"把真实逻辑改坏、自检照样绿" ——
+        /// 测试必须打**运行路径**，复制一份实现等于没测。
+        ///
+        /// 规则：气泡贴本体**左上角**（右下角对着本体左上角，像对话框的尾巴）；
+        /// 左边放不下翻到右侧；再统一 clamp 进工作区。
+        /// </summary>
+        internal static void ComputeBubbleTarget(int px, int py, int pw, int ph,
+                                                 int bw, int bh, out int x, out int y)
+        {
+            PetNative.WorkArea scr = PetNative.NearestScreen(px + pw / 2, py + ph / 2);
+            const int gap = 6;                            // 与本体留缝，不糊在一起
+            x = px - bw - gap;                            // 气泡右边缘 = 本体左边缘 - gap
+            if (x < scr.X + 4)
+            {
+                x = px + pw + gap;                        // 左侧放不下 → 翻到右侧
+            }
+            // 垂直：气泡底边略低于本体顶边（视觉上像"从左上角探出"）
+            y = py - bh + (int)Math.Round(bh * 0.25);
+            if (y < scr.Y + 4) y = scr.Y + 4;
+            if (y + bh > scr.Bottom - 4) y = scr.Bottom - bh - 4;
+
+            int maxX = scr.Right - bw - 4;
+            if (maxX < scr.X + 4) maxX = scr.X + 4;
+            if (x > maxX) x = maxX;
+            if (x < scr.X + 4) x = scr.X + 4;
+        }
         public void PlaceNearPet()
         {
             if (!IsVisible && !Showing) return;
@@ -902,20 +922,10 @@ namespace DshZhuangFangyiPet
                 pw = bw; ph = bh;
             }
 
-            // 优先：贴在头顶，右对齐
-            int x = px + pw - bw;
-            int y = py - bh - 10;
-            PetNative.WorkArea scr = PetNative.NearestScreen(px + pw / 2, py + ph / 2);
-            if (y < scr.Y + 4)
-            {
-                // 头顶放不下 → 放到脚下
-                y = py + ph + 10;
-                if (y + bh > scr.Bottom - 4) y = scr.Y + 4;
-            }
-            int maxX = scr.Right - bw - 4;
-            if (maxX < scr.X + 4) maxX = scr.X + 4;
-            if (x > maxX) x = maxX;
-            if (x < scr.X + 4) x = scr.X + 4;
+            // ⭐ 贴在本体**左上角**（规则见 ComputeBubbleTarget 的说明）。
+            // 为什么不是"正上方"：气泡压在头顶会**遮住角色的头**，用户明确要求挪开。
+            int x, y;
+            ComputeBubbleTarget(px, py, pw, ph, bw, bh, out x, out y);
 
             Left = x / dpi;
             Top = y / dpi;

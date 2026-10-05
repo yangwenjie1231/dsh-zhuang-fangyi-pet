@@ -1015,25 +1015,33 @@ namespace DshZhuangFangyiPet
             Check(constOk, "SetWindowPos 常量值正确（0/2/1/0x40）",
                   constOk ? "HWND_TOP=0 SWP_NOMOVE=2 SWP_NOSIZE=1 SWP_SHOWWINDOW=0x40"
                           : "常量值不符（会导致 Z 序操作异常）");
-            // ⭐ 输入窗与气泡**不能占同一侧**（用户反馈"输入框会和气泡重叠"）。
+            // ⭐ 气泡贴本体**左上角**（用户要求："气泡不应该优先在左上角而不是在头顶上吗"）。
             //
-            // 两者是独立窗口、互不知情：气泡优先贴**头顶**，输入窗原本也贴上方
-            // → 同时出现时直接叠在一起。现在分工：**气泡占上方、输入窗占下方**。
-            // 断言用**计算出的目标方位**比较（不读未 Show 的 Left/Top —— 那会是 NaN）。
-            PetInput posProbe = new PetInput(new PetHttp("http://127.0.0.1:1/", "t"));
-            double inX, inY;
-            posProbe.DiagTargetFor(1000, 1000, 200, 200, out inX, out inY);
-            // 本体底边 = 1200。输入窗应在**下方**（y > 1200），气泡在**上方**（y < 1000）
-            bool inputBelow = inY > 1200;
-            Check(inputBelow, "输入窗放在桌宠下方（与气泡分占两侧，不重叠）",
-                  "输入窗目标 y=" + inY.ToString("0") + "（桌宠底边 1200，应在其下）");
-            // 气泡的目标方位（同一本体矩形）应与输入窗**不同侧**
+            // 原先贴正上方，会**遮住角色的头**。现在气泡右下角对着本体左上角，
+            // 像对话框的尾巴指向角色，本体完全不被遮挡。
+            // 断言用**计算出的目标方位**（不读未 Show 的 Left/Top —— 那会是 NaN）。
             PetBubble sideProbe = new PetBubble();
             int bx, by;
             sideProbe.DiagTargetFor(1000, 1000, 200, 200, out bx, out by);
-            bool oppositeSide = by < 1000 && inY > 1200;
-            Check(oppositeSide, "气泡在上 / 输入窗在下（方位相反，互不遮挡）",
-                  "气泡 y=" + by.ToString("0") + "（上方）；输入窗 y=" + inY.ToString("0") + "（下方）");
+            // 本体左上角 = (1000,1000)：气泡应落在**左侧**（bx < 1000）
+            bool leftOfPet = bx < 1000;
+            bool nearTop = by > 700 && by < 1100;      // 垂直上靠近本体顶部
+            Check(leftOfPet && nearTop, "⭐ 气泡贴本体左上角（不再压头顶）",
+                  "气泡目标=(" + bx + "," + by + ")；本体左上角=(1000,1000) → " +
+                  (leftOfPet ? "在左侧" : "**不在左侧**"));
+
+            // ⭐ 输入窗与气泡**不能占同一侧**（用户反馈"输入框会和气泡重叠"）。
+            //
+            // 两者是独立窗口、互不知情。现在分工：**气泡占左上、输入窗占正下方**。
+            PetInput posProbe = new PetInput(new PetHttp("http://127.0.0.1:1/", "t"));
+            double inX, inY;
+            posProbe.DiagTargetFor(1000, 1000, 200, 200, out inX, out inY);
+            bool inputBelow = inY > 1200;              // 本体底边 = 1200
+            Check(inputBelow, "输入窗放在桌宠下方（与气泡分占两侧，不重叠）",
+                  "输入窗目标 y=" + inY.ToString("0") + "（桌宠底边 1200，应在其下）");
+            // 气泡在左、输入窗在下 → 方位不同，不会叠
+            Check(leftOfPet && inputBelow, "气泡在左上 / 输入窗在下方（互不遮挡）",
+                  "气泡 x=" + bx + "（本体左侧）；输入窗 y=" + inY.ToString("0") + "（本体下方）");
             try { posProbe.Close(); } catch { }
             try { sideProbe.ForceClose(); } catch { }
             // ⭐ 选择器是**两级折叠**：项目（文件夹）→ 该项目的对话。
@@ -1264,46 +1272,44 @@ namespace DshZhuangFangyiPet
             }
             finally
             {
-                    // ⭐ 缩放后气泡必须**重新贴齐桌宠**（用户反馈："气泡缩小之后坐标不变"）。
-                //
-                // 判据用"贴齐"而不是"坐标变了"：定位规则是右对齐（x = 桌宠右边 - 气泡宽），
-                // 所以缩放后**气泡右边必须仍与桌宠右边对齐**。
-                // 这条能抓住真 bug：若定位用了滞后的旧尺寸、且事后不重贴，
-                // 窗口会按新尺寸缩、位置却留在旧尺寸算出来的地方 → 右边错开。
-                // 假桌宠矩形必须落在**工作区内**，否则 PlaceNearPet 会把它 clamp 到屏幕边缘，
-                // 那样测的是 clamp 逻辑、不是缩放对齐（第一版就踩了这个坑：差值恒为常数）。
-                PetNative.WorkArea wa = PetNative.NearestScreen(0, 0);
-                int petW = 200, petH = 200;
-                int[] petRect = new int[] { wa.X + 120, wa.Y + 300, petW, petH };
-                bubble.PetRectProvider = delegate { return petRect; };
-                PetBubbleInfo probeBubble = new PetBubbleInfo();
-                probeBubble.Id = 99001;
-                probeBubble.Kind = "text";
-                probeBubble.Text = "缩放定位测试";
-                probeBubble.DurationMs = 60000;
-                bubble.Show(probeBubble, null);
-                Pump(150);
+                    // ⭐ 缩放后气泡必须**重新贴齐本体左上角**（坐标随尺寸重算）。
+            //
+            // 判据随规则更新：以前是"右对齐本体"（贴头顶），现在是
+            // **气泡右边缘 = 本体左边缘 - gap**（贴左上角）。
+            // 这条能抓住真 bug：若定位用了滞后的旧尺寸、且事后不重贴，
+            // 气泡会按新尺寸缩、位置却留在旧尺寸算出来的地方 → 贴不齐。
+            PetNative.WorkArea wa2 = PetNative.NearestScreen(0, 0);
+            int[] petRect = new int[] { wa2.X + 600, wa2.Y + 300, 200, 200 };
+            bubble.PetRectProvider = delegate { return petRect; };
+            PetBubbleInfo probeBubble = new PetBubbleInfo();
+            probeBubble.Id = 99001;
+            probeBubble.Kind = "text";
+            probeBubble.Text = "缩放定位测试";
+            probeBubble.DurationMs = 60000;
+            bubble.Show(probeBubble, null);
+            Pump(150);
 
-                bool AlignedAt(double sc, out string detail)
-                {
-                    bubble.SetScale(sc);
-                    Pump(300);                       // 等布局落定 + 延迟重贴执行
-                    int[] r = bubble.DiagWindowRect();
-                    if (r == null) { detail = "拿不到窗口矩形"; return false; }
-                    int bubbleRight = r[0] + r[2];
-                    int petRight = petRect[0] + petRect[2];
-                    detail = sc.ToString("0.##") + "×: 气泡 " + r[2] + "x" + r[3] + "@" + r[0] + "," + r[1] +
-                             " 右边=" + bubbleRight + " 桌宠右边=" + petRight + " 差=" + (bubbleRight - petRight);
-                    return Math.Abs(bubbleRight - petRight) <= 3;   // 容 3px 舍入
-                }
+            bool AlignedAt(double sc, out string detail)
+            {
+                bubble.SetScale(sc);
+                Pump(300);
+                int[] r = bubble.DiagWindowRect();
+                if (r == null) { detail = "拿不到窗口矩形"; return false; }
+                int petLeft = petRect[0];
+                int bubbleRight = r[0] + r[2];
+                detail = sc.ToString("0.##") + "×: 气泡 " + r[2] + "x" + r[3] + "@" + r[0] + "," + r[1] +
+                         " 右边缘=" + bubbleRight + " 本体左边缘=" + petLeft +
+                         " 差=" + (petLeft - bubbleRight);
+                // 气泡右边缘应在本体左边缘**左侧**（留 gap），容差放宽到 gap+8
+                return bubbleRight <= petLeft && petLeft - bubbleRight <= 20;
+            }
 
-                string d1, d2, d3;
-                bool alignLo = AlignedAt(1.0, out d1);
-                bool alignSm = AlignedAt(0.4, out d2);
-                bool alignBg = AlignedAt(2.0, out d3);
-                Check(alignLo && alignSm && alignBg, "气泡缩放后仍贴齐桌宠右边（坐标随尺寸重算）",
-                      (alignLo ? "✓" : "✗") + d1 + " | " + (alignSm ? "✓" : "✗") + d2 + " | " + (alignBg ? "✓" : "✗") + d3);
-
+            string d1, d2, d3;
+            bool alignLo = AlignedAt(1.0, out d1);
+            bool alignSm = AlignedAt(0.4, out d2);
+            bool alignBg = AlignedAt(2.0, out d3);
+            Check(alignLo && alignSm && alignBg, "气泡缩放后仍贴齐本体左上角（坐标随尺寸重算）",
+                  (alignLo ? "✓" : "✗") + d1 + " | " + (alignSm ? "✓" : "✗") + d2 + " | " + (alignBg ? "✓" : "✗") + d3);
                 bubble.SetScale(1.0);
                 bubble.HideNow();
                 Pump(100);

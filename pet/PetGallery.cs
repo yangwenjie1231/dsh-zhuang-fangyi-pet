@@ -36,6 +36,12 @@ namespace DshZhuangFangyiPet
         private readonly TextBlock _status;
         private readonly Border _chrome;
         private readonly ScrollViewer _scroll;
+        /// <summary>顶部标题栏（可拖动窗口 + 关闭按钮）。</summary>
+        private readonly Border _header;
+        private readonly TextBlock _headerText;
+        private readonly Button _closeBtn;
+        /// <summary>是否真正激活过（决定 Deactivated 能否关窗，见构造里的说明）。</summary>
+        private bool _everActivated;
         private readonly PetHttp _http;
         private readonly Dispatcher _ui = Dispatcher.CurrentDispatcher;
 
@@ -81,9 +87,50 @@ namespace DshZhuangFangyiPet
             _scroll.HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
             _scroll.Content = _grid;
 
-            StackPanel sp = new StackPanel();
-            sp.Children.Add(_scroll);
-            sp.Children.Add(_status);
+            // ⚠️ **不能用 StackPanel 装 ScrollViewer**（这里踩过）：
+            // StackPanel 给子元素**无限高度**，ScrollViewer 于是"永远装得下"，
+            // 从不出现滚动条 —— 内容被窗口裁掉，用户看不到下面那排，
+            // 反馈"没办法上下滚动查看"。
+            // DockPanel 会把剩余空间**约束**给 ScrollViewer，滚动才生效。
+            _header = new Border();          // 顶部：标题 + 关闭按钮
+            _header.CornerRadius = new CornerRadius(8);
+            _header.Margin = new Thickness(8, 8, 8, 0);
+            _header.Padding = new Thickness(8, 3, 4, 3);
+            _header.Cursor = Cursors.SizeAll;   // 整条标题栏可拖动窗口
+            _header.MouseLeftButtonDown += delegate(object s, MouseButtonEventArgs e)
+            {
+                if (e.ClickCount == 1) { try { DragMove(); } catch { } }
+            };
+            _headerText = new TextBlock();
+            _headerText.FontSize = 12;
+            _headerText.VerticalAlignment = VerticalAlignment.Center;
+            _headerText.Text = "表情包";
+            _closeBtn = new Button();
+            _closeBtn.Content = "✕";
+            _closeBtn.FontSize = 12;
+            _closeBtn.Width = 24;
+            _closeBtn.Height = 20;
+            _closeBtn.Padding = new Thickness(0);
+            _closeBtn.BorderThickness = new Thickness(0);
+            _closeBtn.Background = Brushes.Transparent;
+            _closeBtn.Cursor = Cursors.Hand;
+            _closeBtn.HorizontalAlignment = HorizontalAlignment.Right;
+            _closeBtn.VerticalAlignment = VerticalAlignment.Center;
+            _closeBtn.ToolTip = "关闭（Esc）";
+            _closeBtn.Click += delegate { CloseSelf(); };
+            DockPanel headerRow = new DockPanel();
+            DockPanel.SetDock(_closeBtn, Dock.Right);
+            headerRow.Children.Add(_closeBtn);
+            headerRow.Children.Add(_headerText);
+            _header.Child = headerRow;
+
+            DockPanel dp = new DockPanel();
+            DockPanel.SetDock(_header, Dock.Top);
+            DockPanel.SetDock(_status, Dock.Bottom);
+            dp.Children.Add(_header);
+            dp.Children.Add(_status);
+            dp.LastChildFill = true;         // 最后一个子元素填满剩余空间
+            dp.Children.Add(_scroll);        // 放最后 = 受约束 → 滚动才生效
 
             _chrome = new Border();
             _chrome.CornerRadius = new CornerRadius(10);
@@ -98,11 +145,25 @@ namespace DshZhuangFangyiPet
                 _chrome.Effect = sh;
             }
             catch { }
-            _chrome.Child = sp;
+            _chrome.Child = dp;
             Content = _chrome;
 
             ApplyTheme(false);
             Loaded += OnLoaded;
+
+            // ⭐ 点窗外自动关闭（弹窗惯例）。
+            // 画廊**可以被激活**（未设 ShowActivated=false），所以 Deactivated 可靠；
+            // 用户反馈"关掉的方法很奇怪"—— 原先只有 Esc 和"点一张表情"两条路，
+            // 而后者会顺手选用那张表情，等于没有中性的关闭方式。
+            Deactivated += delegate
+            {
+                // ⚠️ 只有**真正激活过**才允许"失焦即关"。
+                // 否则若本窗从未拿到焦点（Activate 失败 / 被 Topmost 的桌宠抢走），
+                // Deactivated 会在 Show 后立刻触发 → 画廊一闪而过、根本没法用
+                //（这类"关闭方法很奇怪"的观感就是这么来的）。
+                if (_everActivated) CloseSelf();
+            };
+            Activated += delegate { _everActivated = true; };
             Closed += delegate
             {
                 _reallyClosing = true;
@@ -133,6 +194,14 @@ namespace DshZhuangFangyiPet
             _chrome.Background = new SolidColorBrush(Color.FromArgb(p.BgA, p.BgR, p.BgG, p.BgB));
             _chrome.BorderBrush = new SolidColorBrush(Color.FromArgb(p.BdA, p.BdR, p.BdG, p.BdB));
             _status.Foreground = new SolidColorBrush(Color.FromRgb(p.FgR, p.FgG, p.FgB));
+            // 标题栏与关闭按钮也跟随主题（否则深色下是一块亮条）
+            if (_header != null)
+            {
+                _header.Background = new SolidColorBrush(Color.FromArgb(
+                    (byte)Math.Max((byte)0, (byte)(p.BgA / 2)), p.BdR, p.BdG, p.BdB));
+            }
+            if (_headerText != null) _headerText.Foreground = new SolidColorBrush(Color.FromRgb(p.FgR, p.FgG, p.FgB));
+            if (_closeBtn != null) _closeBtn.Foreground = new SolidColorBrush(Color.FromRgb(p.FgR, p.FgG, p.FgB));
         }
 
         /// <summary>
