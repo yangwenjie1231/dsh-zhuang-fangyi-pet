@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -254,8 +254,34 @@ namespace DshZhuangFangyiPet
             bool fwOk = haveIdle && ie.FrameWidth > 0;
             Check(fwOk, "契约 §4 frameWidth 解析",
                   fwOk ? ("idle.frameWidth=" + ie.FrameWidth + "（清单） vs 实测 " + sh.FrameW + "px") : "未解析到");
-            Check(sh.FrameW != sh.FrameH, "非方形帧：单帧宽 ≠ 帧高",
-                  "实测 " + sh.FrameW + "x" + sh.FrameH + "（宽≠高，验证没有拿 frameHeight 当宽度用）");
+
+            // 非方形帧校验：**不能断言某一个固定状态是方的还是非方的**。
+            //
+            // 这条曾经写成 `sh.FrameW != sh.FrameH`（对 idle 硬断言非方形），
+            // 结果素材映射一改（idle 的 canonical 从 240x216 的 wx PNG 换成
+            // 500x500 的方形 GIF）就误报失败 —— 那是**测试脆弱**，不是产品 bug。
+            //
+            // 真正要守的不变式是：**存在非方形帧，且清单如实报出了它的宽度**
+            // （即没有拿 frameHeight 当 frameWidth 用）。所以扫全部状态找证据。
+            string nonSquare = null;
+            int checkedStates = 0;
+            foreach (KeyValuePair<string, PetJson.StateEntry> kv in atlas.States)
+            {
+                PetJson.StateEntry e = kv.Value;
+                if (e.FrameWidth <= 0) continue;
+                checkedStates++;
+                if (e.FrameWidth != atlas.FrameHeight)
+                {
+                    nonSquare = kv.Key + " " + e.FrameWidth + "x" + atlas.FrameHeight +
+                                "（宽≠高）";
+                    break;
+                }
+            }
+            Check(nonSquare != null && checkedStates > 0, "非方形帧：存在单帧宽 ≠ 帧高且清单如实报出",
+                  nonSquare != null
+                      ? ("例：" + nonSquare + "；共检查 " + checkedStates + " 个状态")
+                      : ("全部 " + checkedStates + " 个状态都是方形（本素材集恰好如此）——" +
+                         "无法验证 frameWidth 路径"));
             Check(haveIdle && ie.FrameWidth == sh.FrameW, "清单 frameWidth 与实测一致（自洽性校验）",
                   haveIdle ? (ie.FrameWidth + " == " + sh.FrameW) : "-");
 

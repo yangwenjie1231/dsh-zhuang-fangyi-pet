@@ -148,7 +148,10 @@ export function normalizeAtlas (raw) {
       out.bubble.push({
         file: String(entry.file).replace(/\\/g, '/'),
         w: Number.isFinite(entry.w) ? Math.round(entry.w) : 0,
-        h: Number.isFinite(entry.h) ? Math.round(entry.h) : 0
+        h: Number.isFinite(entry.h) ? Math.round(entry.h) : 0,
+        // 该图**自己已经把文字画进去了**（聊天贴纸）。
+        // 缺字段按 false（旧清单仍可用，只是可能叠字）。
+        hasText: entry.hasText === true
       })
     }
   }
@@ -295,13 +298,37 @@ export function artForState (atlas, state, seed = 0) {
  *
  * @param {object} atlas
  * @param {number} seed
- * @returns {string|null}
+ * @returns {{file: string, w: number, h: number, hasText: boolean}|null}
+ *   **返回整条记录而不只是文件名** —— 调用方需要 `hasText` 来决定要不要叠文字。
+ *   见 {@link bubbleHasText}。
  */
 export function bubbleArt (atlas, seed = 0) {
   const pool = atlas?.bubble
   if (!Array.isArray(pool) || pool.length === 0) return null
   const i = Math.abs(Math.trunc(seed)) % pool.length
-  return pool[i].file
+  return pool[i] ?? null
+}
+
+/**
+ * 取某张气泡图是否**自带文字**。
+ *
+ * 素材里有一整类「中文已经印在图上」的聊天贴纸（实测 16 张，如「好耶！」「工作中…」）。
+ * 这类图当气泡时，**绝不能再叠 Host 的文字** —— 否则屏幕上会出现两段互相打架的文字。
+ *
+ * 找不到该文件时按 `false`（安全侧：允许配文字）。
+ *
+ * @param {object} atlas
+ * @param {string} file - 相对 `art/pet/` 的路径
+ * @returns {boolean}
+ */
+export function bubbleHasText (atlas, file) {
+  const pool = atlas?.bubble
+  if (!Array.isArray(pool) || typeof file !== 'string') return false
+  const key = file.replace(/\\/g, '/')
+  for (const entry of pool) {
+    if (entry?.file === key) return entry.hasText === true
+  }
+  return false
 }
 
 /**

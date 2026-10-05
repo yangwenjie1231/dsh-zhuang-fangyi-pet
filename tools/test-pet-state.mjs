@@ -43,6 +43,7 @@ import {
   resolveArt,
   artForState,
   bubbleArt,
+  bubbleHasText,
   atlasReport,
   geometryFor,
   VALID_STATES
@@ -925,11 +926,77 @@ ok('artForState 对空清单返回 null 而不是抛错', () => {
   assert.equal(artForState(null, 'idle', 0), null)
 })
 
-ok('bubbleArt 轮换且空池返回 null', () => {
-  const atlas = normalizeAtlas({ bubble: [{ file: 'b/1.png' }, { file: 'b/2.png' }] })
-  assert.equal(bubbleArt(atlas, 0), 'b/1.png')
-  assert.equal(bubbleArt(atlas, 1), 'b/2.png')
+ok('bubbleArt 返回整条记录（含 hasText）且空池返回 null', () => {
+  const atlas = normalizeAtlas({
+    bubble: [{ file: 'b/1.png', hasText: true }, { file: 'b/2.png' }]
+  })
+  // 返回**记录**而不是字符串：调用方需要 hasText 才能决定要不要叠文字。
+  assert.equal(bubbleArt(atlas, 0).file, 'b/1.png')
+  assert.equal(bubbleArt(atlas, 0).hasText, true)
+  assert.equal(bubbleArt(atlas, 1).file, 'b/2.png')
+  assert.equal(bubbleArt(atlas, 1).hasText, false, '缺字段按 false（安全侧：允许配文字）')
+  assert.equal(bubbleArt(atlas, 2).file, 'b/1.png', '应回绕')
   assert.equal(bubbleArt(emptyAtlas(), 0), null)
+  assert.equal(bubbleArt(null, 0), null)
+})
+
+/* ── hasText：图自带文字时不能叠 Host 文案 ─────────────────────────────────
+ *
+ * 素材里有一整类「中文已经印在图上」的聊天贴纸（实测 16 张，如「好耶！」「工作中…」）。
+ * 这类图当气泡时若再叠一句 Host 文案（"正在调用工具…"），屏幕上会出现**两段互相
+ * 打架的文字**。契约 §4 因此新增 `bubble[].hasText`。
+ * ────────────────────────────────────────────────────────────────────────── */
+
+ok('bubbleHasText 按文件查表，未知文件按 false', () => {
+  const atlas = normalizeAtlas({
+    bubble: [{ file: 'b/with-text.png', hasText: true }, { file: 'b/plain.png' }]
+  })
+  assert.equal(bubbleHasText(atlas, 'b/with-text.png'), true)
+  assert.equal(bubbleHasText(atlas, 'b/plain.png'), false)
+  assert.equal(bubbleHasText(atlas, 'b/unknown.png'), false, '未知文件按 false')
+  assert.equal(bubbleHasText(null, 'x.png'), false)
+})
+
+ok('⭐ 图自带文字 → 气泡不叠文案（kind=image，text=null）', () => {
+  const { machine } = makeMachine({}, () => ({ file: 'bubble/sticker.png', hasText: true }))
+  machine.apply({ type: 'agent/status', sessionId: 's1', status: 'running' })
+  machine.apply({ type: 'tool/call', sessionId: 's1', callId: 'c1' })
+  const b = machine.snapshot().bubble
+  assert.ok(b !== null, '应弹气泡')
+  assert.equal(b.kind, 'image', '自带文字的图不能配 text，否则两段文字打架')
+  assert.equal(b.text, null, 'text 必须为 null')
+  assert.equal(b.imageHasText, true, '应透传 imageHasText 供诊断')
+  assert.equal(b.image, 'bubble/sticker.png')
+})
+
+ok('图不带文字 → 正常叠文案（kind=both）', () => {
+  const { machine } = makeMachine({}, () => ({ file: 'bubble/plain.png', hasText: false }))
+  machine.apply({ type: 'agent/status', sessionId: 's1', status: 'running' })
+  machine.apply({ type: 'tool/call', sessionId: 's1', callId: 'c1' })
+  const b = machine.snapshot().bubble
+  assert.equal(b.kind, 'both')
+  assert.ok(typeof b.text === 'string' && b.text.length > 0, '应有文案')
+  assert.equal(b.imageHasText, false)
+})
+
+ok('pickBubbleImage 返回纯字符串时仍按旧行为（向后兼容）', () => {
+  const { machine } = makeMachine({}, () => 'bubble/legacy.png')
+  machine.apply({ type: 'agent/status', sessionId: 's1', status: 'running' })
+  machine.apply({ type: 'tool/call', sessionId: 's1', callId: 'c1' })
+  const b = machine.snapshot().bubble
+  assert.equal(b.image, 'bubble/legacy.png')
+  assert.equal(b.kind, 'both', '字符串形式没有 hasText 信息 → 按可叠文字处理')
+  assert.equal(b.imageHasText, false)
+})
+
+ok('只给文字不给图时 kind=text（图不可用也不崩）', () => {
+  const { machine } = makeMachine({}, () => null)
+  machine.apply({ type: 'agent/status', sessionId: 's1', status: 'running' })
+  machine.apply({ type: 'tool/call', sessionId: 's1', callId: 'c1' })
+  const b = machine.snapshot().bubble
+  assert.equal(b.kind, 'text')
+  assert.equal(b.image, null)
+  assert.equal(b.imageHasText, false)
 })
 
 ok('atlasReport 报出覆盖与缺失', () => {

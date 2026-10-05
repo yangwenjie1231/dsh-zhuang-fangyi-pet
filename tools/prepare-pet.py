@@ -12,6 +12,21 @@
     python tools/prepare-pet.py                  # 全量重建（默认）
     python tools/prepare-pet.py --check          # 只报覆盖率与每张图的透明占比；不写文件
     python tools/prepare-pet.py --clean          # 重建前先清掉 art/pet 下的旧产物
+    python tools/prepare-pet.py --refresh-raw    # 强制重刷 src/raw/（默认**不覆盖**已有文件！）
+
+**角色划分（Lead 逐张看图判定，见 `art/pet/src/README.md` §0）**：
+素材实际有**三个风格家族**，脚本按「文字是否 baked-in 在图上」把它们分到两个角色：
+
+  | 家族 | 画面 | 角色 | hasText |
+  |---|---|---|---|
+  | **F1** 细笔触半身像 · 深色作战服 · **无文字** | `gif 01/02/03/04/06/07` + `wx 1..8` | **主体**（`states`） | — |
+  | **F2** 鲨鱼睡衣贴纸 · **中文印在图上** | 用户抠的 16 张（`08`~`23`） | **表情包**（`bubble`） | `true` |
+  | **F3** 简笔场景 · 无文字 · 风格自成一派 | `gif 24/26/28/29` + 用户抠的 `25_看书` | **表情包**（`bubble`） | `false` |
+
+  为什么 F2 只能当表情包：它每张都 baked-in 一句中文（"晚安啦"）。当**主体**会让桌宠
+  永远挂着同一句话；当**气泡**时若 Host 再叠一句 `bubble.text`，屏幕上会**出现两段
+  打架的文字** —— 这正是契约 §4 新增 `bubble[].hasText` 的原因。F1 不得进气泡池
+  （主体重复出现没意义），F2/F3 不得进 `states`（风格会跳）。
 
 设计要点：
   · **不抠图**。`QQ表情\\*.png` 是四角纯白的不透明图，用户明确要求**手动抠图**；
@@ -35,8 +50,13 @@
     `frames`/`frameWidth`/`frameMs`（纯附加字段，旧消费者忽略也能跑）。
   · **清单是唯一契约**。`pet.json` 严格照契约 §4；`states` 的键只能取 §1 的 9 个状态名，
     缺状态时 Host 回落 `idle`，**缺失不得导致任何一方报错**。
-  · **用户手动抠图自动纳入**。`art/pet/src/cutout/<状态名>.png` 会覆盖同名状态映射，
-    抠完丢进去重跑即可，无需改代码；这些图同样会过一遍透明占比检查。
+  · **用户手动抠图自动纳入**。`art/pet/src/cutout/<语义名>.png` 会被自动纳入（见 §F2/F3
+    的两张显式表），抠完丢进去重跑即可，无需改代码；这些图同样会过一遍透明占比检查。
+  · **`src/raw/` 是「用户的工作台」，写一次就不再动**（重要，防数据丢失）：
+    用户**正是在 `raw/` 里手动抠的图**，而源素材仍是 0% 透明的原图。旧版无条件
+    `copy_if_different(源素材, raw/同名)` 会把抠图**覆盖回不透明原图、静默丢失**。
+    现在 `raw/` 只在目标**不存在**时才写入；要强制重刷得显式给 `--refresh-raw`。
+    （`src/png/` 与 `src/gif/` 不涉及人工编辑，仍按内容幂等刷新。）
 """
 
 import argparse
@@ -83,24 +103,76 @@ WX_NAMES = {
     'writing': '8.png',
 }
 
-# ── 状态映射计划：候选按优先级排列，取第一个可用的 ──────────────────────────
-# 一个状态给多个候选 → 写进 `variants` 轮换，避免同状态永远一张图、显得呆板。
+# ── 状态映射计划（**主体**，只从 F1 取）─────────────────────────────────────
+# 候选按优先级排列，取第一个可用的；一个状态给多个候选 → 写进 `variants` 轮换，
+# 避免同状态永远一张图、显得呆板。
 # `gif:NN` 指 `QQ表情\\表情包_NN_*.gif`；其余是 `WX_NAMES` 的语义名。
-# 9 个状态**全部覆盖**（sleeping 由 24_睡觉zzz 撑起）。
+#
+# ⚠️ **这里只能出现 F1**（细笔触半身像、无文字）。F2（鲨鱼睡衣贴纸、baked-in 中文）
+# 与 F3（简笔场景）一律不得进来 —— 前者会让桌宠永远挂着同一句话，后者风格会跳。
+# F2/F3 全部归 `BUBBLE_F2` / `BUBBLE_F3`，进气泡池。
+# 9 个状态**全部覆盖**（sleeping 由 wx6 趴桌睡着撑起）。
 STATE_PLAN = (
-    ('waking',    ('cheer', 'gif:29')),
-    ('idle',      ('sleepy', 'gif:28', 'gif:26')),
-    ('listening', ('wink', 'gif:07')),
-    ('thinking',  ('starry', 'gif:03', 'gif:28')),
-    ('working',   ('writing', 'gif:26', 'gif:04')),
-    ('waiting',   ('shy', 'gif:01')),
-    ('happy',     ('gif:06', 'joy', 'gif:29', 'cheer', 'gif:07')),
-    ('error',     ('gif:02', 'snack')),
-    ('sleeping',  ('gif:24', 'sleepy')),
+    ('waking',    ('cheer', 'gif:07')),
+    ('idle',      ('gif:07', 'shy', 'wink')),
+    ('listening', ('wink', 'gif:01')),
+    ('thinking',  ('gif:04', 'starry')),
+    ('working',   ('writing', 'gif:03')),
+    ('waiting',   ('gif:01', 'shy')),
+    ('happy',     ('gif:06', 'joy', 'cheer', 'gif:07')),
+    ('error',     ('gif:02',)),
+    ('sleeping',  ('sleepy',)),
 )
 
-# 用户手动抠图目录：文件名即状态名，放进去重跑即自动纳入并覆盖内置映射。
+# ── 气泡池（**表情包**）= F2 + F3 ────────────────────────────────────────────
+# F2：用户手动抠好的 16 张鲨鱼睡衣贴纸，每张都 baked-in 一句中文 → `hasText: true`。
+#     文件名 → `hasText` 显式表，**不靠猜**。用户抠图放在 `src/cutout/`（语义名）。
+# F3：简笔场景，无文字 → `hasText: false`。其中 `25_看书` 也是用户抠的。
+#
+# `hasText` 判定规则（契约 §4，已冻结）：
+#   · 用户抠的 `08`~`23` 这 16 张 → `true`（每张都印着中文）
+#   · `25_看书` → `false`（简笔，无文字）
+#   · F3 的 GIF `24/26/28/29` → `false`
+#   · **未知/新增文件的默认值 → `false`**（安全侧：允许 Host 配文字）
+BUBBLE_F2 = (
+    # (语义名, cutout 文件名, hasText)
+    ('08-love-you',          '08-love-you.png',          True),   # 爱你哦
+    ('09-finger-heart',      '09-finger-heart.png',      True),   # 比心
+    ('10-blep',              '10-blep.png',              True),   # 略略略
+    ('11-hi',                '11-hi.png',                True),   # hi～
+    ('12-good-night',        '12-good-night.png',        True),   # 晚安啦
+    ('13-wink',              '13-wink.png',              True),   # 眨眼
+    ('14-kiss',              '14-kiss.png',              True),   # 么么哒
+    ('15-cheer-up',          '15-cheer-up.png',          True),   # 加油
+    ('16-comfort',           '16-comfort.png',           True),   # 开心点嘛
+    ('17-yay',               '17-yay.png',               True),   # 好耶
+    ('18-confused',          '18-confused.png',          True),   # 有点懵
+    ('19-thanks',            '19-thanks.png',            True),   # 谢谢哦
+    ('20-thumbs-up',         '20-thumbs-up.png',         True),   # 默大契
+    ('21-at-work',           '21-at-work.png',           True),   # 工作中
+    ('22-annoyed',           '22-annoyed.png',           True),   # 好气人哦
+    ('23-you-are-the-best',  '23-you-are-the-best.png',  True),   # 你最好了
+)
+
+BUBBLE_F3 = (
+    # F3 的 4 张 GIF（自动判定通过的动画；气泡取首帧静态图）
+    ('gif:24', '表情包_24_睡觉zzz.gif', False),
+    ('gif:26', '表情包_26_趴面.gif',    False),
+    ('gif:28', '表情包_28_挂件吊坠.gif', False),
+    ('gif:29', '表情包_29_抱小宠.gif',  False),
+)
+
+# F3 里用户手动抠的那张（简笔，无文字）。它不覆盖任何状态 —— 只进气泡池。
+CUTOUT_EXTRA = (
+    ('25-reading', '25-reading.png', False),
+)
+
+# 用户手动抠图目录。**注意**：这里的文件名是**语义名**（如 `08-love-you.png`），
+# 不再是状态名 —— F2/F3 只当气泡，不当主体。
 CUTOUT = os.path.join(SRC, 'cutout')
+
+# 用户手动抠图的「原始工作台」。用户在这里面抠图，所以**只在目标不存在时写入**。
+RAW = os.path.join(SRC, 'raw')
 
 
 # ── 基础工具 ────────────────────────────────────────────────────────────────
@@ -192,19 +264,19 @@ def to_height(im, height):
     return im.resize((w, height), Image.LANCZOS)
 
 
-def load_cutouts(state):
-    """取用户在 `cutout/` 放的手动抠图，**按文件名排序返回全部匹配项**。
+def load_state_cutouts(state):
+    """取用户为**某个状态**手动抠的图（可选逃生通道），按文件名排序返回全部匹配项。
 
-    命名规则：`<状态名>.png` 是主变体，`<状态名>-2.png`、`<状态名>-3.png`…
-    作为同状态的轮换变体（契约 §4 的 `variants`）。用户抠多少张就纳入多少张，
-    重跑即可生效，无需改代码。
+    命名规则：`state-<状态名>.png` 是主变体，`state-<状态名>-2.png`… 是轮换变体
+    （契约 §4 的 `variants`）。用 `state-` 前缀是为了**不与气泡贴纸的语义名冲突**
+    —— `cutout/` 现在主要装 F2/F3 的气泡图（如 `08-love-you.png`），
+    旧版按 `<状态名>.png` 匹配会与它们混在一起，语义不清。
     """
     if not os.path.isdir(CUTOUT):
         return []
-    exact = os.path.join(CUTOUT, state + '.png')
-    hits = sorted(glob.glob(os.path.join(CUTOUT, state + '*.png')))
+    hits = sorted(glob.glob(os.path.join(CUTOUT, 'state-%s*.png' % state)))
+    exact = os.path.join(CUTOUT, 'state-%s.png' % state)
     if os.path.isfile(exact):
-        # 主变体排最前，其余按名字序跟在后面
         hits = [exact] + [h for h in hits if h != exact]
     return hits
 
@@ -219,18 +291,73 @@ def copy_if_different(src, dst):
     return True
 
 
+def resolve_bubble_pool(by_semantic):
+    """解析气泡池 = F2（用户抠的 16 张贴纸）+ F3（4 张简笔 GIF + 用户抠的 25_看书）。
+
+    返回 `(pool, miss)`：`pool` 是 `[(item, hasText), …]`，`hasText` 直接来自上面
+    两张**显式表**，不靠对图像做 OCR / 猜测。顺序固定为 F2 → F3 → F3 抠图，
+    保证 `pet.json` 的 `bubble` 数组稳定（幂等可校验）。
+
+    **默认值规则**：不在表里的一律按 `false`（安全侧 —— 允许 Host 叠加 `bubble.text`）。
+    以后新增素材必须显式登记 `hasText`，否则会以 `false` 进池。
+    """
+    pool, miss = [], []
+    for semantic, fname, has_text in BUBBLE_F2:
+        p = os.path.join(CUTOUT, fname)
+        if os.path.isfile(p):
+            pool.append(({'kind': 'png', 'semantic': semantic, 'name': fname,
+                          'path': p, 'cutout': p}, has_text))
+        else:
+            miss.append({'name': fname, 'reason': 'needsCutout',
+                         'detail': 'F2 气泡贴纸（文字 baked-in）；请抠好后放入 src/cutout/'})
+    for semantic, fname, has_text in BUBBLE_F3:
+        it = by_semantic.get(semantic)
+        if it is not None:
+            pool.append((it, has_text))
+        else:
+            miss.append({'name': fname, 'reason': 'needsCutout',
+                         'detail': 'F3 简笔场景 GIF；未通过透明占比判据或源文件缺失'})
+    for semantic, fname, has_text in CUTOUT_EXTRA:
+        p = os.path.join(CUTOUT, fname)
+        if os.path.isfile(p):
+            pool.append(({'kind': 'png', 'semantic': semantic, 'name': fname,
+                          'path': p, 'cutout': p}, has_text))
+        else:
+            miss.append({'name': fname, 'reason': 'needsCutout',
+                         'detail': 'F3 用户手动抠图（简笔、无文字）'})
+    return pool, miss
+
+
+def has_text_of(semantic):
+    """按语义名查 `hasText`；**未知语义名一律 False**（契约 §4 的安全侧默认）。"""
+    for s, _, ht in BUBBLE_F2:
+        if s == semantic:
+            return ht
+    for s, _, ht in BUBBLE_F3:
+        if s == semantic:
+            return ht
+    for s, _, ht in CUTOUT_EXTRA:
+        if s == semantic:
+            return ht
+    return False
+
+
 # ── 素材发现与自动分类 ──────────────────────────────────────────────────────
 
 def discover():
     """扫源素材并**自动分类**，返回 (可用列表, 待抠列表, 弃用列表)。
 
-    可用 = 已透明的 wx PNG + 通过透明占比判据的动态 GIF；
-    待抠 = 17 张 `QQ表情\\*.png`（用户手动抠图）+ 未通过判据的 GIF；
+    可用 = 已透明的 wx PNG + 通过透明占比判据的动态 GIF（**主体候选，即 F1 与 F3 的
+    GIF** —— 是否真的当主体由 `STATE_PLAN` 决定，F3 只进气泡池）；
+    待抠 = 未通过判据的 GIF（`05_星空公式` / `27_生气指人`）+ 缺失的 wx PNG；
     弃用 = 根目录 6 张单帧 GIF（与 wx PNG 重复，实测配对见 README）。
+
+    ⚠️ `QQ表情\\*.png`（F2 的 17 张贴纸）**不在这里**判「待抠」：它们已经由用户抠好
+    放进 `src/cutout/`，角色与 `hasText` 由 `resolve_bubble_pool()` 按显式表决定。
     """
     usable, needs_cutout, dropped = [], [], []
 
-    # ── wx 的 8 张已透明 PNG（首选）──
+    # ── wx 的 8 张已透明 PNG（首选，F1 主体）──
     for semantic, fname in sorted(WX_NAMES.items()):
         p = os.path.join(ASSETS_WX, fname)
         if os.path.isfile(p):
@@ -256,20 +383,6 @@ def discover():
             continue
         usable.append({'kind': 'gif', 'semantic': 'gif:' + idx, 'name': base,
                        'path': p, 'minT': mt, 'frames': len(frames)})
-
-    # ── QQ表情 的 17 张 PNG：用户明确要求手动抠图，只暂存不处理 ──
-    for p in sorted(glob.glob(os.path.join(ASSETS_QQ, '*.png'))):
-        base = os.path.basename(p)
-        im = Image.open(p)
-        detail = '四角纯白、完全不透明，需手动抠图'
-        if im.mode in ('RGBA', 'LA'):
-            mt = min_transparent_ratio([im.convert('RGBA')])
-            if mt >= SOLID_EPS:
-                # 25_看书.png 是唯一例外：它自带部分 alpha（含不透明桌面场景）。
-                # 仍按用户意愿列入待抠，但如实说明它其实已有 alpha。
-                detail = ('已含部分 alpha（透明占比 %.0f%%），但带不透明桌面场景；'
-                          '用户认可即可直接放入 src/cutout/' % (mt * 100))
-        needs_cutout.append({'name': base, 'reason': 'needsCutout', 'detail': detail})
 
     # ── 根目录 6 张单帧 GIF：与 wx PNG 重复，弃用 ──
     for p in sorted(glob.glob(os.path.join(ASSETS, '*.gif'))):
@@ -380,11 +493,15 @@ def write_thumb(state, entry, report):
     report['made'].append((rel, thumb.size, os.path.getsize(path)))
 
 
-def write_bubble(item, report):
-    """产出气泡表情池 `art/pet/bubble/<语义名>.png`。
+def write_bubble(item, has_text, report):
+    """产出气泡表情池 `art/pet/bubble/<语义名>.png`，并返回契约 §4 的条目。
 
     气泡按 **1:1 等比缩到不超过 256px**（不裁切、不拉伸）：
     气泡里常带文字或装饰，裁 bbox 或改比例都会破坏构图。
+
+    `hasText` 原样带进清单：`true` = 该图**自己已经把文字画进去了**（F2 贴纸），
+    Host 必须用 `kind: 'image'` 且**不再叠** `bubble.text`，否则屏幕上会出现两段
+    打架的文字（契约 §4）。判定来自 `BUBBLE_F2`/`BUBBLE_F3`/`CUTOUT_EXTRA` 显式表。
     """
     src = item.get('cutout') or item['path']
     if item['kind'] == 'gif':
@@ -400,21 +517,35 @@ def write_bubble(item, report):
     path = os.path.join(ART, rel)
     im.save(path, 'PNG', optimize=True)
     report['made'].append((rel, im.size, os.path.getsize(path)))
-    return {'file': rel.replace(os.sep, '/'), 'w': im.width, 'h': im.height}
+    return {'file': rel.replace(os.sep, '/'), 'w': im.width, 'h': im.height,
+            'hasText': bool(has_text)}
 
 
-def stage_sources(usable, report):
+def stage_sources(usable, report, refresh_raw=False):
     """把源素材暂存进 `art/pet/src/`（**只拷贝，绝不修改源素材**）。
 
-    幂等：内容一致就不重写，避免无意义的 mtime 变化。
+    ⚠️ **数据丢失防线**：`src/raw/` 是**用户手动抠图的工作台**（用户就是在那里把
+    `QQ表情\\*.png` 抠成透明底的），而源素材仍是 0% 透明的原图 —— 两者内容不同。
+    旧版对 `raw/` 也无条件 `copy_if_different`，于是**重跑一次就把用户的抠图覆盖回
+    不透明原图、静默丢失**。所以现在：
+
+      · `raw/` **只在目标不存在时**写入（视为「原始参考图，写一次就不再动」）；
+      · 要强制重刷必须显式给 `--refresh-raw`（见 `main()`），默认永不覆盖。
+
+    `src/png/` 与 `src/gif/` 不承载人工编辑，仍按内容幂等刷新。
     """
-    staged = {'png': 0, 'gif': 0, 'raw': 0}
+    staged = {'png': 0, 'gif': 0, 'raw': 0, 'rawSkipped': 0}
     for u in usable:
         sub = {'wx': 'png', 'gif': 'gif'}[u['kind']]
         copy_if_different(u['path'], os.path.join(SRC, sub, u['name']))
         staged[sub] += 1
     for p in sorted(glob.glob(os.path.join(ASSETS_QQ, '*.png'))):
-        copy_if_different(p, os.path.join(SRC, 'raw', os.path.basename(p)))
+        dst = os.path.join(RAW, os.path.basename(p))
+        if os.path.isfile(dst) and not refresh_raw:
+            # 已存在 → 这是用户的工作台文件，**绝不覆盖**
+            staged['rawSkipped'] += 1
+            continue
+        copy_if_different(p, dst)
         staged['raw'] += 1
     report['staged'] = staged
 
@@ -471,30 +602,38 @@ def write_manifest(states, variants, bubbles, missing, files, report):
 
 # ── 报告 ────────────────────────────────────────────────────────────────────
 
-def print_check(mapping, gif_rows, png_rows, dropped, bubbles, usable, states_light,
-                variant_geo):
-    """`--check`：只报覆盖率与透明占比，**缺图只警告不报错**，退出码恒为 0。"""
+def print_check(mapping, gif_rows, dropped, bubbles, usable, states_light,
+                variant_geo, missing):
+    """`--check`：只报覆盖率与透明占比，**缺图只警告不报错**，退出码恒为 0。
+
+    报告**明确分成两块角色**，让人一眼看出哪张图被用在哪：
+      · **主体（states）** —— 只列 F1 素材，并逐项标出 `gif:NN` / `wxN` 来源；
+      · **表情包（bubble）** —— 逐项打印 `hasText`（F2 贴纸 true / F3 场景 false）。
+    """
     print('素材覆盖率报告（--check，只读，未写任何文件）')
     print('=' * 70)
     print('源素材目录：%s' % ASSETS)
-    print('可用素材 %d 项；待抠 %d 项；弃用 %d 项'
-          % (len(usable), len(png_rows) + sum(1 for g in gif_rows if not g[2]), len(dropped)))
+    print('可用素材 %d 项；待抠/缺失 %d 项；弃用 %d 项'
+          % (len(usable), len(missing), len(dropped)))
     print()
     print('动态 GIF 透明占比判定（minT%% = 全部帧里最小的 alpha==0 占比；'
           '<%.1f%% 判为有背景板）' % (SOLID_EPS * 100))
     for name, n, ok, mt in gif_rows:
-        print('  %s %-26s %2d 帧  minT=%6.2f%%  %s'
+        role = '主体' if any(name == u['name'] for s in mapping.values() for u in s) \
+            else ('气泡' if any(name == b[0].get('name') for b in bubbles) else '—')
+        print('  %s %-26s %2d 帧  minT=%6.2f%%  %s  [%s]'
               % ('[OK]  ' if ok else '[待抠]', name, n, mt * 100,
-                 '可用于动画' if ok else '★有实心帧 → 排除动画'))
-    print()
-    print('QQ表情 PNG（用户手动抠图，本次不处理）：')
-    for name, mt in png_rows:
-        note = '  ← 已含部分 alpha' if mt >= SOLID_EPS else ''
-        print('  [待抠] %-26s minT=%6.2f%%%s' % (name, mt * 100, note))
+                 '可用于动画' if ok else '★有实心帧 → 排除动画', role))
     print()
     print('弃用（与 wx PNG 重复的单帧 GIF）：%d 张' % len(dropped))
     print()
-    print('状态覆盖（契约 §1 的 9 个状态；单帧宽高 = 产出条带的实际单帧尺寸）：')
+
+    # ── 块 1：主体（states）──────────────────────────────────────────────
+    print('━' * 70)
+    print('【主体（states）】= F1 细笔触半身像 · 深色作战服 · 无文字')
+    print('  候选一律取自 F1：gif 01/02/03/04/06/07 + wx 1..8；'
+          '**F2/F3 不得出现在这里**。')
+    print('━' * 70)
     print('  %-4s %-10s %-14s %5s %6s %11s %6s %8s' % (
         '', '状态', '文件', '帧数', '帧宽', '单帧(宽x高)', 'frameMs', 'variants'))
     for s in PET_STATES:
@@ -506,6 +645,14 @@ def print_check(mapping, gif_rows, png_rows, dropped, bubbles, usable, states_li
                      len(mapping.get(s, []))))
         else:
             print('  [缺] %-10s → Host 回落 idle' % s)
+    print()
+    print('各状态用到的素材（来源语义名，全部应为 F1）：')
+    for s in PET_STATES:
+        items = mapping.get(s, [])
+        if not items:
+            continue
+        print('  %-10s ← %s' % (s, ', '.join(
+            '%s(%s)' % (it['semantic'], it['name']) for it in items)))
     print()
     print('各变体几何（变体之间帧数差异极大：静态 PNG 1 帧 vs 动态 GIF 几十帧，')
     print('必须按文件各自的几何切帧，不能套用 states 的 frames）：')
@@ -521,11 +668,34 @@ def print_check(mapping, gif_rows, png_rows, dropped, bubbles, usable, states_li
             print('    %-18s %3d 帧 x %4dpx = %6dpx 宽  @%dms%s'
                   % (vfile, n, fw, n * fw, fms, mark))
     print()
-    print('气泡表情池：%d 张' % len(bubbles))
+
+    # ── 块 2：表情包（bubble）────────────────────────────────────────────
+    print('━' * 70)
+    print('【表情包（bubble）】= F2 鲨鱼睡衣贴纸（文字 baked-in）+ F3 简笔场景')
+    print('  hasText=true → Host 必须 kind=image，**不再叠 bubble.text**（否则两段文字打架）')
+    print('  hasText=false → 可配 Host 文字（kind=both）')
+    print('━' * 70)
+    n_text = sum(1 for _, ht in bubbles if ht)
+    print('  气泡池共 %d 张：hasText=true %d 张，hasText=false %d 张'
+          % (len(bubbles), n_text, len(bubbles) - n_text))
+    print('  %-4s %-24s %-16s %-14s %6s' % ('', '语义名', '来源文件', '家族', 'hasText'))
+    for it, ht in bubbles:
+        fam = 'F2 贴纸' if ht else ('F3 场景' if not it['semantic'].startswith('gif:')
+                                    else 'F3 GIF')
+        print('  [OK] %-24s %-16s %-14s %6s'
+              % (it['semantic'], it['name'], fam, 'true' if ht else 'false'))
+    print('  未在显式表里的新文件 → 默认 hasText=false（安全侧：允许配文字）')
+    print()
+
+    print('待抠 / 缺失（%d 项，仅警告）：' % len(missing))
+    for m in missing:
+        print('  · %s（%s）%s' % (m['name'], m.get('reason', '?'), m.get('detail', '')))
+    print()
     covered = sum(1 for s in PET_STATES if s in states_light)
-    print('覆盖率：%d/%d 状态有专属素材（缺 %d 个，仅警告）'
-          % (covered, len(PET_STATES), len(PET_STATES) - covered))
-    print('提示：把抠好的图按 `<状态名>.png` 放进 art/pet/src/cutout/ 后重跑本脚本即可纳入。')
+    print('覆盖率：主体 %d/%d 状态有专属素材（缺 %d 个，仅警告）；气泡池 %d 张'
+          % (covered, len(PET_STATES), len(PET_STATES) - covered, len(bubbles)))
+    print('提示：气泡贴纸按语义名放进 art/pet/src/cutout/（如 17-yay.png）后重跑即可；'
+          '给某状态换主体请放 state-<状态名>.png。')
     return 0
 
 
@@ -535,6 +705,8 @@ def main():
     parser = argparse.ArgumentParser(description='庄方宜桌宠素材管线（不抠图、保留 alpha）')
     parser.add_argument('--check', action='store_true', help='只报覆盖率，不写文件；缺图只警告')
     parser.add_argument('--clean', action='store_true', help='重建前清掉 art/pet 下的旧产物')
+    parser.add_argument('--refresh-raw', action='store_true',
+                        help='强制重刷 src/raw/（默认**不覆盖**已有文件：那里是用户抠图的工作台）')
     args = parser.parse_args()
 
     if not os.path.isdir(ASSETS):
@@ -545,9 +717,9 @@ def main():
     usable, missing, dropped = discover()
     by_semantic, mapping = build_mapping(usable)
 
-    # 手动抠图覆盖：用户放进 cutout/ 的图**优先于**内置映射（主变体排最前）
+    # 主体可选逃生通道：用户放进 cutout/state-<状态名>.png 的图优先于内置 F1 映射。
     for state in PET_STATES:
-        for i, p in enumerate(load_cutouts(state)):
+        for i, p in enumerate(load_state_cutouts(state)):
             frames = gif_frames(p)[0] if p.lower().endswith('.gif') else [read_rgba(p)]
             mt = min_transparent_ratio(frames)
             # 手动图也过一遍同一判据：有实心帧就警告，但不拦（用户明确认可的东西由他决定）
@@ -556,17 +728,15 @@ def main():
                       '播放可能出现矩形块' % (os.path.basename(p), mt * 100),
                       file=sys.stderr)
             item = {'kind': 'png' if not p.lower().endswith('.gif') else 'gif',
-                    'semantic': '%s-cut%d' % (state, i), 'name': os.path.basename(p),
+                    'semantic': 'state-%s-cut%d' % (state, i), 'name': os.path.basename(p),
                     'path': p, 'cutout': p, 'minT': mt, 'frames': len(frames)}
             mapping.setdefault(state, []).insert(i, item)
             by_semantic[item['semantic']] = item
 
-    # 气泡池：全部可用素材（8 张 wx + 通过判据的 GIF）都进池
-    bubble_items, seen = [], set()
-    for u in usable:
-        if u['semantic'] not in seen:
-            seen.add(u['semantic'])
-            bubble_items.append(u)
+    # 气泡池 = F2 + F3（**F1 不进池**：它是主体，重复出现没意义）。
+    # 每项都带 `hasText`，来自显式表；未知语义名默认 False。
+    bubble_pool, bubble_missing = resolve_bubble_pool(by_semantic)
+    missing = missing + bubble_missing
 
     if args.check:
         # 只读：不写任何文件。单帧尺寸走 render_tiles（与主流程同一函数），
@@ -590,14 +760,8 @@ def main():
                 continue
             fr, _ = gif_frames(p)
             gif_rows.append((base, len(fr), False, min_transparent_ratio(fr)))
-        png_rows = []
-        for p in sorted(glob.glob(os.path.join(ASSETS_QQ, '*.png'))):
-            im = Image.open(p)
-            mt = min_transparent_ratio([im.convert('RGBA')]) \
-                if im.mode in ('RGBA', 'LA') else 0.0
-            png_rows.append((os.path.basename(p), mt))
-        return print_check(mapping, gif_rows, png_rows, dropped, bubble_items,
-                           usable, light, variant_geo)
+        return print_check(mapping, gif_rows, dropped, bubble_pool,
+                           usable, light, variant_geo, missing)
 
     ensure_dirs()
     if args.clean:
@@ -607,7 +771,7 @@ def main():
                 os.remove(p)
 
     report = {'made': []}
-    stage_sources(usable, report)
+    stage_sources(usable, report, refresh_raw=args.refresh_raw)
 
     states, variants, files, cache = {}, {}, {}, {}
     for state, items in mapping.items():
@@ -623,7 +787,7 @@ def main():
                                 'frameWidth': e['frameWidth'],
                                 'frameMs': e['frameMs']}
 
-    bubbles = [write_bubble(u, report) for u in bubble_items]
+    bubbles = [write_bubble(it, ht, report) for it, ht in bubble_pool]
     manifest = write_manifest(states, variants, bubbles, missing, files, report)
 
     # 清掉不再被清单引用的旧产物（变体缩水时的高序号文件等）
@@ -650,14 +814,20 @@ def main():
         else:
             print('  %-30s %5dx%-5d %8.0f KB' % (name, size[0], size[1], nbytes / 1024.0))
     print()
-    print('暂存源素材：png/ %d 张，gif/ %d 张，raw/ %d 张'
-          % (report['staged']['png'], report['staged']['gif'], report['staged']['raw']))
-    print('状态覆盖：%d/%d' % (len(states), len(PET_STATES)))
+    st = report['staged']
+    print('暂存源素材：png/ %d 张，gif/ %d 张；raw/ 新写入 %d 张，**跳过（保护用户抠图）%d 张**'
+          % (st['png'], st['gif'], st['raw'], st.get('rawSkipped', 0)))
+    if st.get('rawSkipped'):
+        print('  ↑ raw/ 里的已有文件一律不动（那是你抠图的工作台）；'
+              '要强制重刷请加 --refresh-raw')
+    print('状态覆盖（主体，只取 F1）：%d/%d' % (len(states), len(PET_STATES)))
     for s in PET_STATES:
         n = len(variants.get(s, []))
         print('  %s %-10s variants=%d' % ('[OK]' if s in states else '[缺]', s, n))
-    print('气泡池：%d 张；待抠：%d 项；弃用：%d 项'
-          % (len(bubbles), len(manifest['missing']), len(dropped)))
+    n_text = sum(1 for b in bubbles if b['hasText'])
+    print('气泡池（表情包，F2+F3）：%d 张；其中 hasText=true %d 张、false %d 张'
+          % (len(bubbles), n_text, len(bubbles) - n_text))
+    print('待抠/缺失：%d 项；弃用：%d 项' % (len(manifest['missing']), len(dropped)))
     if report.get('pruned'):
         print('清理旧产物 %d 个（清单已不再引用）：%s'
               % (len(report['pruned']), ', '.join(report['pruned'])))

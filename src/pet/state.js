@@ -203,9 +203,11 @@ export function sessionState (rec, at) {
  * @param {object} [options]
  * @param {() => number} [options.now] - 时间源（测试注入假时钟）
  * @param {object} [options.config] - 覆盖 {@link DEFAULT_CONFIG}
- * @param {(key: string, seed: number) => (string|null)} [options.pickBubbleImage]
- *   气泡表情图选择器。返回相对 `art/pet/` 的路径或 null。
- *   **注入而非内联**：状态机不该知道素材目录的存在，测试也能给出确定结果。
+ * @param {(key: string, seed: number) => ({file: string, hasText: boolean}|string|null)} [options.pickBubbleImage]
+ *   气泡表情图选择器。返回 `{file, hasText}`、纯路径字符串、或 null。
+ *   **`hasText` 必须如实反映「该图是否自带文字」** —— 状态机会据此决定要不要叠文案
+ *   （见 `requestBubble` 里的说明）。**注入而非内联**：状态机不该知道素材目录的存在，
+ *   测试也能给出确定结果。
  * @returns {object} 状态机实例
  */
 export function createPetState (options = {}) {
@@ -282,9 +284,23 @@ export function createPetState (options = {}) {
    *   3. `force` 跳过全部规则（用于用户显式操作）。
    */
   function requestBubble (key, at, extra = {}) {
-    const text = extra.text ?? textOf(extra.table ?? STATE_TEXT, key, cfg.locale)
     const priority = extra.priority ?? priorityOf(extra.state ?? key)
-    const image = extra.image !== undefined ? extra.image : pickBubbleImage(key, variantSeed)
+
+    // 挑图。`pickBubbleImage` 现在返回 `{file, hasText}`（或 null）——
+    // 因为**素材里有一类中文已经印在图上**的聊天贴纸，必须知道这件事才能决定
+    // 要不要叠文字（见下面 `kind` 的推导）。
+    const picked = extra.image !== undefined ? extra.image : pickBubbleImage(key, variantSeed)
+    const image = picked === null || picked === undefined
+      ? null
+      : (typeof picked === 'string' ? picked : (picked.file ?? null))
+    const imageHasText = typeof picked === 'object' && picked !== null && picked.hasText === true
+
+    // ⭐ 图自带文字时**不叠 Host 文案**：否则屏幕上会出现两段互相打架的文字
+    //（例如贴纸写着「好耶！」，气泡又写「完成啦」）。
+    // 这不是显示偏好，是正确性要求 —— 见契约 §4 的 `hasText`。
+    const text = imageHasText
+      ? null
+      : (extra.text ?? textOf(extra.table ?? STATE_TEXT, key, cfg.locale))
 
     if (extra.force !== true) {
       if (bubble !== null && at < bubble.at + bubble.durationMs && priority <= bubble.priority) return false
@@ -295,9 +311,11 @@ export function createPetState (options = {}) {
     bubbleSeq += 1
     bubble = {
       id: bubbleSeq,
-      kind: image === null || image === undefined ? 'text' : (text ? 'both' : 'image'),
+      kind: image === null ? 'text' : (text ? 'both' : 'image'),
       image: image ?? null,
       text: text ?? null,
+      /** 该图是否自带文字（透传给客户端，便于诊断与样式微调）。 */
+      imageHasText,
       durationMs: extra.durationMs ?? cfg.bubbleMs,
       priority,
       state: extra.state ?? null,
@@ -522,6 +540,8 @@ export function createPetState (options = {}) {
             kind: bubble.kind,
             image: bubble.image,
             text: bubble.text,
+            /** 该图是否自带文字（`kind === 'image'` 时通常为 true）。 */
+            imageHasText: bubble.imageHasText === true,
             durationMs: bubble.durationMs,
             priority: bubble.priority
           },

@@ -1,102 +1,133 @@
 {
   "bubble": [
     {
-      "file": "bubble/cheer.png",
-      "h": 240,
-      "w": 240
-    },
-    {
-      "file": "bubble/joy.png",
-      "h": 240,
-      "w": 240
-    },
-    {
-      "file": "bubble/shy.png",
-      "h": 240,
-      "w": 240
-    },
-    {
-      "file": "bubble/sleepy.png",
-      "h": 240,
-      "w": 240
-    },
-    {
-      "file": "bubble/snack.png",
-      "h": 240,
-      "w": 240
-    },
-    {
-      "file": "bubble/starry.png",
-      "h": 240,
-      "w": 240
-    },
-    {
-      "file": "bubble/wink.png",
-      "h": 240,
-      "w": 240
-    },
-    {
-      "file": "bubble/writing.png",
-      "h": 240,
-      "w": 240
-    },
-    {
-      "file": "bubble/gif-01.png",
+      "file": "bubble/08-love-you.png",
       "h": 256,
+      "hasText": true,
       "w": 256
     },
     {
-      "file": "bubble/gif-02.png",
+      "file": "bubble/09-finger-heart.png",
       "h": 256,
+      "hasText": true,
       "w": 256
     },
     {
-      "file": "bubble/gif-03.png",
+      "file": "bubble/10-blep.png",
       "h": 256,
+      "hasText": true,
       "w": 256
     },
     {
-      "file": "bubble/gif-04.png",
+      "file": "bubble/11-hi.png",
       "h": 256,
+      "hasText": true,
       "w": 256
     },
     {
-      "file": "bubble/gif-06.png",
+      "file": "bubble/12-good-night.png",
       "h": 256,
+      "hasText": true,
       "w": 256
     },
     {
-      "file": "bubble/gif-07.png",
+      "file": "bubble/13-wink.png",
       "h": 256,
+      "hasText": true,
+      "w": 256
+    },
+    {
+      "file": "bubble/14-kiss.png",
+      "h": 256,
+      "hasText": true,
+      "w": 256
+    },
+    {
+      "file": "bubble/15-cheer-up.png",
+      "h": 256,
+      "hasText": true,
+      "w": 256
+    },
+    {
+      "file": "bubble/16-comfort.png",
+      "h": 256,
+      "hasText": true,
+      "w": 256
+    },
+    {
+      "file": "bubble/17-yay.png",
+      "h": 256,
+      "hasText": true,
+      "w": 256
+    },
+    {
+      "file": "bubble/18-confused.png",
+      "h": 256,
+      "hasText": true,
+      "w": 256
+    },
+    {
+      "file": "bubble/19-thanks.png",
+      "h": 256,
+      "hasText": true,
+      "w": 256
+    },
+    {
+      "file": "bubble/20-thumbs-up.png",
+      "h": 256,
+      "hasText": true,
+      "w": 256
+    },
+    {
+      "file": "bubble/21-at-work.png",
+      "h": 256,
+      "hasText": true,
+      "w": 256
+    },
+    {
+      "file": "bubble/22-annoyed.png",
+      "h": 256,
+      "hasText": true,
+      "w": 256
+    },
+    {
+      "file": "bubble/23-you-are-the-best.png",
+      "h": 256,
+      "hasText": true,
       "w": 256
     },
     {
       "file": "bubble/gif-24.png",
       "h": 256,
+      "hasText": false,
       "w": 256
     },
     {
       "file": "bubble/gif-26.png",
       "h": 256,
+      "hasText": false,
       "w": 256
     },
     {
       "file": "bubble/gif-28.png",
       "h": 256,
+      "hasText": false,
       "w": 256
     },
     {
       "file": "bubble/gif-29.png",
       "h": 256,
+      "hasText": false,
+      "w": 256
+    },
+    {
+      "file": "bubble/25-reading.png",
+      "h": 256,
+      "hasText": false,
       "w": 256
     }
   ],
   "files": {
-    "error-2.png": {
-      "frameMs": 0,
-      "frameWidth": 218,
-      "frames": 1
-    },
     "error.png": {
       "frameMs": 30,
       "frameWidth": 256,
@@ -108,16 +139,11 @@
       "frames": 1
     },
     "happy-3.png": {
-      "frameMs": 60,
-      "frameWidth": 254,
-      "frames": 24
-    },
-    "happy-4.png": {
       "frameMs": 0,
       "frameWidth": 239,
       "frames": 1
     },
-    "happy-5.png": {
+    "happy-4.png": {
       "frameMs": 30,
       "frameWidth": 256,
       "frames": 33
@@ -128,19 +154,19 @@
       "frames": 33
     },
     "idle-2.png": {
-      "frameMs": 60,
+      "frameMs": 0,
       "frameWidth": 256,
-      "frames": 4
+      "frames": 1
     },
     "idle-3.png": {
-      "frameMs": 60,
-      "frameWidth": 314,
-      "frames": 4
+      "frameMs": 0,
+      "frameWidth": 288,
+      "frames": 1
     },
     "idle.png": {
-      "frameMs": 0,
-      "frameWidth": 284,
-      "frames": 1
+      "frameMs": 30,
+      "frameWidth": 256,
+      "frames": 33
     },
     "listening-2.png": {
       "frameMs": 30,
@@ -152,45 +178,35 @@
       "frameWidth": 288,
       "frames": 1
     },
-    "sleeping-2.png": {
+    "sleeping.png": {
       "frameMs": 0,
       "frameWidth": 284,
       "frames": 1
     },
-    "sleeping.png": {
-      "frameMs": 60,
-      "frameWidth": 250,
-      "frames": 4
-    },
     "thinking-2.png": {
-      "frameMs": 30,
-      "frameWidth": 256,
-      "frames": 44
-    },
-    "thinking-3.png": {
-      "frameMs": 60,
-      "frameWidth": 256,
-      "frames": 4
-    },
-    "thinking.png": {
       "frameMs": 0,
       "frameWidth": 241,
       "frames": 1
     },
-    "waiting-2.png": {
+    "thinking.png": {
       "frameMs": 30,
       "frameWidth": 256,
       "frames": 33
     },
-    "waiting.png": {
+    "waiting-2.png": {
       "frameMs": 0,
       "frameWidth": 256,
       "frames": 1
     },
+    "waiting.png": {
+      "frameMs": 30,
+      "frameWidth": 256,
+      "frames": 33
+    },
     "waking-2.png": {
-      "frameMs": 60,
-      "frameWidth": 254,
-      "frames": 24
+      "frameMs": 30,
+      "frameWidth": 256,
+      "frames": 33
     },
     "waking.png": {
       "frameMs": 0,
@@ -198,14 +214,9 @@
       "frames": 1
     },
     "working-2.png": {
-      "frameMs": 60,
-      "frameWidth": 314,
-      "frames": 4
-    },
-    "working-3.png": {
       "frameMs": 30,
       "frameWidth": 256,
-      "frames": 33
+      "frames": 44
     },
     "working.png": {
       "frameMs": 0,
@@ -224,91 +235,6 @@
     {
       "detail": "有实心帧（10/18 帧铺满不透明），播放会出现矩形块；已排除动画，等手动抠图",
       "name": "表情包_27_生气指人.gif",
-      "reason": "needsCutout"
-    },
-    {
-      "detail": "四角纯白、完全不透明，需手动抠图",
-      "name": "表情包_08_爱你哦.png",
-      "reason": "needsCutout"
-    },
-    {
-      "detail": "四角纯白、完全不透明，需手动抠图",
-      "name": "表情包_09_比心.png",
-      "reason": "needsCutout"
-    },
-    {
-      "detail": "四角纯白、完全不透明，需手动抠图",
-      "name": "表情包_10_略略略.png",
-      "reason": "needsCutout"
-    },
-    {
-      "detail": "四角纯白、完全不透明，需手动抠图",
-      "name": "表情包_11_hi～.png",
-      "reason": "needsCutout"
-    },
-    {
-      "detail": "四角纯白、完全不透明，需手动抠图",
-      "name": "表情包_12_晚安啦.png",
-      "reason": "needsCutout"
-    },
-    {
-      "detail": "四角纯白、完全不透明，需手动抠图",
-      "name": "表情包_13_眨眼.png",
-      "reason": "needsCutout"
-    },
-    {
-      "detail": "四角纯白、完全不透明，需手动抠图",
-      "name": "表情包_14_么么哒.png",
-      "reason": "needsCutout"
-    },
-    {
-      "detail": "四角纯白、完全不透明，需手动抠图",
-      "name": "表情包_15_加油.png",
-      "reason": "needsCutout"
-    },
-    {
-      "detail": "四角纯白、完全不透明，需手动抠图",
-      "name": "表情包_16_开心点嘛.png",
-      "reason": "needsCutout"
-    },
-    {
-      "detail": "四角纯白、完全不透明，需手动抠图",
-      "name": "表情包_17_好耶.png",
-      "reason": "needsCutout"
-    },
-    {
-      "detail": "四角纯白、完全不透明，需手动抠图",
-      "name": "表情包_18_有点懵.png",
-      "reason": "needsCutout"
-    },
-    {
-      "detail": "四角纯白、完全不透明，需手动抠图",
-      "name": "表情包_19_谢谢哦.png",
-      "reason": "needsCutout"
-    },
-    {
-      "detail": "四角纯白、完全不透明，需手动抠图",
-      "name": "表情包_20_默大契.png",
-      "reason": "needsCutout"
-    },
-    {
-      "detail": "四角纯白、完全不透明，需手动抠图",
-      "name": "表情包_21_工作中.png",
-      "reason": "needsCutout"
-    },
-    {
-      "detail": "四角纯白、完全不透明，需手动抠图",
-      "name": "表情包_22_好气人哦.png",
-      "reason": "needsCutout"
-    },
-    {
-      "detail": "四角纯白、完全不透明，需手动抠图",
-      "name": "表情包_23_你最好了.png",
-      "reason": "needsCutout"
-    },
-    {
-      "detail": "已含部分 alpha（透明占比 31%），但带不透明桌面场景；用户认可即可直接放入 src/cutout/",
-      "name": "表情包_25_看书.png",
       "reason": "needsCutout"
     }
   ],
@@ -333,9 +259,9 @@
       "anchorY": 1.0,
       "file": "idle.png",
       "frameHeight": 256,
-      "frameMs": 0,
-      "frameWidth": 284,
-      "frames": 1
+      "frameMs": 30,
+      "frameWidth": 256,
+      "frames": 33
     },
     "listening": {
       "anchorY": 1.0,
@@ -349,25 +275,25 @@
       "anchorY": 1.0,
       "file": "sleeping.png",
       "frameHeight": 256,
-      "frameMs": 60,
-      "frameWidth": 250,
-      "frames": 4
+      "frameMs": 0,
+      "frameWidth": 284,
+      "frames": 1
     },
     "thinking": {
       "anchorY": 1.0,
       "file": "thinking.png",
       "frameHeight": 256,
-      "frameMs": 0,
-      "frameWidth": 241,
-      "frames": 1
+      "frameMs": 30,
+      "frameWidth": 256,
+      "frames": 33
     },
     "waiting": {
       "anchorY": 1.0,
       "file": "waiting.png",
       "frameHeight": 256,
-      "frameMs": 0,
+      "frameMs": 30,
       "frameWidth": 256,
-      "frames": 1
+      "frames": 33
     },
     "waking": {
       "anchorY": 1.0,
@@ -388,15 +314,13 @@
   },
   "variants": {
     "error": [
-      "error.png",
-      "error-2.png"
+      "error.png"
     ],
     "happy": [
       "happy.png",
       "happy-2.png",
       "happy-3.png",
-      "happy-4.png",
-      "happy-5.png"
+      "happy-4.png"
     ],
     "idle": [
       "idle.png",
@@ -408,13 +332,11 @@
       "listening-2.png"
     ],
     "sleeping": [
-      "sleeping.png",
-      "sleeping-2.png"
+      "sleeping.png"
     ],
     "thinking": [
       "thinking.png",
-      "thinking-2.png",
-      "thinking-3.png"
+      "thinking-2.png"
     ],
     "waiting": [
       "waiting.png",
@@ -426,8 +348,7 @@
     ],
     "working": [
       "working.png",
-      "working-2.png",
-      "working-3.png"
+      "working-2.png"
     ]
   },
   "version": 1

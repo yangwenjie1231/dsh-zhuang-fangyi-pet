@@ -205,6 +205,9 @@ export function apply (ctx, config) {
     },
     pickBubbleImage: (key, seed) => {
       if (!settings.get().bubble || !settings.get().bubbleImages) return null
+      // 返回**整条记录**（含 `hasText`）而不只是路径：状态机需要知道这张图
+      // 是否已经把文字画进去了，才决定要不要叠 Host 文案 ——
+      // 自带中文的贴纸再叠一句，屏幕上会出现两段互相打架的文字（契约 §4）。
       return bubbleArt(atlas, seed)
     }
   })
