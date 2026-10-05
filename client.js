@@ -50,6 +50,42 @@ window.__ModuleLoader__.load({
     const OVERLAY_ID = 'zhuang-fangyi-pet'
 
     /**
+     * 插件装配出的**唯一运行时**。组件只能从这里拿，**不能指望 `props.runtime`**。
+     *
+     * ⚠️ 这是一个真机上真实炸过的坑，值得写清楚：
+     *
+     * 外壳渲染一个 slot 条目时，props 只有四部分（`dsh-client-ui-renderer` 源码实测，
+     * `renderEntry`）：
+     *
+     *     { ...kit, ...entry.inject, ...slotInjected.props, ...ownerProps }
+     *
+     * 其中 `entry.inject` 来自**注册选项**里的 `inject`（我们没给），
+     * `slotInjected.props` 来自**插槽声明**的 `inject`（`shell.overlay` 没声明），
+     * 而 `ownerProps` 由调用点决定：`shell.overlay` 是 `renderSlot("shell.overlay", {})`，
+     * `settings.section` 是 `renderSlot("settings.section", { close })`。
+     *
+     * **三者都不含 `runtime`。** 于是组件第一行读 `runtime.t` 就抛 `TypeError`，
+     * 被外壳的 `SlotErrorBoundary` 接住 → `reportEntryError(abdicate: true)` →
+     * 该条目被**逐出所在单元格**：它会从 `entriesOfSlot()` 里消失。
+     *
+     * 实测证据：live slot 树里我们的 overlay 条目 `active: false`，
+     * 而同插槽其余 12 个条目全是 `true` —— 这就是"已经被 abdicate 掉"的样子。
+     * 症状是桌宠不出现、设置页一片空白（且**不报错**，只在浏览器 console 里）。
+     *
+     * 为什么测试没抓到：测试一直用 `Pet({ runtime })` 这种**手写的 props 形状**，
+     * 而外壳从不这样传。教训是——测试必须用**外壳真实的调用形状**。
+     */
+    let pluginRuntime = null
+
+    /** 取当前装配的运行时；未装配时给一句能看懂的错，而不是 `undefined.t`。 */
+    function requireRuntime () {
+      if (pluginRuntime === null) {
+        throw new Error('zhuang-fangyi-pet: 运行时尚未装配（apply() 还没跑）')
+      }
+      return pluginRuntime
+    }
+
+    /**
      * 判断**当前要不要用深色变体**（契约 §4 `fileDark`）。
      *
      * overlay 是渲染方，必须由它自己判断 —— Host 在服务端无从知晓浏览器主题。
@@ -366,7 +402,8 @@ window.__ModuleLoader__.load({
      * 这样原生窗口与 overlay 的行为不可能分叉。
      */
     function Pet (props) {
-      const { runtime } = props
+      // 运行时从模块级单例取，**不是** props.runtime —— 见 `requireRuntime()` 的说明。
+      const runtime = requireRuntime()
       const runtimeRef = useRef(runtime)
       runtimeRef.current = runtime
       /** 文案取词器（`✎` 与输入框的提示要本地化；与设置页同一份字典）。 */
@@ -816,7 +853,8 @@ window.__ModuleLoader__.load({
     }
 
     function Section (props) {
-      const { runtime } = props
+      // 同上：`settings.section` 的 ownerProps 只有 `{ close }`，没有 runtime。
+      const runtime = requireRuntime()
       const [settings, setSettings] = useState(() => runtime.settings)
       const [snapshot, setSnapshot] = useState(() => runtime.snapshot)
       const [atlas, setAtlas] = useState(() => runtime.atlas)
@@ -1515,6 +1553,8 @@ window.__ModuleLoader__.load({
     function apply (ctx) {
       const t = makeT(ctx)
       const runtime = createRuntime(ctx, t)
+      // 组件从这里取运行时（外壳不会把 runtime 当 prop 传，见 `requireRuntime()`）。
+      pluginRuntime = runtime
 
       // 样式：自建 <style>，卸载时移除。**CSS 只有这一份来源**（原生窗口用不到它）。
       ctx.effect(() => {
@@ -1557,23 +1597,29 @@ window.__ModuleLoader__.load({
       void runtime.load().then(() => runtime.connect())
 
       ctx.effect(() => () => runtime.dispose(), 'zhuang-fangyi-pet: runtime')
+    }
 
-      // 测试出口（与主题插件同样的做法：无头测试直接验这些纯函数）。
-      exports.__test = {
-        normalizePet,
-        clampPos,
-        readPos,
-        writePos,
-        POS_KEY,
-        STATE_TEXT,
-        DICT,
-        OVERLAY_ID,
-        ROUTE,
-        runtime,
-        Pet,
-        Section,
-        styleText
-      }
+    /**
+     * 测试出口（与主题插件同样的做法：无头测试直接验这些纯函数）。
+     *
+     * **在模块作用域定义，不在 `apply()` 里** —— 这样"没装配就渲染组件"这种
+     * 场景也能被测到（见 `requireRuntime()` 的说明）。`runtime` 用 getter 取，
+     * 因为它要到 `apply()` 之后才存在。
+     */
+    exports.__test = {
+      normalizePet,
+      clampPos,
+      readPos,
+      writePos,
+      POS_KEY,
+      STATE_TEXT,
+      DICT,
+      OVERLAY_ID,
+      ROUTE,
+      get runtime () { return pluginRuntime },
+      Pet,
+      Section,
+      styleText
     }
 
     exports.apply = apply

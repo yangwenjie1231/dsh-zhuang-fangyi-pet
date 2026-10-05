@@ -529,7 +529,7 @@ ok('Pet 在无素材时渲染为空（不出现"一张巨大的脸"）', () => {
   const { Pet, runtime } = l.exports.__test
   // 未加载素材 → display:none，且不渲染 img。
   l.react.resetHooks()
-  const tree = Pet({ runtime })
+  const tree = Pet({})
   assert.equal(tree.props.style.display, 'none')
   const imgs = tree.props.children.filter(c => c !== null && c.type === 'img')
   assert.equal(imgs.length, 0, '没素材时不该渲染 img')
@@ -558,7 +558,7 @@ ok('精灵图放在**裁剪视口**里，视口宽 = 单帧宽（否则整条带
   runtime.__state.snapshot = { petState: 'thinking', label: '正在思考…', bubble: null }
   runtime.__state.settings = normalizePet({ scale: 1 })
   l.react.resetHooks()
-  const tree = Pet({ runtime })
+  const tree = Pet({})
   const view = viewOf(tree)
   assert.ok(view !== undefined, '必须有裁剪视口')
   assert.equal(view.props.style.width, '256px', '视口宽度应是**单帧**宽，不是整条带')
@@ -580,7 +580,7 @@ ok('Pet 有素材时渲染精灵条带，宽度 = 帧宽 × 帧数', () => {
   runtime.__state.snapshot = { petState: 'thinking', label: '正在思考…', bubble: null }
   runtime.__state.settings = normalizePet({ scale: 1 })
   l.react.resetHooks()
-  const tree = Pet({ runtime })
+  const tree = Pet({})
   const img = firstChild(viewOf(tree))
   assert.equal(img.props.src, '/api/zhuang-fangyi/pet/art/thinking.png')
   assert.equal(img.props.style.height, '256px')
@@ -597,7 +597,7 @@ ok('缩放同时作用于视口与条带（不能只缩一个）', () => {
   runtime.__state.snapshot = { petState: 'idle', label: '', bubble: null }
   runtime.__state.settings = normalizePet({ scale: 1.5 })
   l.react.resetHooks()
-  const tree = Pet({ runtime })
+  const tree = Pet({})
   const view = viewOf(tree)
   const img = firstChild(view)
   assert.equal(view.props.style.width, `${Math.round(256 * 1.5)}px`)
@@ -613,7 +613,7 @@ ok('Pet 的状态经 data 属性暴露（便于样式与调试）', () => {
   runtime.__state.snapshot = { petState: 'working', label: 'x', bubble: null }
   runtime.__state.settings = normalizePet({})
   l.react.resetHooks()
-  const tree = Pet({ runtime })
+  const tree = Pet({})
   assert.equal(tree.props['data-zf-pet-state'], 'working')
 })
 
@@ -625,7 +625,7 @@ ok('clickThrough 开启时容器 pointer-events:none', () => {
   runtime.__state.snapshot = { petState: 'idle', label: '', bubble: null }
   runtime.__state.settings = normalizePet({ clickThrough: true })
   l.react.resetHooks()
-  const tree = Pet({ runtime })
+  const tree = Pet({})
   assert.equal(tree.props.style.pointerEvents, 'none')
 })
 
@@ -637,7 +637,7 @@ ok('bubble 关闭时不渲染气泡', () => {
   runtime.__state.snapshot = { petState: 'idle', label: '', bubble: { id: 1, kind: 'text', text: 'hi', image: null } }
   runtime.__state.settings = normalizePet({ bubble: false })
   l.react.resetHooks()
-  const tree = Pet({ runtime })
+  const tree = Pet({})
   const bubble = tree.props.children.find(c => c !== null && c.props?.['data-zf-pet-bubble-kind'] !== undefined)
   assert.equal(bubble, undefined, 'bubble 关闭时不该渲染')
 })
@@ -650,7 +650,7 @@ ok('bubbleImages 关闭时气泡只剩文字', () => {
   runtime.__state.snapshot = { petState: 'idle', label: '', bubble: { id: 1, kind: 'both', text: 'hi', image: 'bubble/01.png' } }
   runtime.__state.settings = normalizePet({ bubble: true, bubbleImages: false })
   l.react.resetHooks()
-  const tree = Pet({ runtime })
+  const tree = Pet({})
   const bubble = tree.props.children.find(c => c !== null && c.props?.['data-zf-pet-bubble-kind'] !== undefined)
   assert.ok(bubble !== undefined, '应渲染气泡')
   const imgs = bubble.props.children.filter(c => c !== null && c.type === 'img')
@@ -667,7 +667,7 @@ function renderBubble (bubble, opts = {}) {
   runtime.__state.snapshot = { petState: 'idle', label: '', bubble }
   runtime.__state.settings = normalizePet({ bubble: true, bubbleImages: true })
   l.react.resetHooks()
-  const tree = Pet({ runtime })
+  const tree = Pet({})
   const b = tree.props.children.find(c => c !== null && c.props?.['data-zf-pet-bubble-kind'] !== undefined)
   const img = b.props.children.find(c => c !== null && c.type === 'img')
   return { bubbleNode: b, img }
@@ -729,7 +729,7 @@ function renderPetWithSend (sendBlock) {
   runtime.__state.snapshot = { petState: 'idle', label: '', bubble: null, send: sendBlock }
   runtime.__state.settings = normalizePet({})
   l.react.resetHooks()
-  const tree = Pet({ runtime })
+  const tree = Pet({})
   const btn = tree.props.children.find(c => c !== null && c.props?.className === 'zf-pet__send-btn')
   return { tree, btn }
 }
@@ -766,7 +766,7 @@ ok('⭐ clickThrough 时不给 ✎（按钮会显示却点不动）', () => {
   runtime.__state.snapshot = { petState: 'idle', label: '', bubble: null, send: { available: true } }
   runtime.__state.settings = normalizePet({ clickThrough: true })
   l.react.resetHooks()
-  const tree = Pet({ runtime })
+  const tree = Pet({})
   const btn = tree.props.children.find(c => c !== null && c.props?.className === 'zf-pet__send-btn')
   assert.equal(btn, undefined, '穿透模式下桌宠收不到鼠标，按钮点了也没用')
 })
@@ -794,7 +794,7 @@ function renderBubbleWith (bubble, snapshotExtra = {}) {
   runtime.__state.snapshot = { petState: 'waiting', label: '', bubble, ...snapshotExtra }
   runtime.__state.settings = normalizePet({})
   l.react.resetHooks()
-  const tree = Pet({ runtime })
+  const tree = Pet({})
   const b = tree.props.children.find(c => c !== null && c.props?.['data-zf-pet-bubble-kind'] !== undefined)
   return b
 }
@@ -849,7 +849,7 @@ ok('⭐ 多个对话时输入条出现「发给」选择器，且选项用 title
   runtime.__state.settings = normalizePet({})
   l.react.resetHooks()
   // 打开输入条
-  const tree = Pet({ runtime })
+  const tree = Pet({})
   // 找 ✎ 按钮并触发
   const findPen = node => {
     if (node === null || node === undefined || typeof node !== 'object') return null
@@ -865,7 +865,7 @@ ok('⭐ 多个对话时输入条出现「发给」选择器，且选项用 title
   assert.ok(pen !== null, '有发送能力时应渲染 ✎')
   l.react.resetHooks()
   pen.props.onClick({ stopPropagation () {} })
-  const tree2 = Pet({ runtime })
+  const tree2 = Pet({})
   const sel = findPen(tree2)
   // 重新查找 select
   const findSelect = node => {
@@ -916,10 +916,10 @@ ok('⭐ 选择器按项目分组（<optgroup> 折叠，对话多了才翻得到�
     return null
   }
   l.react.resetHooks()
-  const pen = findPen(Pet({ runtime }))
+  const pen = findPen(Pet({}))
   l.react.resetHooks()
   pen.props.onClick({ stopPropagation () {} })
-  const tree2 = Pet({ runtime })
+  const tree2 = Pet({})
   const findSelect = node => {
     if (node === null || node === undefined || typeof node !== 'object') return null
     if (Array.isArray(node)) { for (const c of node) { const r = findSelect(c); if (r) return r } return null }
@@ -968,10 +968,10 @@ ok('⭐ 只有一个对话时不显示选择器（不占地方）', () => {
     return null
   }
   l.react.resetHooks()
-  const pen = findPen(Pet({ runtime }))
+  const pen = findPen(Pet({}))
   l.react.resetHooks()
   pen.props.onClick({ stopPropagation () {} })
-  const tree2 = Pet({ runtime })
+  const tree2 = Pet({})
   const findSelect = node => {
     if (node === null || node === undefined || typeof node !== 'object') return null
     if (Array.isArray(node)) { for (const c of node) { const r = findSelect(c); if (r) return r } return null }
@@ -1008,7 +1008,7 @@ ok('⭐ attention 在 clickThrough 下仍显示（它是通知，不是交互）
   }
   runtime.__state.settings = normalizePet({ clickThrough: true })
   l.react.resetHooks()
-  const tree = Pet({ runtime })
+  const tree = Pet({})
   const b = tree.props.children.find(c => c !== null && c.props?.['data-zf-pet-bubble-kind'] !== undefined)
   assert.ok(b !== undefined, '穿透只是不吃鼠标，通知必须仍可见 —— 否则"人不在 DSH 前"就错过了')
 })
@@ -1056,7 +1056,7 @@ function renderSection (settingsPatch = {}) {
   runtime.__state.snapshot = { petState: 'idle', label: '', bubble: null, nativeAvailable: false }
   runtime.__state.settings = normalizePet(settingsPatch)
   l.react.resetHooks()
-  return Section({ runtime })
+  return Section({ close () {} })
 }
 
 ok('⭐ 设置页能渲染（不抛错、不出空白）', () => {
@@ -1092,7 +1092,7 @@ ok('设置页在设置缺字段（旧设置文件）时也能渲染', () => {
   const { Section, runtime } = l.exports.__test
   runtime.__state.settings = { scale: 1, enabled: true } // 缺 activity/doubleClick 等新字段
   l.react.resetHooks()
-  const tree = Section({ runtime })
+  const tree = Section({ close () {} })
   assert.ok(tree !== null, '缺字段不该让设置页崩掉')
 })
 
@@ -1104,8 +1104,67 @@ ok('缺该状态的素材时回落到 idle', () => {
   runtime.__state.snapshot = { petState: 'sleeping', label: '', bubble: null }
   runtime.__state.settings = normalizePet({})
   l.react.resetHooks()
-  const tree = Pet({ runtime })
+  const tree = Pet({})
   assert.match(firstChild(viewOf(tree)).props.src, /idle\.png$/, '应回落 idle 素材')
+})
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * 7b. ⭐ 组件必须能接受**外壳真实的 props 形状**（真机炸过）
+ *
+ * 这一条是被真机事故逼出来的，且比第 7 节所有断言都重要：
+ *
+ * 外壳渲染 slot 条目时传的 props 是
+ *     `{ ...kit, ...entry.inject, ...slotInjected.props, ...ownerProps }`
+ * —— **没有 `runtime`**。`shell.overlay` 的 ownerProps 是 `{}`，
+ * `settings.section` 的是 `{ close }`。
+ *
+ * 而此前的测试一律写 `Pet({ runtime })`，那是**测试自己发明的形状**，
+ * 外壳永远不会这样调。于是两边都"通过"：测试绿、真机上条目一渲染就抛
+ * `TypeError`，被外壳 `SlotErrorBoundary` 接住并 `abdicate`（逐出单元格）。
+ * 实测 live slot 树里我们的 overlay 条目 `active: false`、其余 12 个全 `true`
+ * —— 正是"已被逐出"的证据。用户看到的则是桌宠不出现、设置页空白。
+ *
+ * 所以这里**只传外壳真会传的东西**，并额外断言"绝不依赖 props.runtime"。
+ * ──────────────────────────────────────────────────────────────────────── */
+section('7b. 外壳真实 props 形状（无 runtime）')
+
+ok('⭐ Pet 用外壳的真实调用形状（{}）渲染不抛错', () => {
+  const l = loadClient()
+  l.exports.apply(l.ctx)
+  const { Pet, runtime } = l.exports.__test
+  runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 1 } } }
+  runtime.__state.snapshot = { petState: 'idle', label: '', bubble: null }
+  runtime.__state.settings = normalizePet({})
+  l.react.resetHooks()
+  assert.doesNotThrow(() => Pet({}), '外壳传 {} —— 抛错就会被 abdicate 掉')
+})
+
+ok('⭐ Section 用外壳的真实调用形状（{ close }）渲染不抛错', () => {
+  const l = loadClient()
+  l.exports.apply(l.ctx)
+  const { Section } = l.exports.__test
+  l.react.resetHooks()
+  assert.doesNotThrow(() => Section({ close () {} }), 'settings.section 的 ownerProps 只有 close')
+})
+
+ok('⭐ 组件不读 props.runtime（传了就说明还在依赖它）', () => {
+  const l = loadClient()
+  l.exports.apply(l.ctx)
+  const { Pet } = l.exports.__test
+  // 传一个会抛错的 runtime：若组件仍在读它，这里就会炸。
+  const trap = new Proxy({}, {
+    get (_t, key) { throw new Error(`组件不该读 props.runtime.${String(key)}`) }
+  })
+  l.react.resetHooks()
+  assert.doesNotThrow(() => Pet({ runtime: trap }), 'props.runtime 必须完全不被读取')
+})
+
+ok('运行时未装配时给出可读错误，而不是 undefined.t', () => {
+  // 不调 apply()，直接渲染 —— 模拟"装配顺序错了"。
+  const l = loadClient()
+  const { Pet } = l.exports.__test
+  l.react.resetHooks()
+  assert.throws(() => Pet({}), /运行时尚未装配/, '错误信息应指出运行时没装配')
 })
 
 /* ══════════════════════════════════════════════════════════════════════════
