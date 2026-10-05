@@ -168,6 +168,45 @@ if ($bad -gt 0) {
   exit 1
 }
 
+# ── 4. 目标必须"完整"，且 exe 必须真能跑 ─────────────────────────────────
+#
+# 为什么加这道：部署是"先删后建"。若某次执行在删完之后被打断（文件锁、杀进程、
+# 磁盘抖动），目标目录会留下**半成品**：脚本看起来跑完了，但 `bin/`（或
+# `tools/`、`docs/`）没了。宿主的表现是 `started=false` —— **不抛错**，
+# 只是静默回落窗口内 overlay，于是"桌宠不出现"且毫无线索。
+# 实测踩过：真机上桌宠一直不出来，最后发现部署包里根本没有 bin/。
+$missing = @()
+foreach ($d in $Dirs) {
+  if ((Test-Path (Join-Path $Src $d)) -and -not (Test-Path (Join-Path $Dst $d))) {
+    $missing += "$d\"
+  }
+}
+if (-not $SkipExe -and (Test-Path (Join-Path $Src 'bin')) -and -not (Test-Path (Join-Path $Dst 'bin'))) {
+  $missing += 'bin\'
+}
+foreach ($f in $Files) {
+  if (-not (Test-Path (Join-Path $Dst $f))) { $missing += $f }
+}
+if ($missing.Count -gt 0) {
+  Write-Host "`n❌ 目标缺东西：$($missing -join ', ')" -ForegroundColor Red
+  Write-Host "   目标目录处于**半成品**状态（多半是上一次部署被中断）。" -ForegroundColor Red
+  Write-Host "   请重跑本脚本；仍失败就先跑 tools\build-pet.ps1 再重试。" -ForegroundColor Yellow
+  exit 1
+}
+
+if (-not $SkipExe) {
+  $exePath = Join-Path $Dst 'bin\dsh-zhuang-fangyi-pet.exe'
+  # 真跑一次自检：文件在 ≠ 能用（可能被截断/杀软隔离）。
+  $probe = & $exePath --selftest 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "`n❌ 部署后的 exe 自检失败（EXIT=$LASTEXITCODE）——文件可能被截断或隔离。" -ForegroundColor Red
+    Write-Host $probe
+    exit 1
+  }
+  $verdict = ($probe -split "`n" | Select-String '自检全部通过|自检存在失败' | Select-Object -Last 1)
+  Write-Host ("  exe 自检    {0}" -f ($verdict -replace '\s+', ' ').Trim()) -ForegroundColor Green
+}
+
 Write-Host "`n部署完成，全部一致。" -ForegroundColor Green
 Write-Host "重载插件：plugin_manager set_plugin target=include:zhuang-fangyi-pet enabled=false → true"
 Write-Host "探活：Invoke-WebRequest http://127.0.0.1:<port>/api/zhuang-fangyi/pet/diag"

@@ -30,6 +30,7 @@
     "pet",
     "art",
     "locale",
+    "bin",
     "README.md"
   ],
   "engines": {
