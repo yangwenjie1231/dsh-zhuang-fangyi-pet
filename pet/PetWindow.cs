@@ -530,6 +530,14 @@ namespace DshZhuangFangyiPet
             PetLog.Info("点击穿透 = " + (on ? "开（透明处穿透）" : "关（整窗可点可拖）"));
         }
 
+        /// <summary>
+        /// 本体显隐变化（true=显示 / false=隐藏）。
+        ///
+        /// **为什么需要**：气泡是**另一个窗口**，本体 Hide() 不会带走它 ——
+        /// 结果就是"隐藏了桌宠，旁边还挂着一个气泡"。Program 用它联动气泡的显隐。
+        /// </summary>
+        public Action<bool> VisibilityChanged = delegate { };
+
         public void SetBubbleVisibleState(bool visible)
         {
             if (visible) ShowPet(); else HidePet();
@@ -539,12 +547,16 @@ namespace DshZhuangFangyiPet
         {
             Hide();
             _timer.Stop();
+            // 联动：本体藏了，气泡必须一起藏（它是独立窗口，不会自动跟随）。
+            // 通知放在最后：先让本体真正进入隐藏态，订阅方读 IsVisible 才是对的。
+            try { VisibilityChanged(false); } catch { }
         }
 
         public void ShowPet()
         {
             Show();
             RestartTimer();
+            try { VisibilityChanged(true); } catch { }
         }
 
         public void ToggleVisible()

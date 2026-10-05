@@ -200,6 +200,10 @@ namespace DshZhuangFangyiPet
 
         private long _lastRev = -1;
         private long _lastBubbleId = -1;
+        /// <summary>当前实际显示中的气泡 id（-1 = 没显示）。隐藏/重放时用它判断。</summary>
+        private long _shownBubbleId = -1;
+        /// <summary>最近一次快照（桌宠重新显示时用它重放当前气泡）。</summary>
+        private PetSnapshot _lastSnapshot;
         private bool _bubbleOn;
         private bool _previewMode;
         private int _previewIndex;
@@ -302,6 +306,25 @@ namespace DshZhuangFangyiPet
                 PetLog.Info("托盘：主题 → " + _settingsTheme + "（生效深色=" + (darkNow ? "1" : "0") + "）");
             };
             _tray.ToggleVisible = delegate { _win.ToggleVisible(); };
+            // ⭐ 本体显隐 → 气泡联动。
+            // 气泡是独立窗口，本体 Hide() 不会带走它；不联动就会出现
+            // "桌宠隐藏了、旁边还挂着一个聊天气泡"。
+            _win.VisibilityChanged = delegate(bool visible)
+            {
+                try
+                {
+                    if (!visible)
+                    {
+                        _bubble.HideNow();
+                    }
+                    else if (_bubbleOn && _lastBubbleId != _shownBubbleId)
+                    {
+                        // 重新显示时把"当前该显示的气泡"补回来（隐藏期间收到的气泡不会自己重现）。
+                        ReplayCurrentBubble();
+                    }
+                }
+                catch (Exception ex) { PetLog.Warn("气泡联动失败: " + PetLog.Describe(ex)); }
+            };
             _tray.SetClickThrough = delegate(bool on) { _win.SetClickThrough(on); };
             _tray.SetTopmost = delegate(bool on) { _win.SetTopmost(on); _tray.SetTopmostCheck(on); };
             _tray.SetScale = delegate(double s) { _win.SetScale(s); _win.ReclampPosition(false); };
@@ -373,8 +396,67 @@ namespace DshZhuangFangyiPet
             ApplySnapshot(snap);
         }
 
+        /// <summary>
+        /// 显示快照里的气泡（取图 → 主题选图 → 兜底 → Show）。
+        ///
+        /// 抽成方法的原因：**隐藏桌宠再显示时要"重放"当前气泡**。
+        /// 气泡是独立窗口，本体隐藏时它必须一起藏；重新显示时若只 Show 本体，
+        /// 那个气泡就再也不会出现（直到下一个新气泡 id 到来）—— 看起来像"气泡丢了"。
+        /// </summary>
+        private void ShowBubbleFrom(PetSnapshot snap)
+        {
+            if (snap == null || snap.Bubble == null) return;
+            _lastBubbleId = snap.Bubble.Id;
+            _shownBubbleId = snap.Bubble.Id;
+            BitmapSource img = null;
+
+            // 契约 §4 fileDark：只有渲染方知道实际主题 → exe 自己判深色选图。
+            // task-6 优先级：argv --dark 0|1 > settings.theme > 注册表。
+            // task-8：attention 气泡是纯文本提醒，不需要贴图（跳过取图省一次下载）。
+            bool dark = PetTheme.ResolveIsDark(_opt.DarkOverride, _settingsTheme);
+            string rel = snap.Bubble.Kind == "attention" ? null :
+                PetTheme.SelectBubbleImageRel(
+                    snap.Bubble.WantsImage, snap.Bubble.Image, snap.Bubble.ImageDark, dark);
+
+            if (rel != null)
+            {
+                try { img = _store.GetBubbleImage(rel); }
+                catch (Exception ex) { PetLog.Warn("气泡图加载失败: " + PetLog.Describe(ex)); }
+
+                // 深色变体取不到（404/断网）→ 回落浅色原图，尽量还显示"这句话"；
+                // 再不行才走随机气泡池（原有兜底，保持不变）。
+                if (img == null && rel != snap.Bubble.Image && !string.IsNullOrEmpty(snap.Bubble.Image))
+                {
+                    PetLog.Warn("深色变体取图失败，回落浅色原图: " + rel);
+                    try { img = _store.GetBubbleImage(snap.Bubble.Image); } catch { }
+                }
+                if (img == null)
+                {
+                    string alt = _store.RandomBubbleFile();
+                    if (alt != null) img = _store.GetBubbleImage(alt);
+                }
+                PetLog.Info("气泡取图 rel=" + rel + " dark=" + (dark ? "1" : "0") +
+                            (img != null ? " → 解码成功" : " → 解码失败（走兜底）") +
+                            " opaque=" + (snap.Bubble.Opaque ? "1" : "0") +
+                            " theme=" + _settingsTheme);
+            }
+
+            try { _bubble.Show(snap.Bubble, img); }
+            catch (Exception ex) { PetLog.Warn("气泡显示失败: " + PetLog.Describe(ex)); }
+        }
+
+        /// <summary>本体重新显示后，把"当前仍该显示的气泡"补回来。</summary>
+        private void ReplayCurrentBubble()
+        {
+            if (!_bubbleOn) return;
+            PetSnapshot snap = _lastSnapshot;
+            if (snap == null || snap.Bubble == null) return;
+            ShowBubbleFrom(snap);
+            PetLog.Info("桌宠重新显示 → 重放气泡 id=" + snap.Bubble.Id);
+        }
         private void ApplySnapshot(PetSnapshot snap)
         {
+            _lastSnapshot = snap;   // 供桌宠重新显示时重放当前气泡
             if (snap.Rev >= 0)
             {
                 long prev = Interlocked.Read(ref _lastRev);
@@ -404,42 +486,13 @@ namespace DshZhuangFangyiPet
 
             if (_bubbleOn && snap.Bubble != null && snap.Bubble.Id > _lastBubbleId)
             {
-                _lastBubbleId = snap.Bubble.Id;
-                BitmapSource img = null;
-
-                // 契约 §4 fileDark：只有渲染方知道实际主题 → exe 自己判深色选图。
-                // task-6 优先级：argv --dark 0|1 > settings.theme > 注册表。
-                // task-8：attention 气泡是纯文本提醒，不需要贴图（跳过取图省一次下载）。
-                bool dark = PetTheme.ResolveIsDark(_opt.DarkOverride, _settingsTheme);
-                string rel = snap.Bubble.Kind == "attention" ? null :
-                    PetTheme.SelectBubbleImageRel(
-                        snap.Bubble.WantsImage, snap.Bubble.Image, snap.Bubble.ImageDark, dark);
-
-                if (rel != null)
-                {
-                    try { img = _store.GetBubbleImage(rel); }
-                    catch (Exception ex) { PetLog.Warn("气泡图加载失败: " + PetLog.Describe(ex)); }
-
-                    // 深色变体取不到（404/断网）→ 回落浅色原图，尽量还显示"这句话"；
-                    // 再不行才走随机气泡池（原有兜底，保持不变）。
-                    if (img == null && rel != snap.Bubble.Image && !string.IsNullOrEmpty(snap.Bubble.Image))
-                    {
-                        PetLog.Warn("深色变体取图失败，回落浅色原图: " + rel);
-                        try { img = _store.GetBubbleImage(snap.Bubble.Image); } catch { }
-                    }
-                    if (img == null)
-                    {
-                        string alt = _store.RandomBubbleFile();
-                        if (alt != null) img = _store.GetBubbleImage(alt);
-                    }
-                    PetLog.Info("气泡取图 rel=" + rel + " dark=" + (dark ? "1" : "0") +
-                                (img != null ? " → 解码成功" : " → 解码失败（走兜底）") +
-                                " opaque=" + (snap.Bubble.Opaque ? "1" : "0") +
-                                " theme=" + _settingsTheme);
-                }
-
-                try { _bubble.Show(snap.Bubble, img); }
-                catch (Exception ex) { PetLog.Warn("气泡显示失败: " + PetLog.Describe(ex)); }
+                ShowBubbleFrom(snap);
+            }
+            // 快照里没有气泡（宿主已收起）→ 本地也收起，别让旧气泡挂着。
+            else if (_bubbleOn && snap.Bubble == null && _shownBubbleId >= 0)
+            {
+                try { _bubble.HideNow(); } catch { }
+                _shownBubbleId = -1;
             }
         }
 

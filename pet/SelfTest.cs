@@ -987,6 +987,23 @@ namespace DshZhuangFangyiPet
                 bool btnLingers = win.DiagSendBtnLingers();
                 Check(btnLingers, "✎ 按钮离开桌宠后延迟隐藏（给手移到按钮的时间）",
                       btnLingers ? "有隐藏宽限期" : "MouseLeave 立即隐藏 → 够不着");
+                // ⭐ 隐藏桌宠时，气泡窗必须一起隐藏（它是独立窗口，不会自动跟随）。
+                // 这是一条被真实反馈换来的断言："隐藏了桌宠，旁边还挂着一个聊天气泡"。
+                bool visCbFired = false;
+                bool visCbValue = true;
+                Action<bool> probe = delegate(bool v) { visCbFired = true; visCbValue = v; };
+                win.VisibilityChanged = probe;
+                win.HidePet();
+                Pump(120);
+                bool hideNotified = visCbFired && !visCbValue;
+                Check(hideNotified, "隐藏桌宠会通知联动（气泡跟着藏）",
+                      hideNotified ? "VisibilityChanged(false) 已发出" : "隐藏时没有通知 → 气泡会留在屏幕上");
+                win.ShowPet();
+                Pump(120);
+                bool showNotified = visCbFired && visCbValue;
+                Check(showNotified, "重新显示桌宠也会通知（气泡可重放）",
+                      showNotified ? "VisibilityChanged(true) 已发出" : "显示时没有通知");
+                win.VisibilityChanged = delegate { };
 
                 // ⭐ 深浅色主题：气泡外壳必须真的换色（原先只换贴纸图，白框在深色桌面上刺眼）。
                 PetTheme.BubblePalette darkPal = PetTheme.BubblePalette.For(true);
