@@ -136,6 +136,39 @@ namespace DshZhuangFangyiPet
                 return rg != null && rg.RadiusX > 0.5;
             }
         }
+        /// <summary>
+        /// 自检诊断用：人为把 Border 撑大（模拟投影/内边距造成的外扩）。
+        /// 用途：验证"裁剪跟着图片走"—— 自检窗口没有真实投影，
+        /// `ActualWidth` 恰好等于图片尺寸，不制造差异就区分不出 bug。
+        /// </summary>
+        internal void DiagSpreadBorder(double pad)
+        {
+            try
+            {
+                _border.Padding = new Thickness(pad, pad, pad, pad);
+                _border.UpdateLayout();
+            }
+            catch { }
+        }
+        /// <summary>自检诊断用：图片元素的实际渲染尺寸（裁剪基准应当是它）。</summary>
+        internal void DiagImageSize(out double w, out double h)
+        {
+            w = _image == null ? 0 : _image.ActualWidth;
+            h = _image == null ? 0 : _image.ActualHeight;
+            if (w <= 0 || h <= 0)
+            {
+                Size d = _image == null ? new Size(0, 0) : _image.DesiredSize;
+                w = d.Width; h = d.Height;
+            }
+        }
+        /// <summary>自检诊断用：当前圆角裁剪的尺寸与半径（判断裁剪是否真的按有效尺寸落下）。</summary>
+        internal void DiagClipGeometry(out double w, out double h, out double r)
+        {
+            w = 0; h = 0; r = 0;
+            RectangleGeometry rg = _border == null ? null : _border.Clip as RectangleGeometry;
+            if (rg == null) return;
+            w = rg.Rect.Width; h = rg.Rect.Height; r = rg.RadiusX;
+        }
         /// <summary>自检诊断用：喂入本体尺寸后按比例算出的上限。</summary>
         internal double DiagCapForPet(int frameW, int frameH, double dpi, double scale)
         {
@@ -335,6 +368,10 @@ namespace DshZhuangFangyiPet
             _root.Children.Add(_border);
             Content = _root;
 
+            // 构造期就挂上尺寸监听：`SizeToContent` 的窗口会在后续布局中改尺寸，
+            // 满幅贴纸的圆角裁剪必须跟着重算（只在 opaque 模式下生效，见回调）。
+            _border.SizeChanged += OnChromeSizeChanged;
+
             // 用基准值把外观尺寸初始化好（见字段处的注释：漏了这步会让图片上限停在 0）。
             UpdateMetrics();
 
@@ -477,6 +514,14 @@ namespace DshZhuangFangyiPet
 
             if (!IsVisible) Show();
             UpdateLayout();
+            // ⚠️ 排布完成后必须**按真实尺寸重刷一次圆角裁剪**。
+            //
+            // `ApplyBubbleChrome` 在 `UpdateLayout` **之前**执行（443 行），
+            // 那时 `_border.ActualWidth` 还是 0，只能用 `DesiredSize` 兜底；
+            // 而 `SizeToContent` 的窗口尺寸要到这一轮布局后才真正确定 ——
+            // 少了这一步，满幅贴纸的圆角裁剪会按错误尺寸落下，
+            // 表现就是"第一次启动那张图没有圆角"（用户实测反馈）。
+            if (_opaquePresentation) UpdateOpaqueClip();
             PlaceNearPet();
 
             FadeIn();
@@ -564,17 +609,35 @@ namespace DshZhuangFangyiPet
 
         private void OnChromeSizeChanged(object sender, SizeChangedEventArgs e)
         {
-            UpdateOpaqueClip();
+            // 只在满幅贴纸模式下重刷 —— 普通气泡的尺寸变化不该给它加裁剪。
+            if (_opaquePresentation) UpdateOpaqueClip();
         }
 
         /// <summary>按当前实际尺寸刷新圆角裁剪矩形。</summary>
         private void UpdateOpaqueClip()
         {
-            double w = _border.ActualWidth, h = _border.ActualHeight;
+            // ⚠️ 裁剪矩形必须用**图片的实际渲染尺寸**，不能用 `_border.ActualWidth`。
+            //
+            // 实测（日志）：`_border.ActualWidth=134.7`，而贴纸只有 `119.3` 宽 ——
+            // 因为 `_border` 上挂了 `DropShadowEffect`，`ActualWidth` 把**投影的
+            // 外扩量**也算进去了。用 134.7 去裁 119.3 的图，圆角就落在图片**外面**，
+            // 四角仍是直角 —— 这正是"第一次启动那张图没有圆角"的真因
+            //（我先前误判成时序问题，加了"布局后重刷"其实治不了它）。
+            //
+            // `_image` 是真正承载贴纸的元素，用它的尺寸才准。
+            double w = 0, h = 0;
+            if (_image != null)
+            {
+                w = _image.ActualWidth; h = _image.ActualHeight;
+                if (w <= 0 || h <= 0)
+                {
+                    Size wantImg = _image.DesiredSize;
+                    w = wantImg.Width; h = wantImg.Height;
+                }
+            }
             if (w <= 0 || h <= 0)
             {
-                // 还没完成排布（`Show` 里 ApplyBubbleChrome 早于 UpdateLayout）——
-                // 用测量出来的期望尺寸兜底，否则这一步会被静默跳过、圆角不生效。
+                // 图片还没排布：退回 Border 的期望尺寸（不含投影，比 ActualWidth 准）
                 Size want = _border.DesiredSize;
                 w = want.Width; h = want.Height;
             }
@@ -584,6 +647,9 @@ namespace DshZhuangFangyiPet
             double limit = Math.Min(w, h) / 2;
             if (r > limit) r = limit;
             _border.Clip = new RectangleGeometry(new Rect(0, 0, w, h), r, r);
+            // 保留一行精简日志：圆角失效这类问题**只有运行期真值能定位**
+            //（我先前靠读代码推理，误判成时序问题，白改一轮）。
+            PetLog.Info("贴纸圆角裁剪 w=" + w.ToString("0.#") + " r=" + r.ToString("0.#"));
         }
 
         /// <summary>清掉满幅贴纸的裁剪（回到透明抠图气泡时要还原，气泡窗是复用的）。</summary>

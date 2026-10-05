@@ -812,6 +812,99 @@ namespace DshZhuangFangyiPet
                   "150%×0.8 → " + (ratio * 100).ToString("0") + "%；100%×1.0 → " + (ratio2 * 100).ToString("0") + "%");
             try { sizeProbe.ForceClose(); } catch { }
 
+            // ⭐⭐ 裁剪矩形必须**等于图片尺寸**，不能等于 Border 尺寸。
+            //
+            // 真因（日志实测）：`_border` 挂了 `DropShadowEffect`，`ActualWidth`
+            // 把投影外扩量也算进去 —— 修复前 `actual=134.7x119.3` 而贴纸只有
+            // `119.3x119.3`。用 134.7 去裁 119.3 的图，圆角落在图片**外面**，
+            // 四角仍是直角 → 用户看到"第一次启动那张图没有圆角"。
+            //
+            // 我先前误判成"时序问题"（加了布局后重刷，治不了它）——
+            // 是**把运行期真值写进日志**才定位到的，不是靠读代码推理。
+            PetBubble sizeClip = new PetBubble();
+            PetBubbleInfo scb = new PetBubbleInfo();
+            scb.Id = 90001;
+            scb.Kind = "image";
+            scb.Opaque = true;
+            scb.DurationMs = 60000;
+            BitmapSource simg = MakeSolidBubbleBitmap(120);
+            sizeClip.Show(scb, simg);
+            Pump(300);
+            double clipW, clipH, clipR;
+            sizeClip.DiagClipGeometry(out clipW, out clipH, out clipR);
+            double imgW, imgH;
+            sizeClip.DiagImageSize(out imgW, out imgH);
+            // 裁剪尺寸必须贴近图片尺寸（容 1px 舍入），而不是 Border（含投影，会大 ~15px）
+            bool clipMatchesImage = imgW > 0 && Math.Abs(clipW - imgW) <= 1.5 &&
+                                    Math.Abs(clipH - imgH) <= 1.5;
+            Check(clipMatchesImage,
+                  "⭐ 圆角裁剪用图片尺寸（不是含投影的 Border 尺寸）",
+                  "裁剪=" + clipW.ToString("0.#") + "x" + clipH.ToString("0.#") +
+                  " 图片=" + imgW.ToString("0.#") + "x" + imgH.ToString("0.#") +
+                  (clipMatchesImage ? "（吻合）" : "（偏差过大 → 圆角会落在图外）"));
+
+            // ⭐⭐ 更强的一条：**人为把 Border 撑大**（模拟投影外扩），
+            // 裁剪尺寸必须**仍然跟着图片走**。
+            //
+            // 为什么需要它：上面那条在自检里区分不出 bug —— 自检窗口没有真实投影外扩，
+            // `_border.ActualWidth` 恰好等于图片尺寸，所以"用 Border 尺寸裁"也能通过
+            //（回退验证时确认过：改回 Border 基准，断言照样绿）。
+            // 这里直接把 Border 的 Padding 撑大 30px 来制造差异，
+            // 于是"用图片尺寸"与"用 Border 尺寸"必然分道扬镳。
+            PetBubble spread = new PetBubble();
+            PetBubbleInfo spb = new PetBubbleInfo();
+            spb.Id = 91001;
+            spb.Kind = "image";
+            spb.Opaque = true;
+            spb.DurationMs = 60000;
+            BitmapSource spimg = MakeSolidBubbleBitmap(120);
+            spread.Show(spb, spimg);
+            Pump(250);
+            double beforeW, beforeH, beforeR, beforeImgW, beforeImgH;
+            spread.DiagClipGeometry(out beforeW, out beforeH, out beforeR);
+            spread.DiagImageSize(out beforeImgW, out beforeImgH);
+            spread.DiagSpreadBorder(30);   // 撑大 Border（模拟投影/内边距造成的外扩）
+            Pump(250);
+            double afterW, afterH, afterR, afterImgW, afterImgH;
+            spread.DiagClipGeometry(out afterW, out afterH, out afterR);
+            spread.DiagImageSize(out afterImgW, out afterImgH);
+            // Border 撑大了，但**图片没变** → 裁剪也必须没变（跟着图片走）。
+            bool followsImage = Math.Abs(afterImgW - beforeImgW) <= 1.5 &&
+                                Math.Abs(afterW - beforeW) <= 1.5;
+            Check(followsImage,
+                  "⭐⭐ Border 被撑大时裁剪仍跟图片走（投影外扩不影响圆角）",
+                  "撑大前 裁剪=" + beforeW.ToString("0.#") + " 图片=" + beforeImgW.ToString("0.#") +
+                  " → 撑大后 裁剪=" + afterW.ToString("0.#") + " 图片=" + afterImgW.ToString("0.#"));
+            try { spread.ForceClose(); } catch { }
+
+            try { sizeClip.ForceClose(); } catch { }
+            // ⭐⭐ **新建窗口**首次显示满幅贴纸时圆角必须生效（"第一次启动没圆角"）。
+            //
+            // 这条是被真实反馈逼出来的：`ApplyBubbleChrome` 在 `UpdateLayout` **之前**
+            // 执行，那时 `_border.ActualWidth` 还是 0；而 `SizeToContent` 的真实尺寸
+            // 要到布局后才确定。少了"布局后重刷"，首帧的裁剪会按错误尺寸落下 ——
+            // 用户看到的就是"第一次启动那张图没有圆角"。
+            //
+            // 关键点：必须用**全新构造**的气泡（复用的那只会残留上次的裁剪，
+            // 掩盖首帧问题 —— 这正是原断言漏掉它的原因）。
+            PetBubble freshOpaque = new PetBubble();
+            PetBubbleInfo fob = new PetBubbleInfo();
+            fob.Id = 89001;
+            fob.Kind = "image";
+            fob.Opaque = true;
+            fob.DurationMs = 60000;
+            BitmapSource fimg = MakeSolidBubbleBitmap(64);
+            freshOpaque.Show(fob, fimg);
+            Pump(300);
+            bool freshClipped = freshOpaque.DiagOpaqueClipped;
+            double cw, ch, cr;
+            freshOpaque.DiagClipGeometry(out cw, out ch, out cr);
+            Check(freshClipped && cw > 0 && ch > 0 && cr > 0.5,
+                  "⭐ 新建气泡首帧就裁圆角（尺寸/半径都有效）",
+                  "裁剪=" + (freshClipped ? "有" : "无") +
+                  " 尺寸=" + cw.ToString("0") + "x" + ch.ToString("0") +
+                  " 半径=" + cr.ToString("0.#"));
+            try { freshOpaque.ForceClose(); } catch { }
             // ⭐ 满幅贴纸必须有圆角（用户反馈"有的气泡没有圆角"）。
             // 那批 F4 贴纸是方形硬边（实测四角 alpha=255），原先 CornerRadius(0) 且无裁剪
             // → 直角方块直接贴桌面。Border.CornerRadius 不裁子元素，必须挂 Clip。
