@@ -264,6 +264,85 @@ await ok('⭐ 能力不可用时 /pet/send 返回 503 而不是假装成功', as
   assert.equal(body.error, 'unavailable')
 })
 
+/* ── 会话选择器：给"发给哪个对话"提供可读名字（契约 §2 sessions[].title）───── */
+
+await ok('⭐ 桩宿主没装配 sessionController 时，sessions 仍列出状态机记的会话', async () => {
+  // 关键：**不能因为拿不到标题就什么都不给** —— 至少让用户能按"哪个在忙"选。
+  const r = await get('/api/zhuang-fangyi/pet/state')
+  const snap = JSON.parse(r.body)
+  assert.ok(Array.isArray(snap.sessions), 'sessions 必须是数组')
+  for (const s of snap.sessions) {
+    assert.equal(typeof s.sessionId, 'string', 'sessionId 必须可发给 /pet/send')
+    assert.ok(typeof s.title === 'string' && s.title !== '',
+      'title 必须**一定有值**（最差是 id 前缀）—— 否则选择器只能显示乱码')
+    assert.ok(s.sessionId !== 'unknown', '绝不能把 unknown 列为可发会话')
+  }
+})
+
+await ok('⭐ 有 sessionController 时：list() 的标题进快照，指定会话能投递', async () => {
+  // 用**第二个装配**（带桩 sessionController）验证整条链路：
+  // list() 提供标题 → 快照 sessions[].title → 按 sessionId 发送 → prompt 收到对的会话。
+  const local = makeCtx(makeWebServer())
+  const prompts = []
+  local.provide('sessionController', {
+    async list () {
+      return {
+        items: [
+          // 有标题 → 用标题
+          { sessionId: 's-titled', updatedAt: 300, running: true, cwd: 'D:\\work\\alpha', projections: { values: { title: '桌宠开发' } } },
+          // 无标题、有 cwd → 用目录名（照抄 DSH 的 displayTitleOf 回退）
+          { sessionId: 's-cwd-only', updatedAt: 200, running: false, cwd: 'D:\\work\\beta' },
+          // 都没有 → 用 id 前缀
+          { sessionId: 's-bare-1234567890', updatedAt: 100, running: false }
+        ]
+      }
+    },
+    async prompt (req) { prompts.push(req); return { accepted: true } }
+  })
+  // 与文件顶部同一导入方式（模块命名空间直接有 apply，没有 default 包装）。
+  const petIndex = await import(`file://${path.join(ROOT, 'index.js').replace(/\\/g, '/')}`)
+  petIndex.apply(toCordisLike(local, ['webServer']), {})
+  const ws = local.__services.get('webServer')
+  // 桩 webServer 要显式 listen 才会分配端口（否则 port=0，fetch 必然失败）。
+  await ws.listen()
+  // 等一次广播把 list() 的结果吃进缓存
+  for (const f of (local.__handlers.get('agent/status') ?? [])) {
+    f({ type: 'agent/status', sessionId: 's-titled', status: 'running' })
+  }
+  await new Promise(r => setTimeout(r, 250))
+
+  const base = `http://127.0.0.1:${ws.port}`
+  const state = await fetch(`${base}/api/zhuang-fangyi/pet/state`).then(r => r.json())
+  const byId = new Map((state.sessions ?? []).map(s => [s.sessionId, s]))
+  assert.ok(byId.has('s-titled'), '状态机记的会话必须在列表里')
+  assert.equal(byId.get('s-titled').title, '桌宠开发', '有标题就用标题')
+  assert.equal(byId.get('s-cwd-only')?.title, 'beta', '没标题用工作目录名')
+  assert.equal(byId.get('s-bare-1234567890')?.title, 's-bare-1', '都没有用 id 前缀')
+
+  // 指定会话发送 → prompt 必须收到**那个**会话
+  const okRes = await fetch(`${base}/api/zhuang-fangyi/pet/send`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text: '发给 titled', sessionId: 's-titled' })
+  })
+  assert.equal(okRes.status, 200, `期望 200，实际 ${okRes.status}`)
+  assert.equal(prompts.length, 1, '应恰好投递一次')
+  assert.equal(prompts[0].sessionId, 's-titled', '必须投给指定的会话，不能改投')
+
+  // 指定不存在的会话 → 409（**绝不静默改投别的会话**）
+  const badRes = await fetch(`${base}/api/zhuang-fangyi/pet/send`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text: '你好', sessionId: 'session-does-not-exist' })
+  })
+  assert.equal(badRes.status, 409, `期望 409，实际 ${badRes.status}`)
+  assert.equal((await badRes.json()).error, 'no-session')
+  assert.equal(prompts.length, 1, '被拒的发送不能真的投递出去')
+
+  for (const dispose of local.__effects) {
+    if (typeof dispose === 'function') assert.doesNotThrow(() => dispose())
+  }
+  // 必须关掉这个桩 webServer：它真的在 listen，不关会让测试进程挂着不退出。
+  await ws.close()
+})
 await ok('⭐ POST /pet/settings 是合并语义：裸 {scale} 不许抹掉其它设置', async () => {
   // 对应一个实测抓到的数据丢失缺陷：exe 滚轮缩放只 POST {"scale": n}，
   // 若 Host 按整体替换处理（按默认值归一化），用户的透明度/穿透/主题/双击会被全抹回默认。

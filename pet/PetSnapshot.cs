@@ -34,6 +34,10 @@ namespace DshZhuangFangyiPet
         public string SessionId;
         public string State = "idle";
         public int ToolsInFlight;
+        /// <summary>契约 §2 v5：可读名字（Host 已回退：标题 → 目录名 → id 前缀）。旧快照缺省 = null。</summary>
+        public string Title;
+        /// <summary>契约 §2 v5：是否在跑。旧快照缺省 = false。</summary>
+        public bool Running;
     }
 
     /// <summary>
@@ -245,6 +249,9 @@ namespace DshZhuangFangyiPet
                     si.SessionId = sv.Str("sessionId", "");
                     si.State = PetJson.NormalizeState(sv.Str("state", "idle"));
                     si.ToolsInFlight = sv.Int("toolsInFlight", 0);
+                    // v5：标题与运行位（旧 Host 没有这两个字段 → null/false，向后兼容）。
+                    si.Title = sv.Str("title", null);
+                    si.Running = sv.Bool("running", false);
                     s.Sessions.Add(si);
                 }
             }

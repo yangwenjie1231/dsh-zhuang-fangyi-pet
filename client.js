@@ -151,6 +151,7 @@ window.__ModuleLoader__.load({
         sendTitle: '发消息给庄方宜',
         sendPlaceholder: '说点什么…',
         sendTip: 'Enter 发送 · Esc 收起',
+        sendTo: '发给',
         sending: '发送中…',
         activity: '活跃度',
         activityQuiet: '安静（只提醒要紧的事）',
@@ -207,6 +208,7 @@ window.__ModuleLoader__.load({
         sendTitle: 'Send a message',
         sendPlaceholder: 'Say something…',
         sendTip: 'Enter to send · Esc to close',
+        sendTo: 'To',
         sending: 'Sending…',
         activity: 'Liveliness',
         activityQuiet: 'Quiet (only important notices)',
@@ -439,6 +441,15 @@ window.__ModuleLoader__.load({
       const [sending, setSending] = useState(false)
       const [sendError, setSendError] = useState(null)
       const sendTextRef = useRef('')
+      // 发给哪个对话：默认第一个（Host 已把"在跑的"排前面）。
+      const [targetSessionId, setTargetSessionId] = useState(null)
+      const sessionChoices = Array.isArray(snapshot?.sessions)
+        ? snapshot.sessions.filter(s => s && s.sessionId && s.sessionId !== 'unknown')
+        : []
+      // 选中的会话若已消失（对话结束了），自动落到第一个 —— 否则会发向一个不存在的会话。
+      const effectiveTargetId = sessionChoices.some(s => s.sessionId === targetSessionId)
+        ? targetSessionId
+        : (sessionChoices[0]?.sessionId ?? null)
 
       const submitSend = useCallback(async () => {
         const text = String(sendTextRef.current ?? '').trim()
@@ -450,7 +461,7 @@ window.__ModuleLoader__.load({
         setSending(true)
         setSendError(null)
         try {
-          await runtime.sendMessage?.(text)
+          await runtime.sendMessage?.(text, effectiveTargetId)
           // 发出去就收起来：输入框是快捷入口，不是常驻编辑器。
           setComposerOpen(false)
           sendTextRef.current = ''
@@ -692,6 +703,21 @@ window.__ModuleLoader__.load({
         // ── 输入条：点 ✎ 后出现，Enter 发送、Esc 收起 ────────────────────────
         composerOpen
           ? h('div', { key: 'composer', className: 'zf-pet__composer' }, [
+              // 发给哪个对话：多个对话时才有意义，只有一个就不占地方。
+              sessionChoices.length > 1
+                ? h('div', { key: 'target', className: 'zf-pet__composer-target' }, [
+                    h('span', { key: 'label', className: 'zf-pet__composer-target-label' }, t('sendTo')),
+                    h('select', {
+                      key: 'sel',
+                      className: 'zf-pet__composer-select',
+                      value: effectiveTargetId ?? '',
+                      onChange: event => setTargetSessionId(event.target.value)
+                    }, sessionChoices.map(s =>
+                      h('option', { key: s.sessionId, value: s.sessionId },
+                        (s.running === true ? '● ' : '') + (s.title || s.sessionId))
+                    ))
+                  ])
+                : null,
               h('input', {
                 key: 'input',
                 className: 'zf-pet__composer-input',
@@ -1151,7 +1177,14 @@ window.__ModuleLoader__.load({
   box-shadow:0 6px 18px rgba(0,0,0,.18);
   pointer-events:auto;
 }
-.zf-pet__composer-input{
+.zf-pet__composer-target{ display:flex; align-items:center; gap:6px; margin:0 0 6px; }
+.zf-pet__composer-target-label{ font-size:11px; opacity:.72; white-space:nowrap; }
+.zf-pet__composer-select{
+  flex:1 1 auto; min-width:0; font-size:12px; padding:3px 6px; border-radius:6px;
+  border:1px solid var(--dsw-alias-border-secondary, rgba(0,0,0,.18));
+  background:var(--dsw-alias-bg-elevated, #fff);
+  color:inherit;
+}.zf-pet__composer-input{
   width:150px;font-size:12px;
   padding:3px 6px;border-radius:6px;
   border:1px solid var(--dsw-alias-border-l1, rgba(0,0,0,.08));
@@ -1310,13 +1343,16 @@ window.__ModuleLoader__.load({
        * @param {string} text
        * @returns {Promise<void>} 失败时抛错（带可读原因），由 UI 就地展示
        */
-      async function sendMessage (text) {
+      async function sendMessage (text, sessionId) {
         let res
         try {
+          // 指定了会话就带上（用户在选择器里选的那个）；没指定则省略字段，
+          // 由 Host 挑最近活跃的 —— 省略与发空串语义不同。
+          const payload = sessionId ? { text, sessionId } : { text }
           res = await fetch(`${ROUTE}/send`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ text })
+            body: JSON.stringify(payload)
           })
         } catch (error) {
           throw new Error(`网络错误：${error?.message ?? error}`)

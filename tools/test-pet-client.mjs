@@ -833,6 +833,96 @@ ok('⭐ 待处理 ≥2 时渲染计数徽标，=1 不渲染', () => {
   assert.equal(badge1, undefined, '只有 1 项时不显示徽标')
 })
 
+ok('⭐ 多个对话时输入条出现「发给」选择器，且选项用 title', () => {
+  const l = loadClient()
+  l.exports.apply(l.ctx)
+  const { Pet, runtime } = l.exports.__test
+  runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 1, frameMs: 36 } } }
+  runtime.__state.snapshot = {
+    petState: 'idle', label: '',
+    send: { available: true, reason: null },
+    sessions: [
+      { sessionId: 's-a', title: '桌宠开发', running: true, state: 'working' },
+      { sessionId: 's-b', title: 'beta', running: false, state: 'idle' }
+    ]
+  }
+  runtime.__state.settings = normalizePet({})
+  l.react.resetHooks()
+  // 打开输入条
+  const tree = Pet({ runtime })
+  // 找 ✎ 按钮并触发
+  const findPen = node => {
+    if (node === null || node === undefined || typeof node !== 'object') return null
+    if (Array.isArray(node)) { for (const c of node) { const r = findPen(c); if (r) return r } return null }
+    if (node.props) {
+      const cls = node.props.className
+      if (typeof cls === 'string' && cls.includes('zf-pet__send-btn')) return node
+      return findPen(node.props.children)
+    }
+    return null
+  }
+  const pen = findPen(tree)
+  assert.ok(pen !== null, '有发送能力时应渲染 ✎')
+  l.react.resetHooks()
+  pen.props.onClick({ stopPropagation () {} })
+  const tree2 = Pet({ runtime })
+  const sel = findPen(tree2)
+  // 重新查找 select
+  const findSelect = node => {
+    if (node === null || node === undefined || typeof node !== 'object') return null
+    if (Array.isArray(node)) { for (const c of node) { const r = findSelect(c); if (r) return r } return null }
+    if (node.props) {
+      if (node.props.className === 'zf-pet__composer-select') return node
+      return findSelect(node.props.children)
+    }
+    return null
+  }
+  const select = findSelect(tree2)
+  assert.ok(select !== null, '多对话时应出现选择器')
+  assert.equal(select.props.value, 's-a', '默认选中第一个（Host 已把在跑的排前面）')
+  const opts = select.props.children
+  assert.equal(opts.length, 2, '两个对话 → 两个选项')
+  assert.ok(String(opts[0].props.children).includes('桌宠开发'), '选项显示 title 而不是乱码 id')
+  assert.ok(String(opts[0].props.children).includes('●'), '在跑的加标记')
+})
+
+ok('⭐ 只有一个对话时不显示选择器（不占地方）', () => {
+  const l = loadClient()
+  l.exports.apply(l.ctx)
+  const { Pet, runtime } = l.exports.__test
+  runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 1, frameMs: 36 } } }
+  runtime.__state.snapshot = {
+    petState: 'idle', label: '',
+    send: { available: true, reason: null },
+    sessions: [{ sessionId: 's-only', title: '唯一', running: false, state: 'idle' }]
+  }
+  runtime.__state.settings = normalizePet({})
+  const findPen = node => {
+    if (node === null || node === undefined || typeof node !== 'object') return null
+    if (Array.isArray(node)) { for (const c of node) { const r = findPen(c); if (r) return r } return null }
+    if (node.props) {
+      const cls = node.props.className
+      if (typeof cls === 'string' && cls.includes('zf-pet__send-btn')) return node
+      return findPen(node.props.children)
+    }
+    return null
+  }
+  l.react.resetHooks()
+  const pen = findPen(Pet({ runtime }))
+  l.react.resetHooks()
+  pen.props.onClick({ stopPropagation () {} })
+  const tree2 = Pet({ runtime })
+  const findSelect = node => {
+    if (node === null || node === undefined || typeof node !== 'object') return null
+    if (Array.isArray(node)) { for (const c of node) { const r = findSelect(c); if (r) return r } return null }
+    if (node.props) {
+      if (node.props.className === 'zf-pet__composer-select') return node
+      return findSelect(node.props.children)
+    }
+    return null
+  }
+  assert.equal(findSelect(tree2), null, '只有一个对话时不该出现选择器')
+})
 ok('⭐ attention 在 clickThrough 下仍显示（它是通知，不是交互）', () => {
   const l = loadClient()
   l.exports.apply(l.ctx)

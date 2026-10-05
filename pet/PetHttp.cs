@@ -606,9 +606,15 @@ namespace DshZhuangFangyiPet
         }
 
         /// <summary>构造 POST /pet/send body 的纯函数（{"text":"…"}，转义正确），SelfTest 直接断言。</summary>
-        public static string BuildSendBody(string text)
+        public static string BuildSendBody(string text, string sessionId)
         {
-            return "{\"text\":\"" + Escape(text == null ? "" : text) + "\"}";
+            string body = "{\"text\":\"" + Escape(text == null ? "" : text) + "\"";
+            // 指定了会话就带上；没指定则交给 Host 挑最近活跃的（省略字段，不是发空串）。
+            if (!string.IsNullOrEmpty(sessionId))
+            {
+                body += ",\"sessionId\":\"" + Escape(sessionId) + "\"";
+            }
+            return body + "}";
         }
 
         /// <summary>
@@ -618,7 +624,7 @@ namespace DshZhuangFangyiPet
         /// status=HTTP 状态码，网络失败=0 且 body=错误描述）——输入窗要靠它区分
         /// 成功（关窗+气泡「已发送」）/ 失败（就地报错不丢字）。done 可为 null（退化成 PostJson 语义）。
         /// </summary>
-        public void PostSend(string text, Action<int, string> done)
+        public void PostSend(string text, string sessionId, Action<int, string> done)
         {
             if (_disposed)
             {
@@ -626,7 +632,7 @@ namespace DshZhuangFangyiPet
                 return;
             }
             string url = _base + "/api/zhuang-fangyi/pet/send";
-            string json = BuildSendBody(text);
+            string json = BuildSendBody(text, sessionId);
             string token = _token;
             ThreadPool.QueueUserWorkItem(delegate(object _)
             {

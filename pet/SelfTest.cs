@@ -671,10 +671,55 @@ namespace DshZhuangFangyiPet
             // (3) 发送 body 构造：转义正确（引号/反斜杠/换行/中文）。
             // 注意：Escape 把 <0x20 的控制字符转成 \uXXXX（合法 JSON），所以换行在 body 里是 \u000a；
             // 正确的验证方式是「反序列化回来等于原文」（roundtrip），而不是断言特定转义写法。
-            string body1 = PetHttp.BuildSendBody("你好");
-            string body2 = PetHttp.BuildSendBody("说\"引\"与\\反斜");
-            string body3 = PetHttp.BuildSendBody("第一行\n第二行\t制表");
-            string body4 = PetHttp.BuildSendBody(null);
+            // ⭐ 指定会话时 body 必须带 sessionId（这是"发给哪个对话"的落地点）；
+            //    没指定时**省略字段**（不是发空串）—— 省略才让 Host 去挑最近活跃的。
+            string bodyWithSession = PetHttp.BuildSendBody("你好", "session-abc");
+            bool hasSessionField = bodyWithSession.IndexOf("\"sessionId\":\"session-abc\"", StringComparison.Ordinal) >= 0;
+            Check(hasSessionField, "发消息：指定会话时 body 带 sessionId",
+                  hasSessionField ? bodyWithSession : "缺 sessionId：" + bodyWithSession);
+            string bodyNoSession = PetHttp.BuildSendBody("你好", null);
+            bool omitsSession = bodyNoSession.IndexOf("sessionId", StringComparison.Ordinal) < 0;
+            Check(omitsSession, "发消息：未指定会话时省略字段（交给 Host 挑最近活跃）",
+                  omitsSession ? bodyNoSession : "不该出现 sessionId：" + bodyNoSession);
+            // 会话 id 里的特殊字符也要转义（不然会破坏 JSON）
+            string bodyEsc = PetHttp.BuildSendBody("x", "s\"q\\b");
+            bool sessionEscOk = bodyEsc.IndexOf("\\\"", StringComparison.Ordinal) >= 0;
+            Check(sessionEscOk, "发消息：会话 id 里的引号被转义（不破坏 JSON）", bodyEsc);
+            // ⭐ 会话列表解析（契约 §2 v5）：title/running 要进快照对象，旧快照缺省不崩。
+            PetSnapshot withSess = PetSnapshot.Parse(
+                "{\"rev\":9,\"petState\":\"idle\",\"sessions\":[" +
+                "{\"sessionId\":\"s1\",\"title\":\"桌宠开发\",\"state\":\"working\",\"running\":true,\"toolsInFlight\":2}," +
+                "{\"sessionId\":\"s2\",\"state\":\"idle\"}]}");
+            bool sessOk = withSess != null && withSess.Sessions.Count == 2 &&
+                withSess.Sessions[0].Title == "桌宠开发" && withSess.Sessions[0].Running &&
+                withSess.Sessions[1].Title == null && !withSess.Sessions[1].Running;
+            Check(sessOk, "会话列表：title/running 解析（缺字段不崩）",
+                  sessOk ? "s1 标题=桌宠开发 running=1；s2 缺字段 → null/false"
+                         : "解析结果不符：" + (withSess == null ? "null" : withSess.Sessions.Count.ToString()));
+
+            // ⭐ 选择器：选中项回传的 sessionId 必须与列表项对应（发错对话就是这里出的错）。
+            PetInput picker = new PetInput(new PetHttp("http://127.0.0.1:1/", "t"));
+            List<PetSessionChoice> chs = new List<PetSessionChoice>();
+            PetSessionChoice c1 = new PetSessionChoice(); c1.SessionId = "s-a"; c1.Title = "甲"; c1.Running = true;
+            PetSessionChoice c2 = new PetSessionChoice(); c2.SessionId = "s-b"; c2.Title = "乙";
+            chs.Add(c1); chs.Add(c2);
+            picker.SetChoices(chs);
+            bool sel1 = picker.SelectedSessionId() == "s-a";
+            // 换一批（模拟会话结束），选择必须落到新列表里存在的项上
+            List<PetSessionChoice> chs2 = new List<PetSessionChoice>();
+            PetSessionChoice c3 = new PetSessionChoice(); c3.SessionId = "s-c"; c3.Title = "丙";
+            chs2.Add(c3);
+            picker.SetChoices(chs2);
+            bool sel2 = picker.SelectedSessionId() == "s-c";
+            picker.SetChoices(new List<PetSessionChoice>());
+            bool sel3 = picker.SelectedSessionId() == null;
+            Check(sel1 && sel2 && sel3, "会话选择器：选中项回传正确、列表变化不残留旧选择",
+                  "首项=" + (sel1 ? "s-a" : "错") + " 换批=" + (sel2 ? "s-c" : "错") + " 空表=" + (sel3 ? "null" : "错"));
+            try { picker.Close(); } catch { }
+            string body1 = PetHttp.BuildSendBody("你好", null);
+            string body2 = PetHttp.BuildSendBody("说\"引\"与\\反斜", null);
+            string body3 = PetHttp.BuildSendBody("第一行\n第二行\t制表", null);
+            string body4 = PetHttp.BuildSendBody(null, null);
             bool escOk = body1 == "{\"text\":\"你好\"}" &&
                          body2.IndexOf("\\\"引\\\"", StringComparison.Ordinal) >= 0 &&
                          body2.IndexOf("\\\\反斜", StringComparison.Ordinal) >= 0 &&

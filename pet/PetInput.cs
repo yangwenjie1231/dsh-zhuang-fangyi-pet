@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
@@ -20,6 +21,12 @@ namespace DshZhuangFangyiPet
         private readonly TextBox _box;
         private readonly TextBlock _hint;
         private readonly Border _chrome;
+        /// <summary>「发给哪个对话」选择器（会话列表由 Host 通过快照提供）。</summary>
+        private readonly ComboBox _target;
+        private readonly TextBlock _targetLabel;
+        private readonly StackPanel _targetRow;
+        /// <summary>当前可选的会话（与 ComboBox 项一一对应）。</summary>
+        private List<PetSessionChoice> _choices = new List<PetSessionChoice>();
 
         private readonly PetHttp _http;
         private readonly Dispatcher _ui;
@@ -51,10 +58,34 @@ namespace DshZhuangFangyiPet
             UseLayoutRounding = true;
             SnapsToDevicePixels = true;
 
+            // ── 发给哪个对话（选择器）────────────────────────────────────────
+            //
+            // 为什么需要：`/pet/send` 一直支持指定 sessionId，但界面上没得选 ——
+            // 只能由 Host 挑"最近活跃"的那个。多开对话时经常发错地方。
+            // 名字由 Host 提供（快照 sessions[].title），这里只负责显示与回传 id。
+            _targetLabel = new TextBlock();
+            _targetLabel.Text = "发给";
+            _targetLabel.FontSize = 11;
+            _targetLabel.Foreground = new SolidColorBrush(Color.FromArgb(170, 90, 100, 120));
+            _targetLabel.VerticalAlignment = VerticalAlignment.Center;
+            _targetLabel.Margin = new Thickness(0, 0, 6, 0);
+
+            _target = new ComboBox();
+            _target.FontSize = 12;
+            _target.MinWidth = 210;
+            _target.Margin = new Thickness(0, 0, 0, 0);
+            _target.SelectionChanged += delegate { SetHint(); };
+
+            _targetRow = new StackPanel();
+            _targetRow.Orientation = Orientation.Horizontal;
+            _targetRow.Margin = new Thickness(12, 10, 12, 0);
+            _targetRow.Children.Add(_targetLabel);
+            _targetRow.Children.Add(_target);
+
             _box = new TextBox();
             _box.FontSize = 14;
             _box.MinWidth = 260;
-            _box.Margin = new Thickness(12, 10, 12, 4);
+            _box.Margin = new Thickness(12, 4, 12, 4);
             _box.VerticalContentAlignment = VerticalAlignment.Center;
             // 占位提示：无字时显示（TextBox 原生没有 placeholder，用 Tag+灰字绘制太重，这里用提示行+样式兜底）
             _box.KeyDown += OnBoxKeyDown;
@@ -83,6 +114,7 @@ namespace DshZhuangFangyiPet
             }
             catch { }
             StackPanel sp = new StackPanel();
+            sp.Children.Add(_targetRow);
             sp.Children.Add(_box);
             sp.Children.Add(_hint);
             _chrome.Child = sp;
@@ -150,6 +182,49 @@ namespace DshZhuangFangyiPet
             }));
         }
 
+        /// <summary>
+        /// 更新「发给哪个对话」的可选项（由 Program 在快照变化时喂进来）。
+        ///
+        /// 保持用户当前选择：优先按 sessionId 找回原来那项；找不回（会话结束）就选第一项。
+        /// 否则 ComboBox 会悄悄跳回第一项，用户没察觉，消息就发去了别处。
+        /// </summary>
+        public void SetChoices(List<PetSessionChoice> choices)
+        {
+            _choices = choices ?? new List<PetSessionChoice>();
+            string keep = SelectedSessionId();
+            _target.Items.Clear();
+            for (int i = 0; i < _choices.Count; i++)
+            {
+                _target.Items.Add(_choices[i].Display);
+            }
+            if (_choices.Count == 0)
+            {
+                _target.IsEnabled = false;
+                _target.Items.Add("（没有可发的对话）");
+                _target.SelectedIndex = 0;
+                SetHint();
+                return;
+            }
+            _target.IsEnabled = true;
+            int idx = 0;
+            if (!string.IsNullOrEmpty(keep))
+            {
+                for (int i = 0; i < _choices.Count; i++)
+                {
+                    if (_choices[i].SessionId == keep) { idx = i; break; }
+                }
+            }
+            _target.SelectedIndex = idx;
+            SetHint();
+        }
+
+        /// <summary>当前选中的会话 id；没有可选项时返回 null（Host 会自己挑最近活跃的）。</summary>
+        public string SelectedSessionId()
+        {
+            int i = _target == null ? -1 : _target.SelectedIndex;
+            if (i < 0 || i >= _choices.Count) return null;
+            return _choices[i].SessionId;
+        }
         private void SetHint()
         {
             int n = _box.Text == null ? 0 : _box.Text.Length;
@@ -186,7 +261,7 @@ namespace DshZhuangFangyiPet
             _hint.Foreground = new SolidColorBrush(Color.FromArgb(160, 90, 100, 120));
             _hint.Text = "发送中…";
             _box.IsEnabled = false;
-            _http.PostSend(text, delegate(int status, string body)
+            _http.PostSend(text, SelectedSessionId(), delegate(int status, string body)
             {
                 // 线程池线程 → 切回 UI
                 _ui.BeginInvoke(DispatcherPriority.Normal, new Action(delegate { OnSendDone(status, body); }));
@@ -230,6 +305,21 @@ namespace DshZhuangFangyiPet
         {
             if (_reallyClosing) return;
             try { Close(); } catch { }
+        }
+    }
+
+    /// <summary>一个可选的发送目标（契约 §2 sessions[] 的子集）。</summary>
+    internal sealed class PetSessionChoice
+    {
+        public string SessionId;
+        /// <summary>给用户看的名字（Host 已回退过：标题 → 目录名 → id 前缀）。</summary>
+        public string Title;
+        public bool Running;
+
+        /// <summary>下拉里显示的文字（在跑的加个圆点，一眼看出哪个在忙）。</summary>
+        public string Display
+        {
+            get { return (Running ? "● " : "") + (string.IsNullOrEmpty(Title) ? SessionId : Title); }
         }
     }
 }

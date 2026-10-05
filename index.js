@@ -365,10 +365,129 @@ export function apply (ctx, config) {
     }
   }
 
+  /**
+   * 会话列表（给"发送到哪个对话"的选择器用）。
+   *
+   * ── 为什么需要它 ────────────────────────────────────────────────────────
+   *
+   * 发消息本来就**可以**指定会话（`/pet/send` 一直支持 `sessionId`），
+   * 但界面上没得选 —— 更根本的是：`sessionId` 是一串不透明的乱码，
+   * 直接把状态机的会话列表摆给用户，他也不知道哪个是哪个。
+   *
+   * ── 名字从哪来 ─────────────────────────────────────────────────────────
+   *
+   * DSH 的 `sessionController.list()` 返回 `{ items: SessionSummary[] }`，
+   * 标题在 `item.projections.values.title`（会话标题投影）。
+   * 回退顺序照抄 DSH 自己的 `displayTitleOf`：**标题 → 工作目录名 → id 前缀**。
+   * 不自己发明一套，免得和外壳里显示的名字对不上。
+   *
+   * ── 为什么带缓存 ────────────────────────────────────────────────────────
+   *
+   * `withSettings()` 在**每次广播**时都会调用（状态一变就广播），
+   * 而 `list()` 会读持久化 header —— 绝不能挂在热路径上。
+   * 所以缓存 5 秒；**失败也记时间戳**，避免每帧去撞一个坏掉的服务。
+   */
+  const SESSION_LIST_TTL_MS = 5000
+  let sessionListCache = { at: 0, items: [] }
+
+  /** 从 cwd 取目录名（DSH 的 displayTitleOf 同款回退）。 */
+  const basenameOf = p => {
+    if (typeof p !== 'string' || p === '') return null
+    const parts = p.replace(/[\\/]+$/, '').split(/[\\/]+/)
+    return parts.length > 0 && parts[parts.length - 1] !== '' ? parts[parts.length - 1] : null
+  }
+
+  /** 短 id（无法命名时的最后回退）。 */
+  const shortId = id => (typeof id === 'string' && id.length > 8 ? id.slice(0, 8) : String(id ?? ''))
+
+  /**
+   * 给会话起个能认出来的名字。纯函数（测试直接断言回退顺序），不碰 IO。
+   * @param {object} item - `SessionSummary`
+   * @returns {string} 一定有值（最差是 id 前缀）
+   */
+  const titleOfSummary = item => {
+    if (item === null || typeof item !== 'object') return ''
+    const proj = item.projections?.values
+    const t = proj?.title
+    if (typeof t === 'string' && t.trim() !== '') return t.trim()
+    const base = basenameOf(item.cwd)
+    if (base !== null) return base
+    return shortId(item.sessionId)
+  }
+
+  /**
+   * 取会话列表（带 TTL 缓存）。**绝不抛** —— 取不到就退回状态机自己记的会话，
+   * 至少让用户能按"哪个在忙"来选。
+   */
+  const sessionChoices = snap => {
+    const live = Array.isArray(snap?.sessions) ? snap.sessions : []
+    const now = Date.now()
+    if (now - sessionListCache.at > SESSION_LIST_TTL_MS) {
+      sessionListCache = { at: now, items: sessionListCache.items }
+      const svc = resolveSendService()
+      if (svc !== null && typeof svc.list === 'function') {
+        // 不 await：广播是同步路径。拿回来更新缓存，下次广播自然带上。
+        Promise.resolve()
+          .then(() => svc.list({}))
+          .then(value => {
+            const items = Array.isArray(value?.items) ? value.items : (Array.isArray(value) ? value : [])
+            sessionListCache = {
+              at: Date.now(),
+              items: items
+                .filter(it => it !== null && typeof it === 'object' && typeof it.sessionId === 'string')
+                .map(it => ({
+                  sessionId: it.sessionId,
+                  title: titleOfSummary(it),
+                  running: it.running === true,
+                  updatedAt: typeof it.updatedAt === 'number' ? it.updatedAt : null
+                }))
+            }
+          })
+          .catch(error => {
+            // 失败也记时间戳：否则每帧都会重试一个坏掉的服务。
+            logger?.debug?.(`zhuang-fangyi-pet: 会话列表读取失败（${error?.message ?? error}）`)
+            sessionListCache = { at: Date.now(), items: sessionListCache.items }
+          })
+      }
+    }
+
+    // 以**状态机记的活跃会话**为准（它是实时的），标题从缓存里补。
+    const byId = new Map(sessionListCache.items.map(it => [it.sessionId, it]))
+    const out = []
+    for (const s of live) {
+      if (s.sessionId === 'unknown') continue      // 不是真实会话，绝不能发给它
+      const meta = byId.get(s.sessionId)
+      out.push({
+        sessionId: s.sessionId,
+        title: meta?.title ?? shortId(s.sessionId),
+        state: s.state,
+        running: meta?.running === true || s.state === 'working' || s.state === 'thinking',
+        updatedAt: meta?.updatedAt ?? null,
+        // 保留状态机原有的字段：老渲染方（旧 exe/overlay）只认这几个，不能丢。
+        toolsInFlight: s.toolsInFlight ?? 0
+      })
+      byId.delete(s.sessionId)
+    }
+    // 缓存里有、状态机没记的（例如刚重启过）也列出来，按更新时间排在后面。
+    const rest = [...byId.values()].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+    for (const it of rest.slice(0, 20)) {
+      out.push({
+        sessionId: it.sessionId,
+        title: it.title,
+        state: 'idle',
+        running: it.running === true,
+        updatedAt: it.updatedAt
+      })
+    }
+    return out
+  }
+
   /** 快照 + 设置 = 广播帧（exe 与 overlay 共用同一帧）。 */
   const withSettings = snap => ({
     ...snap,
     settings: exeSettings(),
+    // 会话列表：给"发送到哪个对话"的选择器用（见 `sessionChoices`）。
+    sessions: sessionChoices(snap),
     // 能力位：两半边的 ✎ 入口都靠它决定显不显示（**不做没入口的错误**）。
     // 每次广播时**现取**服务：它可能稍后才装配好，缓存一次会让入口永久消失。
     send: {
@@ -458,7 +577,21 @@ export function apply (ctx, config) {
    * @returns {string|null} 没有可发会话时返回 null
    */
   const pickSessionId = requested => {
-    if (typeof requested === 'string' && requested !== '') return requested
+    if (typeof requested === 'string' && requested !== '') {
+      // 调用方明确指定了会话：**必须用它，且必须存在**。
+      // 绝不静默改投别的会话 —— 用户选了"发给 A"，消息却进了 B，
+      // 那比报错更糟（他以为发对了地方）。
+      //
+      // ⚠️ 校验必须用**选择器同一个来源**（`sessionChoices`，= 状态机活跃会话 ∪ list() 缓存）。
+      // 曾经只查状态机，结果是"列表里能选、选了却 409" —— 用户撞上的是自相矛盾的界面。
+      const known = sessionChoices(machine.snapshot()).some(s => s.sessionId === requested)
+      if (!known) {
+        const error = new Error(`指定的会话不存在或已结束：${requested}`)
+        error.code = 'no-session'
+        throw error
+      }
+      return requested
+    }
     const stats = machine.sessionStats()
     // 状态机把"事件没带 sessionId"归到字面量 `'unknown'`。**绝不能拿它去发消息** ——
     // 那不是一个真实会话，`prompt()` 必然 not-found；宁可回 409 说"没有可发的会话",

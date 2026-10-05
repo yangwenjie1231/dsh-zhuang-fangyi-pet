@@ -471,6 +471,9 @@ namespace DshZhuangFangyiPet
             // 启动时主题没变过的话，气泡会用构造期的浅色默认值）。
             try { _bubble.ApplyTheme(PetTheme.ResolveIsDark(_opt.DarkOverride, _settingsTheme)); } catch { }
 
+            // 输入窗开着时，会话列表跟着快照走（新开/结束的对话要即时反映）
+            if (_input != null) ApplySendChoices();
+
             // task-7：send 能力位（available=false 或块缺失 → 不显示 ✎）
             ApplySendInfo(snap.Send);
 
@@ -651,12 +654,50 @@ namespace DshZhuangFangyiPet
                     _input = null;
                 };
             }
+            // 每次打开都刷一次可选对话（用户可能刚开了新对话/结束了旧的）
+            ApplySendChoices();
             int x, y, w, h;
             _win.GetScreenRect(out x, out y, out w, out h);
             _win.SetSendOpen(true);
             _input.OpenNear(x, y, w, h);
         }
 
+        /// <summary>
+        /// 把快照里的会话列表喂给输入窗的「发给哪个对话」选择器。
+        ///
+        /// 只取 Host 已回退好名字的项（title 一定有值），并按"在跑的优先、再按更新时间"排序 ——
+        /// 用户最可能想发给正在干活的那个。
+        /// </summary>
+        private void ApplySendChoices()
+        {
+            if (_input == null) return;
+            try
+            {
+                List<PetSessionChoice> list = new List<PetSessionChoice>();
+                PetSnapshot snap = _lastSnapshot;
+                if (snap != null && snap.Sessions != null)
+                {
+                    for (int i = 0; i < snap.Sessions.Count; i++)
+                    {
+                        PetSessionInfo si = snap.Sessions[i];
+                        if (si == null || string.IsNullOrEmpty(si.SessionId)) continue;
+                        if (si.SessionId == "unknown") continue;   // 不是真实会话
+                        PetSessionChoice c = new PetSessionChoice();
+                        c.SessionId = si.SessionId;
+                        c.Title = si.Title;
+                        c.Running = si.Running || si.State == "working" || si.State == "thinking";
+                        list.Add(c);
+                    }
+                    list.Sort(delegate(PetSessionChoice a, PetSessionChoice b)
+                    {
+                        if (a.Running != b.Running) return a.Running ? -1 : 1;
+                        return string.Compare(a.Title, b.Title, StringComparison.CurrentCulture);
+                    });
+                }
+                _input.SetChoices(list);
+            }
+            catch (Exception ex) { PetLog.Warn("会话选择器刷新失败: " + PetLog.Describe(ex)); }
+        }
         /// <summary>退出时若输入窗还开着，一并收掉。</summary>
         private void CloseInput()
         {
