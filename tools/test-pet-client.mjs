@@ -778,6 +778,105 @@ ok('activity 字段归一化：非法值回落 normal', () => {
   assert.equal(normalizePet({}).activity, 'normal')
 })
 
+/* ── 常亮提醒（契约 §2 attention）的 overlay 渲染 ───────────────────────── */
+
+ok('⭐ attentionReminder 归一化：默认开、非法值回落', () => {
+  assert.equal(normalizePet({}).attentionReminder, true, '默认开（新功能默认可见）')
+  assert.equal(normalizePet({ attentionReminder: false }).attentionReminder, false)
+  assert.equal(normalizePet({ attentionReminder: 'yes' }).attentionReminder, true, '非法值回落默认')
+})
+
+function renderBubbleWith (bubble, snapshotExtra = {}) {
+  const l = loadClient()
+  l.exports.apply(l.ctx)
+  const { Pet, runtime } = l.exports.__test
+  runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 1, frameMs: 36 } } }
+  runtime.__state.snapshot = { petState: 'waiting', label: '', bubble, ...snapshotExtra }
+  runtime.__state.settings = normalizePet({})
+  l.react.resetHooks()
+  const tree = Pet({ runtime })
+  const b = tree.props.children.find(c => c !== null && c.props?.['data-zf-pet-bubble-kind'] !== undefined)
+  return b
+}
+
+ok('⭐ attention 气泡带 --attention 修饰类（醒目描边/脉动）', () => {
+  const b = renderBubbleWith({
+    id: 9, kind: 'attention', text: '在等你审批', image: null,
+    sticky: true, attentionCount: 1, durationMs: 1800000, priority: 100
+  })
+  assert.ok(b !== undefined, '应渲染气泡')
+  assert.ok(b.props.className.includes('zf-pet__bubble--attention'))
+  assert.equal(b.props['data-zf-pet-bubble-kind'], 'attention')
+})
+
+ok('普通气泡不带 --attention 类（现状零回归）', () => {
+  const b = renderBubbleWith({
+    id: 9, kind: 'both', text: '在等你审批', image: null, durationMs: 6000, priority: 80
+  })
+  assert.ok(!b.props.className.includes('zf-pet__bubble--attention'))
+})
+
+ok('⭐ 待处理 ≥2 时渲染计数徽标，=1 不渲染', () => {
+  const many = renderBubbleWith({
+    id: 9, kind: 'attention', text: '在等你审批', image: null,
+    sticky: true, attentionCount: 2, durationMs: 1800000, priority: 100
+  })
+  const badge = many.props.children.find(c => c !== null && c.props?.className === 'zf-pet__bubble-badge')
+  assert.ok(badge !== undefined, '2 项待处理应显示徽标')
+  // React children 是数组形态（单字符串包一层）。
+  assert.equal(String(badge.props.children), '2')
+  const one = renderBubbleWith({
+    id: 9, kind: 'attention', text: '在等你审批', image: null,
+    sticky: true, attentionCount: 1, durationMs: 1800000, priority: 100
+  })
+  const badge1 = one.props.children.find(c => c !== null && c.props?.className === 'zf-pet__bubble-badge')
+  assert.equal(badge1, undefined, '只有 1 项时不显示徽标')
+})
+
+ok('⭐ attention 在 clickThrough 下仍显示（它是通知，不是交互）', () => {
+  const l = loadClient()
+  l.exports.apply(l.ctx)
+  const { Pet, runtime } = l.exports.__test
+  runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 1, frameMs: 36 } } }
+  runtime.__state.snapshot = {
+    petState: 'waiting', label: '',
+    bubble: { id: 9, kind: 'attention', text: '在等你审批', image: null, sticky: true, attentionCount: 1, priority: 100 }
+  }
+  runtime.__state.settings = normalizePet({ clickThrough: true })
+  l.react.resetHooks()
+  const tree = Pet({ runtime })
+  const b = tree.props.children.find(c => c !== null && c.props?.['data-zf-pet-bubble-kind'] !== undefined)
+  assert.ok(b !== undefined, '穿透只是不吃鼠标，通知必须仍可见 —— 否则"人不在 DSH 前"就错过了')
+})
+
+ok('⭐ 设置页有"审批/提问常亮提醒"开关', () => {
+  // Section 树里 Toggle 还是未展开的元素：文案在 `label`、值在 `value`（布尔）。
+  let toggle = null
+  const walk = node => {
+    if (node === null || node === undefined || typeof node !== 'object') return
+    if (Array.isArray(node)) { node.forEach(walk); return }
+    if (node.props) {
+      if (typeof node.props.label === 'string' && node.props.label.includes('常亮提醒')) toggle = node
+      walk(node.props.children)
+    }
+  }
+  walk(renderSection({ attentionReminder: false }).props.children)
+  assert.ok(toggle !== null, '设置页应有该开关')
+  assert.equal(toggle.props.value, false, '开关应反映当前值（关闭态）')
+  // 再确认开着的时候渲染 true
+  let toggle2 = null
+  const walk2 = node => {
+    if (node === null || node === undefined || typeof node !== 'object') return
+    if (Array.isArray(node)) { node.forEach(walk2); return }
+    if (node.props) {
+      if (typeof node.props.label === 'string' && node.props.label.includes('常亮提醒')) toggle2 = node
+      walk2(node.props.children)
+    }
+  }
+  walk2(renderSection({ attentionReminder: true }).props.children)
+  assert.equal(toggle2?.props.value, true)
+})
+
 /* ── 设置页（Section）必须能渲染 ─────────────────────────────────────────
  *
  * 这一条是被真实事故逼出来的：设置页在用户那里**整片空白**，

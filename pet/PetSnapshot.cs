@@ -20,6 +20,10 @@ namespace DshZhuangFangyiPet
         public string ImageDark;
         public int DurationMs = 4000;
         public int Priority;
+        /// <summary>契约 §2 attention（task-8）：常亮气泡（不按 durationMs 收，以 attention 块为准）。缺省 false。</summary>
+        public bool Sticky;
+        /// <summary>契约 §2 attention（task-8）：待处理会话数（≥2 时渲染红色计数徽标）。缺省 1。</summary>
+        public int AttentionCount = 1;
 
         public bool WantsImage { get { return Kind == "image" || Kind == "both"; } }
         public bool WantsText { get { return Kind == "text" || Kind == "both"; } }
@@ -81,6 +85,32 @@ namespace DshZhuangFangyiPet
         }
     }
 
+    /// <summary>
+    /// 契约 §2（task-8，additive）：snapshot.attention —— 授权/提问常亮提醒。
+    /// 块缺失 / 显式 null（旧 Host 或 attentionReminder:false）→ Attention=null（无提醒，零回归）。
+    /// **存续判定完全以本块为准**：null → 收起气泡；exe 绝不自算超时
+    /// （30 分钟兜底上限 attentionMaxMs 在 Host 状态机里，两侧口径必须一致）。
+    /// </summary>
+    internal sealed class PetAttentionInfo
+    {
+        public string Kind;         // 'approval'（等审批，优先）| 'question'（等回答）
+        public string SessionId;
+        public string Text;         // Host 已本地化，exe 直接显示
+        public long Since;          // 待处理起始时刻（Host 计上限用）
+        public int Count = 1;       // 待处理会话总数（≥2 → 红色计数徽标）
+
+        public bool IsApproval { get { return Kind == "approval"; } }
+
+        /// <summary>纯函数：两块 attention 是否"值相同"（Program diff 用，值没变零日志）。</summary>
+        public static bool Same(PetAttentionInfo a, PetAttentionInfo b)
+        {
+            if (a == null && b == null) return true;
+            if (a == null || b == null) return false;
+            return a.Kind == b.Kind && a.SessionId == b.SessionId &&
+                   a.Text == b.Text && a.Since == b.Since && a.Count == b.Count;
+        }
+    }
+
     internal sealed class PetSnapshot
     {
         public long Rev = -1;
@@ -90,6 +120,7 @@ namespace DshZhuangFangyiPet
         public PetBubbleInfo Bubble;
         public PetSettingsInfo Settings;
         public PetSendInfo Send;
+        public PetAttentionInfo Attention;
         public List<PetSessionInfo> Sessions = new List<PetSessionInfo>();
         public bool NativeAvailable = true;
         public string NativeError;
@@ -125,8 +156,28 @@ namespace DshZhuangFangyiPet
                 if (bi.DurationMs < 500) bi.DurationMs = 500;
                 if (bi.DurationMs > 600000) bi.DurationMs = 600000;
                 bi.Priority = b.Int("priority", 0);
+                // 契约 §2 attention（task-8，additive）：sticky / attentionCount，缺省 false/1。
+                bi.Sticky = b.Bool("sticky", false);
+                bi.AttentionCount = b.Int("attentionCount", 1);
+                if (bi.AttentionCount < 1) bi.AttentionCount = 1;
                 if (bi.WantsImage && string.IsNullOrEmpty(bi.Image)) bi.Image = null;
                 s.Bubble = bi;
+            }
+
+            // 契约 §2（task-8，additive）：attention 块。**显式 null 或块缺失 → Attention=null**
+            //（旧 Host / attentionReminder:false → 无提醒，零回归）。
+            PetJson.JVal at = root.Get("attention");
+            if (at != null && at.IsObj)
+            {
+                PetAttentionInfo ai = new PetAttentionInfo();
+                ai.Kind = at.Str("kind", null);
+                if (ai.Kind != "approval" && ai.Kind != "question") ai.Kind = "question"; // 非法回落，不崩
+                ai.SessionId = at.Str("sessionId", "");
+                ai.Text = at.Str("text", null);
+                ai.Since = (long)at.Num("since", 0);
+                ai.Count = at.Int("count", 1);
+                if (ai.Count < 1) ai.Count = 1;
+                s.Attention = ai;
             }
 
             // 契约 §2 新增（additive）：settings 块。全部 optional，

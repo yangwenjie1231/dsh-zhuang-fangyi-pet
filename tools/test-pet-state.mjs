@@ -879,6 +879,151 @@ ok('setConfig 挡住非法值（热更新不是绕过校验的后门）', () => 
   assert.equal(cfg.locale, 'zh', '非法语言回落 zh')
 })
 
+section('13.5 授权/提问常亮提醒（attention，契约 §2）')
+
+ok('⭐ approval/asked → attention=approval 且气泡 sticky 常亮', () => {
+  const { machine } = makeMachine()
+  machine.apply({ type: 'approval/asked', sessionId: 's1' })
+  const snap = machine.snapshot()
+  assert.ok(snap.attention !== null, '应有待处理提醒')
+  assert.equal(snap.attention.kind, 'approval')
+  assert.equal(snap.attention.sessionId, 's1')
+  assert.equal(snap.attention.count, 1)
+  assert.equal(snap.attention.text, '在等你审批', '文案应已本地化，渲染方直接用')
+  assert.equal(snap.bubble.kind, 'attention')
+  assert.equal(snap.bubble.sticky, true, 'sticky=渲染方不按 durationMs 收')
+  assert.equal(snap.bubble.priority, 100, '压过 working(90)，普通气泡抢不走')
+})
+
+ok('⭐ 常亮：远超普通气泡时长仍然亮着', () => {
+  const { machine, clock } = makeMachine({ bubbleMs: 6000 })
+  machine.apply({ type: 'approval/asked', sessionId: 's1' })
+  assert.ok(machine.snapshot().bubble !== null)
+  clock.advance(600000) // 10 分钟，普通气泡 6s 早该没了
+  machine.tick()
+  const snap = machine.snapshot()
+  assert.ok(snap.bubble !== null, '10 分钟后仍常亮')
+  assert.equal(snap.bubble.kind, 'attention')
+  assert.equal(snap.attention.kind, 'approval')
+})
+
+ok('⭐ approval/decided → 立刻收起（attention 与气泡同时归零）', () => {
+  const { machine } = makeMachine()
+  machine.apply({ type: 'approval/asked', sessionId: 's1' })
+  assert.ok(machine.snapshot().attention !== null)
+  machine.apply({ type: 'approval/decided', sessionId: 's1' })
+  const snap = machine.snapshot()
+  assert.equal(snap.attention, null, '处理完 → 无提醒')
+  assert.equal(snap.bubble, null, '气泡同时收起')
+})
+
+ok('⭐ ask_user_question 提问 → attention=question；回答后收起', () => {
+  const { machine } = makeMachine()
+  machine.apply({ type: 'tool/call', sessionId: 's1', callId: 'c1', name: 'ask_user_question' })
+  const snap = machine.snapshot()
+  assert.ok(snap.attention !== null, '提问中应有提醒')
+  assert.equal(snap.attention.kind, 'question')
+  assert.equal(snap.bubble.kind, 'attention')
+  // 回答：真实 tool/result **不带 callId** → 保守清除（在飞工具归零）
+  machine.apply({ type: 'tool/result', sessionId: 's1', isError: false })
+  const after = machine.snapshot()
+  assert.equal(after.attention, null, '回答后收起（无 callId 也能清）')
+  assert.equal(after.bubble, null)
+})
+
+ok('普通工具调用不触发 attention（只有 ask_user_question 算提问）', () => {
+  const { machine } = makeMachine()
+  machine.apply({ type: 'tool/call', sessionId: 's1', callId: 'c1', name: 'bash' })
+  assert.equal(machine.snapshot().attention, null)
+})
+
+ok('⭐ approval 压过 question；count 合计', () => {
+  const { machine } = makeMachine()
+  machine.apply({ type: 'tool/call', sessionId: 's1', callId: 'c1', name: 'ask_user_question' })
+  machine.apply({ type: 'approval/asked', sessionId: 's2' })
+  const snap = machine.snapshot()
+  assert.equal(snap.attention.kind, 'approval', '审批更紧急')
+  assert.equal(snap.attention.sessionId, 's2')
+  assert.equal(snap.attention.count, 2, '两处待处理 → 2')
+  assert.equal(snap.bubble.attentionCount, 2, '气泡侧同值（渲染方显示徽标）')
+  // s2 处理完 → 回落到 question，count 变 1
+  machine.apply({ type: 'approval/decided', sessionId: 's2' })
+  const snap2 = machine.snapshot()
+  assert.equal(snap2.attention.kind, 'question')
+  assert.equal(snap2.attention.count, 1)
+})
+
+ok('⭐ turn/end 收回提问（模型不再等了）', () => {
+  const { machine } = makeMachine()
+  machine.apply({ type: 'tool/call', sessionId: 's1', callId: 'c1', name: 'ask_user_question' })
+  assert.ok(machine.snapshot().attention !== null)
+  machine.apply({ type: 'turn/end', sessionId: 's1', reason: { kind: 'completed' } })
+  assert.equal(machine.snapshot().attention, null)
+})
+
+ok('⭐ 兜底上限：超 attentionMaxMs 的提醒自动放下（绝不永久钉死）', () => {
+  const { machine, clock } = makeMachine({ attentionMaxMs: 60000 })
+  machine.apply({ type: 'approval/asked', sessionId: 's1' })
+  assert.ok(machine.snapshot().attention !== null)
+  clock.advance(61000)
+  machine.tick()
+  assert.equal(machine.snapshot().attention, null, '超上限 → 放下')
+  assert.equal(machine.snapshot().bubble, null)
+  // 上限内仍然亮
+  const { machine: m2, clock: c2 } = makeMachine({ attentionMaxMs: 60000 })
+  m2.apply({ type: 'approval/asked', sessionId: 's1' })
+  c2.advance(30000)
+  m2.tick()
+  assert.ok(m2.snapshot().attention !== null, '上限内不放下')
+})
+
+ok('attentionReminder=false → 完全回到现状（无 attention，只有普通气泡）', () => {
+  const { machine } = makeMachine({ attentionReminder: false })
+  machine.apply({ type: 'approval/asked', sessionId: 's1' })
+  const snap = machine.snapshot()
+  assert.equal(snap.attention, null)
+  // 普通 waiting 气泡照旧（这是"回到现状"的含义，不是什么都不显示）
+  assert.notEqual(snap.bubble, null)
+  assert.notEqual(snap.bubble.kind, 'attention')
+})
+
+ok('attention 不受 bubble 总开关影响（bubbleStates=[] 仍提醒）', () => {
+  const { machine } = makeMachine({ bubbleStates: [] })
+  machine.apply({ type: 'approval/asked', sessionId: 's1' })
+  const snap = machine.snapshot()
+  assert.ok(snap.attention !== null, '关普通气泡 ≠ 不要审批提醒')
+  assert.equal(snap.bubble.kind, 'attention')
+})
+
+ok('⭐ attention 存续期间：普通气泡与完成提醒都被挡住', () => {
+  const { machine, clock } = makeMachine({ notifyComplete: true, bubbleSilenceMs: 0 })
+  machine.apply({ type: 'approval/asked', sessionId: 's1' })
+  // 制造一次完成：notify-complete 是 force，但 attention 优先
+  machine.apply({ type: 'turn/end', sessionId: 's1', reason: { kind: 'completed' } })
+  const b = machine.snapshot().bubble
+  assert.equal(b.kind, 'attention', '完成提醒必须给审批让位')
+  // 审批处理完后，完成提醒若还没发就发一次
+  machine.apply({ type: 'approval/decided', sessionId: 's1' })
+  machine.tick()
+  const b2 = machine.snapshot().bubble
+  assert.ok(b2 !== null, '审批撤了，完成提醒现在可以弹')
+  assert.equal(b2.text, '完成啦！来看看～')
+})
+
+ok('session/gone → 提醒跟着消失', () => {
+  const { machine } = makeMachine()
+  machine.apply({ type: 'approval/asked', sessionId: 's1' })
+  assert.ok(machine.snapshot().attention !== null)
+  machine.apply({ type: 'session/gone', sessionId: 's1' })
+  assert.equal(machine.snapshot().attention, null)
+})
+
+ok('attention 文案随 locale 切换', () => {
+  const { machine } = makeMachine({ locale: 'en' })
+  machine.apply({ type: 'approval/asked', sessionId: 's1' })
+  assert.equal(machine.snapshot().attention.text, 'Waiting for your approval')
+})
+
 section('14. 素材清单与路径安全（atlas.js）')
 
 const goodAtlas = normalizeAtlas({

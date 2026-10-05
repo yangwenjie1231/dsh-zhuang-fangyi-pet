@@ -215,6 +215,9 @@ namespace DshZhuangFangyiPet
         private bool _sendAvailable;   // snapshot.send.available（块缺失=false）
         private PetInput _input;
 
+        // task-8：attention 常亮提醒（上次应用的值；null=无提醒）
+        private PetAttentionInfo _lastAttention;
+
         private static readonly string[] PreviewStates = new string[]
         {
             "waking", "idle", "listening", "thinking", "working",
@@ -281,6 +284,7 @@ namespace DshZhuangFangyiPet
             _bubble = new PetBubble();
             _bubble.PetRectProvider = PetRect;
             _bubble.HideNow();
+            WireAttentionButton();   // task-8：「去处理」→ focus-dsh 链路
 
             _tray = new PetTray();
             _tray.IsVisible = delegate { return _win.IsVisible; };
@@ -375,6 +379,9 @@ namespace DshZhuangFangyiPet
             // task-7：send 能力位（available=false 或块缺失 → 不显示 ✎）
             ApplySendInfo(snap.Send);
 
+            // task-8：attention diff（值没变零日志；null → 立刻收恒亮气泡）
+            ApplyAttention(snap);
+
             string st = snap.EffectiveState();
             if (!_previewMode)
             {
@@ -389,9 +396,11 @@ namespace DshZhuangFangyiPet
 
                 // 契约 §4 fileDark：只有渲染方知道实际主题 → exe 自己判深色选图。
                 // task-6 优先级：argv --dark 0|1 > settings.theme > 注册表。
+                // task-8：attention 气泡是纯文本提醒，不需要贴图（跳过取图省一次下载）。
                 bool dark = PetTheme.ResolveIsDark(_opt.DarkOverride, _settingsTheme);
-                string rel = PetTheme.SelectBubbleImageRel(
-                    snap.Bubble.WantsImage, snap.Bubble.Image, snap.Bubble.ImageDark, dark);
+                string rel = snap.Bubble.Kind == "attention" ? null :
+                    PetTheme.SelectBubbleImageRel(
+                        snap.Bubble.WantsImage, snap.Bubble.Image, snap.Bubble.ImageDark, dark);
 
                 if (rel != null)
                 {
@@ -489,6 +498,44 @@ namespace DshZhuangFangyiPet
             }
 
             if (changed) _tray.Refresh();   // 托盘勾选状态（缩放档位/穿透/气泡）跟着真实值走
+        }
+
+        // ------------------------------------------------------------------
+        // task-8：attention 常亮提醒（存续判定完全以 attention 块为准，exe 不自算超时）
+        // ------------------------------------------------------------------
+
+        /// <summary>
+        /// attention diff：块变化才动（起/落/换内容各一次日志），值没变零日志。
+        /// - attention 出现且 bubble.kind==='attention' → 交给 Show（PetBubble 走恒亮路径）
+        /// - attention=null（或块缺失）→ **立刻收**恒亮气泡（HideAttention）
+        /// </summary>
+        private void ApplyAttention(PetSnapshot snap)
+        {
+            PetAttentionInfo at = snap == null ? null : snap.Attention;
+            if (PetAttentionInfo.Same(at, _lastAttention)) return;
+
+            bool had = _lastAttention != null;
+            _lastAttention = at;
+
+            if (at == null)
+            {
+                if (had) PetLog.Info("attention → null");
+                try { _bubble.HideAttention(); } catch (Exception ex) { PetLog.Warn("收 attention 气泡失败: " + PetLog.Describe(ex)); }
+                return;
+            }
+
+            PetLog.Info("attention → kind=" + at.Kind + " session=" + at.SessionId +
+                        " count=" + at.Count.ToString(CultureInfo.InvariantCulture) +
+                        (had ? "（内容更新）" : ""));
+            // 气泡本体由下方 bubble 渲染分支处理（Host 会同时给 kind:'attention' 气泡，
+            // id 递增走 Show）；这里只记 diff 日志与接管"解除"时机。
+            // 同一 attention 存续期内 Host 不再发新 bubble.id 时也要能收到解除 → 见上 null 分支。
+        }
+
+        /// <summary>装配「去处理」→ 复用双击已实现的 focus-dsh 链路。</summary>
+        private void WireAttentionButton()
+        {
+            _bubble.GoAction = delegate { OnFocusDsh(); };
         }
 
         // ------------------------------------------------------------------

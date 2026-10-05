@@ -125,6 +125,8 @@ window.__ModuleLoader__.load({
         bubbleGapHint: '调大可减少刷屏；0 = 不限',
         notifyComplete: 'AI 完成时弹提醒',
         notifyCompleteHint: '一回合并干净结束就强制弹一条（绕过上面的间隔）',
+        attentionReminder: '审批/提问常亮提醒',
+        attentionReminderHint: 'AI 要授权或问你问题时，气泡一直亮着直到你处理完（不看上面的气泡时长）',
         groupBehavior: '行为',
         happyMs: '完成后的开心时长',
         sleepMs: '空闲多久后睡觉',
@@ -179,6 +181,8 @@ window.__ModuleLoader__.load({
         bubbleGapHint: 'Raise it to reduce spam; 0 = unlimited',
         notifyComplete: 'Notify when AI finishes',
         notifyCompleteHint: 'Force a bubble on every clean turn end (bypasses the gap above)',
+        attentionReminder: 'Sticky approval/question alert',
+        attentionReminderHint: 'Keeps the bubble lit until you approve or answer (ignores the bubble duration above)',
         groupBehavior: 'Behavior',
         happyMs: 'Happy duration after done',
         sleepMs: 'Idle time before sleeping',
@@ -244,6 +248,8 @@ window.__ModuleLoader__.load({
         statusAlways: false,
         /** AI 完成一回合时弹提醒。 */
         notifyComplete: true,
+        /** 授权/提问常亮提醒（Host 用它决定 attention；独立于 bubble 总开关）。 */
+        attentionReminder: true,
         locale: 'zh'
       }
       if (input === null || typeof input !== 'object') return base
@@ -254,7 +260,7 @@ window.__ModuleLoader__.load({
       if (Number.isFinite(input.scale)) out.scale = Math.min(3, Math.max(0.3, input.scale))
       if (Number.isFinite(input.opacity)) out.opacity = Math.min(1, Math.max(0.3, input.opacity))
       for (const k of ['clickThrough', 'topmost', 'bubble', 'bubbleImages',
-        'hint', 'statusAlways', 'notifyComplete']) {
+        'hint', 'statusAlways', 'notifyComplete', 'attentionReminder']) {
         if (typeof input[k] === 'boolean') out[k] = input[k]
       }
       if (Number.isFinite(input.x)) out.x = Math.round(input.x)
@@ -631,9 +637,18 @@ window.__ModuleLoader__.load({
           : h('div', {
               key: 'bubble',
               className: 'zf-pet__bubble'
-                + (bubble.imageOpaque ? ' zf-pet__bubble--opaque' : ''),
+                + (bubble.imageOpaque ? ' zf-pet__bubble--opaque' : '')
+                + (bubble.kind === 'attention' ? ' zf-pet__bubble--attention' : ''),
               'data-zf-pet-bubble-kind': bubble.kind
             }, [
+              // 待处理计数徽标（同时两处要处理时显示 "2"）——
+              // 常亮提醒最怕"只看见一个，其实有俩"。
+              bubble.kind === 'attention' && (bubble.attentionCount ?? 1) > 1
+                ? h('span', {
+                    key: 'bubble-badge',
+                    className: 'zf-pet__bubble-badge'
+                  }, String(bubble.attentionCount))
+                : null,
               bubbleImage === null
                 ? null
                 : h('img', {
@@ -862,6 +877,13 @@ window.__ModuleLoader__.load({
           value: settings.notifyComplete,
           onChange: v => set({ notifyComplete: v })
         }),
+        h(Toggle, {
+          key: 'attentionReminder',
+          label: t('attentionReminder'),
+          hint: t('attentionReminderHint'),
+          value: settings.attentionReminder,
+          onChange: v => set({ attentionReminder: v })
+        }),
 
         h('h3', { key: 'g4', className: 'zf-pet-settings__group' }, t('groupBehavior')),
         h('label', { key: 'activity', className: 'zf-pet-row' }, [
@@ -1052,6 +1074,30 @@ window.__ModuleLoader__.load({
   object-fit:contain;
   border-radius:10px;
   display:block;
+}
+/* ── 常亮提醒（契约 §2 attention）──────────────────────────────────────
+ * 它与普通气泡的区别只有**醒目程度**，绝不能盖掉桌宠本体：
+ * · 描边加粗 + 主题强调色（比普通气泡的灰边明显一档）；
+ * · 轻微呼吸脉动（2.5s 一轮，只改描边/投影亮度，不做位移 —— 位移会跟拖动打架）；
+ * · 徽标：两处以上待处理时显示计数，别让人只看见一个。
+ * 它**不参与过期**：显隐完全由 attention 块决定（Host 已把 sticky 透传）。
+ * ──────────────────────────────────────────────────────────────────── */
+.zf-pet__bubble--attention{
+  border:2px solid var(--dsw-alias-brand-primary, #4a7);
+  font-weight:600;
+  animation:zf-pet-bubble-in .16s ease-out, zf-pet-attention-pulse 2.5s ease-in-out infinite;
+}
+.zf-pet__bubble-badge{
+  flex:0 0 auto;
+  min-width:18px;height:18px;padding:0 5px;
+  border-radius:9px;
+  background:#d94848;color:#fff;
+  font-size:11px;font-weight:700;line-height:18px;
+  text-align:center;
+}
+@keyframes zf-pet-attention-pulse{
+  0%,100%{ box-shadow:0 6px 18px rgba(0,0,0,.18); }
+  50%{ box-shadow:0 6px 18px rgba(0,0,0,.18), 0 0 14px 2px var(--dsw-alias-brand-primary, #4a7); }
 }
 @keyframes zf-pet-bubble-in{
   from{ opacity:0; transform:translateY(4px) scale(.96); }

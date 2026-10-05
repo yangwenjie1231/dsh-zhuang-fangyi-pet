@@ -520,6 +520,54 @@ await ok('派发 agent/error → 推 error', async () => {
   assert.ok(hit, `未推送 error。最近帧：${JSON.stringify(sse.snapshots().slice(-2))}`)
 })
 
+/* ── attention（常亮提醒）在真实装配下的起落（契约 §2）─────────────────── */
+
+await ok('⭐ approval/asked → attention 随 /pet/state 与 SSE 推出，气泡 sticky', async () => {
+  ctx.emit('session/event', { id: 'e2e-1' }, {
+    type: 'approval/asked',
+    data: { turn: 2, step: 1 }
+  })
+  const deadline = Date.now() + 4000
+  let hit = null
+  while (Date.now() < deadline) {
+    const frame = [...sse.snapshots()].reverse().find(s => s.attention != null)
+    if (frame) { hit = frame; break }
+    await new Promise(r => setTimeout(r, 25))
+  }
+  assert.ok(hit, `SSE 未推 attention。最近帧：${JSON.stringify(sse.snapshots().slice(-1))}`)
+  assert.equal(hit.attention.kind, 'approval')
+  assert.equal(hit.attention.count, 1)
+  assert.equal(hit.bubble?.kind, 'attention')
+  assert.equal(hit.bubble?.sticky, true, 'sticky=渲染方不按 durationMs 收')
+  // /pet/state（轮询兜底通道）与 SSE 必须同构
+  const st = JSON.parse((await get('/api/zhuang-fangyi/pet/state')).body)
+  assert.equal(st.attention?.kind, 'approval', '/pet/state 也要带 attention')
+  assert.equal(st.bubble?.kind, 'attention')
+})
+
+await ok('⭐ attention 存续期间普通气泡被挡住（帧里持续是 attention 气泡）', async () => {
+  const last = [...sse.snapshots()].reverse().find(s => s.attention != null)
+  assert.ok(last !== undefined, 'attention 应仍在帧里')
+  assert.equal(last.bubble?.kind, 'attention', '普通气泡抢不走（priority 100）')
+})
+
+await ok('⭐ approval/decided → attention 归零（/pet/state 同步）', async () => {
+  ctx.emit('session/event', { id: 'e2e-1' }, {
+    type: 'approval/decided',
+    data: { turn: 2, step: 1, outcome: 'allowed' }
+  })
+  const deadline = Date.now() + 4000
+  let cleared = false
+  while (Date.now() < deadline) {
+    const st = JSON.parse((await get('/api/zhuang-fangyi/pet/state')).body)
+    if (st.attention === null) { cleared = true; break }
+    await new Promise(r => setTimeout(r, 25))
+  }
+  assert.ok(cleared, '处理完应立刻收起')
+  const st = JSON.parse((await get('/api/zhuang-fangyi/pet/state')).body)
+  assert.equal(st.bubble, null, '气泡同步收起')
+})
+
 await ok('SSE 里每一帧的 petState 都是契约 §1 的合法状态名', async () => {
   const VALID = ['waking', 'idle', 'listening', 'thinking', 'working', 'waiting', 'happy', 'error', 'sleeping']
   for (const snap of sse.snapshots()) {

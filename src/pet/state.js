@@ -88,6 +88,8 @@ export const EVENT_TEXT = {
   'turn/max-tokens': { zh: '输出被截断', en: 'Output truncated' },
   /** `notifyComplete` 强提醒的文案。不是状态，只是"跑完了"的一声招呼。 */
   'notify-complete': { zh: '完成啦！来看看～', en: 'All done — take a look!' },
+  /** 常亮提醒：AI 在等你回答问题（`ask_user_question`）。 */
+  'ask-user': { zh: '问了你一个问题，在等你回答…', en: 'Asked you a question — waiting…' },
   'native/error': { zh: '桌面窗口开不起来', en: 'Desktop window unavailable' }
 }
 
@@ -117,6 +119,24 @@ export const DEFAULT_CONFIG = {
    * 由活跃度档位给出（只有"调皮"会给一个数）。见 `activity.js`。
    */
   idleEmoteMs: null,
+  /**
+   * 「授权/提问常亮提醒」开关（用户点名的功能）。
+   *
+   * 开启时：AI 要授权（`approval/asked`）或提问（`ask_user_question`）期间，
+   * 气泡**常亮直到处理完**，不受 `bubbleMs` 影响。
+   * 关闭时：完全回到现状（审批只弹 6 秒）。
+   *
+   * **独立于 `bubble` 总开关**：关掉普通气泡不等于不想要审批提醒。
+   */
+  attentionReminder: true,
+  /**
+   * 常亮提醒的**兜底上限**（ms）：超过这个时长还没被处理就自动放下。
+   *
+   * 为什么必须有：提问的清除依赖 `tool/result`（实测真实 tool/result 不带 callId，
+   * 只能保守清除）；一旦某个事件没到，提醒会永久挂在屏幕上挡住视线。
+   * 30 分钟足够人离开电脑吃顿饭再回来，也不会变成"永久钉子"。
+   */
+  attentionMaxMs: 1800000,
   /** 气泡文案语言。 */
   locale: 'zh'
 }
@@ -186,6 +206,13 @@ function newRecord (sessionId) {
     running: false,
     toolsInFlight: new Set(),
     waiting: false,
+    /** `ask_user_question` 已发出、还没拿到回答（常亮提醒的 question 一侧）。 */
+    askPending: false,
+    /**
+     * 当前待处理事项（waiting 或 askPending）的起始时刻。
+     * 既是提醒的 `since`，也是**兜底上限** `attentionMaxMs` 的计时起点。
+     */
+    attentionSince: null,
     error: null,
     happyUntil: null,
     listeningUntil: null,
@@ -257,6 +284,15 @@ export function createPetState (options = {}) {
       next.idleEmoteMs = Number.isFinite(n) && n > 0 ? n : null
     }
     if (!Array.isArray(next.bubbleStates)) next.bubbleStates = DEFAULT_CONFIG.bubbleStates
+    // 常亮提醒：非布尔一律回落默认（true）；上限必须是有限正数，
+    // 否则 `at - since >= NaN` 永远为 false，兜底就失效了。
+    next.attentionReminder = next.attentionReminder === true || next.attentionReminder === false
+      ? next.attentionReminder
+      : DEFAULT_CONFIG.attentionReminder
+    {
+      const n = Number(next.attentionMaxMs)
+      next.attentionMaxMs = Number.isFinite(n) && n > 0 ? n : DEFAULT_CONFIG.attentionMaxMs
+    }
     if (next.locale !== 'zh' && next.locale !== 'en') next.locale = DEFAULT_CONFIG.locale
     return next
   }
@@ -299,6 +335,12 @@ export function createPetState (options = {}) {
   let idleEmoteAt = 0
   let idleEmoteArmed = false
   let idleEmoteSeq = 0
+  /**
+   * 当前「授权/提问」待处理提醒（契约 §2 的 `attention` 块）。
+   * 由 `refresh()` 每次重算；`null` = 没有需要处理的事。
+   */
+  let lastAttention = null
+  let lastAttentionKey = null
   let nativeAvailable = false
   let nativeError = null
 
@@ -386,6 +428,46 @@ export function createPetState (options = {}) {
     return true
   }
 
+  /**
+   * 计算当前「授权/提问」待处理提醒（契约 §2 `attention`）。
+   *
+   * 规则：
+   *   · `approval`（在等你审批）**压过** `question`（问了你问题）；
+   *   · 同级取 `lastEventAt` 最新的那个会话（桌宠此刻最可能在演它）；
+   *   · `count` = 待处理会话总数（同时有两处要处理时给渲染方一个"2"）；
+   *   · **兜底上限** `attentionMaxMs`：超时的会话直接不再提醒 ——
+   *     提问的清除依赖 tool/result（真实事件不带 callId，只能保守），
+   *     事件没到时必须能自己放下，绝不能永久钉在屏幕上。
+   *
+   * @param {number} at
+   * @returns {object|null}
+   */
+  function computeAttention (at) {
+    if (cfg.attentionReminder !== true) return null
+    let best = null
+    let bestSeverity = 0
+    let count = 0
+    for (const rec of sessions.values()) {
+      let kind = null
+      if (rec.waiting === true) kind = 'approval'
+      else if (rec.askPending === true) kind = 'question'
+      if (kind === null) continue
+      const since = rec.attentionSince ?? rec.lastEventAt
+      if (at - since >= cfg.attentionMaxMs) continue // 超上限：放下这个（每个会话独立计时）
+      count += 1
+      const severity = kind === 'approval' ? 2 : 1
+      if (severity > bestSeverity ||
+          (severity === bestSeverity && rec.lastEventAt >= (best?.lastEventAt ?? -Infinity))) {
+        best = { kind, sessionId: rec.sessionId, since, lastEventAt: rec.lastEventAt }
+      }
+    }
+    if (best === null) return null
+    const text = best.kind === 'approval'
+      ? textOf(STATE_TEXT, 'waiting', cfg.locale)
+      : textOf(EVENT_TEXT, 'ask-user', cfg.locale)
+    return { kind: best.kind, sessionId: best.sessionId, text, since: best.since, count }
+  }
+
   /** 重新求值；状态或气泡变化时推进 `rev` 并通知监听者。 */
   function refresh (at) {
     const next = computeState(at)
@@ -401,13 +483,65 @@ export function createPetState (options = {}) {
       }
     }
 
+    // ── ⭐ 常亮提醒（attention）─────────────────────────────────────────────
+    //
+    // 它**接管**普通气泡的显示位，直到被处理或触达上限：
+    //   · 出现/切换（不同会话或重新发起）→ 换一个新气泡（id 递增，渲染方据此重绘）；
+    //   · 还在等 → 保持不动（sticky：不走下面的过期清理）；
+    //   · 撤了 → 立刻收起。
+    const attention = computeAttention(at)
+    const attentionKey = attention === null
+      ? null
+      : `${attention.kind}:${attention.sessionId}:${attention.since}`
+    if (attentionKey !== null) {
+      const current = bubble !== null && bubble.kind === 'attention' ? bubble : null
+      if (current === null || current.attentionKey !== attentionKey) {
+        bubble = {
+          id: ++bubbleSeq,
+          kind: 'attention',
+          attentionKey,
+          image: null,
+          imageHasText: false,
+          imageOpaque: false,
+          imageDark: null,
+          text: attention.text,
+          /** 常亮：渲染方不按 durationMs 收，一切以 attention 块为准。 */
+          sticky: true,
+          /** 待处理计数（渲染方徽标）；创建时就带上，否则首帧会显示成 1。 */
+          attentionCount: attention.count,
+          // durationMs 只作最后防线（与 attentionMaxMs 同源）；正常靠 attention=null 收。
+          durationMs: cfg.attentionMaxMs,
+          // 高于 working(90)：普通气泡在它存续期间全被优先级挡住。
+          priority: 100,
+          state: null,
+          at
+        }
+        changed = true
+      } else if (current.text !== attention.text || current.attentionCount !== attention.count) {
+        // 文案（locale/审批类型）或 count 变了：同 key 也要刷新显示。
+        current.text = attention.text
+        current.attentionCount = attention.count
+        changed = true
+      }
+    } else if (bubble !== null && bubble.kind === 'attention') {
+      bubble = null // 提醒被处理/超时撤下 → 立刻收起
+      changed = true
+    }
+    // 提醒块本身变了（即使气泡内容没变，count/session 变化也要推进 rev）。
+    const prevAttentionKey = lastAttentionKey
+    lastAttention = attention
+    lastAttentionKey = attentionKey
+    if (attentionKey !== prevAttentionKey) changed = true
+
     // ⭐ "AI 完成时提醒我"：一回合成干净结束（completed）就**强制**弹一条。
     // 这是用户点名的功能 —— `happy` 闩锁气泡可能被静默期/优先级挡掉，
     // 但"跑完了"这个事实值得立刻知道。所以绕过 requestBubble 的三条规则
     //（等价于 `force: true`），只受 `notifyComplete` 与气泡总开关约束。
     // **气泡总开关优先**：`bubbleStates: []` 表达"用户不想要任何气泡"，
     // 提醒再重要也不能违背它 —— 否则关了气泡还会突然蹦一条，等于失控。
-    if (cfg.notifyComplete === true &&
+    // **attention 优先级更高**：正在等你审批时，"完成啦"的声势必须让位。
+    if (attentionKey === null &&
+        cfg.notifyComplete === true &&
         cfg.bubbleStates.length > 0 &&
         lastCompletedAt > completedNotifiedAt) {
       completedNotifiedAt = lastCompletedAt
@@ -426,7 +560,8 @@ export function createPetState (options = {}) {
     //
     // 每次都重新排下一次（哪怕这次没弹）：排程本身就是限流，
     // 所以用**带计数的 key**绕开按 key 的静默期，而不是靠静默期限流。
-    if (typeof cfg.idleEmoteMs === 'number' && cfg.idleEmoteMs > 0 && cfg.bubbleStates.length > 0) {
+    if (attentionKey === null &&
+        typeof cfg.idleEmoteMs === 'number' && cfg.idleEmoteMs > 0 && cfg.bubbleStates.length > 0) {
       if (idleEmoteArmed === false) {
         idleEmoteAt = at + nextIdleEmoteDelay(cfg.idleEmoteMs)
         idleEmoteArmed = true
@@ -439,12 +574,13 @@ export function createPetState (options = {}) {
         // 忙着呢 —— 这段时间不算数，重新排，别一空下来就立刻蹦。
         idleEmoteAt = at + nextIdleEmoteDelay(cfg.idleEmoteMs)
       }
-    } else {
+    } else if (attentionKey === null) {
       idleEmoteArmed = false
     }
 
     // 气泡过期：清掉，让客户端收起气泡窗。
-    if (bubble !== null && at >= bubble.at + bubble.durationMs) {
+    // **sticky（attention）不过期** —— 它的存续由上面的 attention 块决定。
+    if (bubble !== null && bubble.sticky !== true && at >= bubble.at + bubble.durationMs) {
       bubble = null
       changed = true
     }
@@ -509,6 +645,14 @@ export function createPetState (options = {}) {
         rec.running = true
         rec.toolsInFlight.add(String(event.callId ?? `${at}-${rec.toolsInFlight.size}`))
         rec.lastEventAt = at
+        // ⭐ AI 在等你回答问题（`ask_user_question` 是阻塞工具：结果要等你选）。
+        // 这就是常亮提醒的 question 一侧 —— 没有它，提问只会表现为 working，
+        // 6 秒气泡过去后桌面毫无动静，人不在电脑前就错过了。
+        if (event.name === 'ask_user_question' && rec.askPending !== true) {
+          rec.askPending = true
+          // 同会话已有待处理事项（如审批）时保留原起点：计时取最早。
+          if (rec.attentionSince === null) rec.attentionSince = at
+        }
         break
       }
 
@@ -520,6 +664,12 @@ export function createPetState (options = {}) {
           rec.toolsInFlight.delete(rec.toolsInFlight.values().next().value)
         }
         rec.lastEventAt = at
+        // 提问被回答 = 没有在飞的工具了（真实 tool/result **不带 callId**，
+        // 无法精确配对，用"归零"做保守清除；归不了零的还有 attentionMaxMs 兜底）。
+        if (rec.askPending === true && rec.toolsInFlight.size === 0) {
+          rec.askPending = false
+          if (!rec.waiting) rec.attentionSince = null
+        }
         if (event.isError === true) {
           requestBubble('tool/failed', at, {
             table: EVENT_TEXT, text: textOf(EVENT_TEXT, 'tool/failed', cfg.locale),
@@ -534,6 +684,9 @@ export function createPetState (options = {}) {
         rec.running = false
         rec.toolsInFlight.clear()
         rec.lastEventAt = at
+        // 回合结束 = 提问无论答没答都被收回（模型不再等了），提醒跟着撤。
+        rec.askPending = false
+        if (!rec.waiting) rec.attentionSince = null
         const kind = event.reason?.kind ?? event.reason ?? 'completed'
         if (kind === 'completed') {
           rec.happyUntil = at + cfg.happyMs
@@ -581,6 +734,8 @@ export function createPetState (options = {}) {
       case 'approval/asked': {
         const rec = ensure(sessionId)
         rec.waiting = true
+        // 计时从**最早**的待处理事项算起（同会话先提问后审批时保留提问的起点）。
+        if (rec.attentionSince === null) rec.attentionSince = at
         rec.lastEventAt = at
         break
       }
@@ -589,6 +744,8 @@ export function createPetState (options = {}) {
         const rec = ensure(sessionId)
         rec.waiting = false
         rec.lastEventAt = at
+        // 审批处理完：若没有提问还挂着，起始时刻一并清掉。
+        if (!rec.askPending) rec.attentionSince = null
         break
       }
 
@@ -652,9 +809,20 @@ export function createPetState (options = {}) {
             imageOpaque: bubble.imageOpaque === true,
             /** 深色模式变体路径（渲染方按自己的主题挑；null 表示没有）。 */
             imageDark: bubble.imageDark ?? null,
+            /** 常亮气泡（attention）：**不按 durationMs 收**，以 attention 块为准。 */
+            sticky: bubble.sticky === true,
+            /** attention 的待处理计数（渲染方显示"2 项待处理"；普通气泡为 1）。 */
+            attentionCount: bubble.attentionCount ?? 1,
             durationMs: bubble.durationMs,
             priority: bubble.priority
           },
+      /**
+       * 契约 §2 `attention`：当前**等你处理**的事（授权/提问）。
+       *
+       * `null` = 没有。渲染方用它决定常亮气泡的显隐与样式；
+       * **缺该块（旧 Host）按 null 处理**（向后兼容）。
+       */
+      attention: lastAttention,
       sessions: [...sessions.values()].map(rec => ({
         sessionId: rec.sessionId,
         state: sessionState(rec, at),

@@ -289,6 +289,8 @@ export function apply (ctx, config) {
       idleEmoteMs: act.idleEmoteMs,
       /** AI 完成一回合时**强制**弹一条提醒（绕过静默期与优先级）。 */
       notifyComplete: s.notifyComplete,
+      /** 授权/提问常亮提醒。**不看 `bubble` 总开关** —— 它们是独立开关。 */
+      attentionReminder: s.attentionReminder,
       locale: s.locale,
       // 气泡总开关关掉 → 空列表（状态机据此知道"用户不想要任何气泡"）。
       bubbleStates: s.bubble ? act.bubbleStates : []

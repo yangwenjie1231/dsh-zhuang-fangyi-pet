@@ -192,6 +192,12 @@ working(90) > waiting(80) > thinking(70) > error(60)
 - **`waiting` 高于 `thinking`** —— 被审批卡住的会话最该被看到，
   否则它看起来只是"在忙"。
 
+**常亮提醒（attention，契约 §2）**：状态之上的另一层。`approval/asked`（等审批）
+或 `ask_user_question`（等你回答）期间，气泡**一直亮着直到处理完**，
+不受 `bubbleMs` 影响；`approval` 压过 `question`，同时多处待处理显示计数徽标。
+兜底上限 30 分钟（超时自动放下，绝不永久钉死）。设置项
+`attentionReminder` 独立于 `bubble` 总开关 —— 关普通气泡不等于不要审批提醒。
+
 ---
 
 ## 六、配置
@@ -203,12 +209,20 @@ working(90) > waiting(80) > thinking(70) > error(60)
 |---|---|---|
 | `enabled` | `true` | 总开关 |
 | `mode` | `'auto'` | `auto`（优先桌面窗）/ `native` / `overlay` |
-| `scale` | `1.0` | 大小，0.5~2.0 |
+| `scale` | `1.0` | 大小，0.3~3.0（设置页滑杆、滚轮缩放、exe 三处同范围） |
 | `opacity` | `1.0` | 不透明度，0.3~1.0 |
 | `topmost` | `true` | 总在最前 |
 | `clickThrough` | `false` | 整窗穿透（纯装饰） |
 | `bubble` | `true` | 气泡总开关 |
 | `bubbleImages` | `true` | 气泡是否显示表情图 |
+| `bubbleMs` | `6000` | 气泡一次显示多久（1~20s） |
+| `bubbleGapMs` | `8000` | 两条气泡最小间隔（0~60s，0=不限） |
+| `notifyComplete` | `true` | AI 完成一回合时强制弹一条提醒 |
+| `attentionReminder` | `true` | **授权/提问常亮提醒**（气泡一直亮到处理完；独立于 `bubble`） |
+| `activity` | `'normal'` | 活跃度：`quiet` 安静 / `normal` 正常 / `playful` 调皮 |
+| `doubleClick` | `'focus-dsh'` | 双击桌宠：`focus-dsh` / `emote` 换表情 / `none` |
+| `theme` | `'auto'` | 贴纸深浅色：`auto` / `light` / `dark` |
+| `hint` / `statusAlways` | `true` / `false` | 悬停显示状态 / 桌宠下方常显状态 |
 | `happyMs` | `3000` | "完成"开心多久 |
 | `sleepMs` | `300000` | 空闲多久后睡觉 |
 | `x` / `y` | `null` | **仅原生窗口**的位置 |
@@ -221,9 +235,14 @@ working(90) > waiting(80) > thinking(70) > error(60)
 ## 七、交互
 
 - **拖动**：按住桌宠拖到任意位置，重启后保持（拖出屏幕会被夹回工作区）。
-- **双击**：唤起并前置 DSH 主窗口（best-effort）。
+- **滚轮缩放**：鼠标悬停在桌宠上直接滚轮缩放（0.3×~3×，去抖后持久化）。
+- **双击**：默认唤起并前置 DSH 主窗口（可在设置里换成"换一个随机表情"或"什么都不做"）。
+- **悬停 ✎**：鼠标移到桌宠上出现小 ✎ 按钮，点开输入条**直接给会话发消息**
+  （排队语义，不打断当前回合；宿主没提供发消息能力时不显示这个入口）。
 - **透明处点击穿透**：鼠标能点到桌宠"身后"的桌面图标与窗口 ——
   这是靠 `WM_NCHITTEST` 按像素 alpha 判定的（已实测）。
+- **授权/提问常亮提醒**：AI 要你审批或回答问题时，气泡常亮到你处理完；
+  桌面窗口版带「去处理」按钮一键聚焦 DSH（overlay 用户已在 DSH 内，不加按钮）。
 - **托盘图标**：显示/隐藏、点击穿透开关、缩放档位、重置位置、退出。
 - **右键桌宠**：切换表情预览、打开 DSH 窗口、隐藏。
 

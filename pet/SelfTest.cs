@@ -83,6 +83,7 @@ namespace DshZhuangFangyiPet
                 TestFilesMapCompat();
                 TestClamp();
                 TestWindows(opt, artDir, cacheDir, sheet);
+                TestAttentionPresentation();
                 TestMutex();
                 TestHttp(opt);
             }
@@ -707,6 +708,128 @@ namespace DshZhuangFangyiPet
                          PetInput.DescribeSendError(503, "{}").IndexOf("宿主", StringComparison.Ordinal) >= 0 &&
                          PetInput.DescribeSendError(418, "{}").IndexOf("418", StringComparison.Ordinal) >= 0;
             Check(errOk, "send 失败文案映射（0/400/409/503/其它）", "网络失败/超长/无会话/不可用/未知码各有一句话");
+        }
+
+        /// <summary>
+        /// task-8：attention 解析（缺失/显式 null/正常/非法 kind 回落）、bubble.sticky/attentionCount
+        /// 解析（缺省 false/1）、attention diff 纯函数、真实气泡窗呈现矩阵
+        /// （attention：描边加粗+脉动+徽标+按钮；普通：全无）、按钮转发 focus-dsh 桩断言、旧快照零回归。
+        /// </summary>
+        private static void TestAttentionPresentation()
+        {
+            // (1) attention 块缺失 → null（旧 Host 快照零回归）
+            PetSnapshot none = PetSnapshot.Parse("{\"rev\":1,\"petState\":\"idle\"}");
+            Check(none != null && none.Attention == null,
+                  "attention 块缺失 → null（旧快照零回归）", "Attention=null");
+
+            // (2) 显式 null → null（attentionReminder:false 时 Host 恒发 null）
+            PetSnapshot nul = PetSnapshot.Parse("{\"rev\":2,\"attention\":null}");
+            Check(nul != null && nul.Attention == null,
+                  "attention 显式 null → null（Host 恒发 null 语义）", "Attention=null");
+
+            // (3) 正常块 → 字段齐全；非法 kind 回落 question（不崩）
+            PetSnapshot ok = PetSnapshot.Parse(
+                "{\"rev\":3,\"attention\":{\"kind\":\"approval\",\"sessionId\":\"s-1\"," +
+                "\"text\":\"在等你审批\",\"since\":1791159411846,\"count\":2}}");
+            PetAttentionInfo a = ok == null ? null : ok.Attention;
+            bool parseOk = a != null && a.Kind == "approval" && a.SessionId == "s-1" &&
+                           a.Text == "在等你审批" && a.Since == 1791159411846L && a.Count == 2 &&
+                           a.IsApproval;
+            PetSnapshot badKind = PetSnapshot.Parse(
+                "{\"rev\":4,\"attention\":{\"kind\":\"bogus\",\"text\":\"x\"}}");
+            bool kindOk = badKind != null && badKind.Attention != null &&
+                          badKind.Attention.Kind == "question";
+            Check(parseOk && kindOk, "attention 解析：字段齐全 + 非法 kind 回落 question",
+                  "kind=approval session=s-1 count=2；bogus→question（不崩）");
+
+            // (4) attention diff 纯函数（Program 用它做"值没变零日志"）
+            PetAttentionInfo a2 = PetSnapshot.Parse(
+                "{\"rev\":5,\"attention\":{\"kind\":\"approval\",\"sessionId\":\"s-1\"," +
+                "\"text\":\"在等你审批\",\"since\":1791159411846,\"count\":2}}").Attention;
+            PetAttentionInfo a3 = PetSnapshot.Parse(
+                "{\"rev\":6,\"attention\":{\"kind\":\"approval\",\"sessionId\":\"s-1\"," +
+                "\"text\":\"在等你审批\",\"since\":1791159411846,\"count\":3}}").Attention;
+            bool diffOk = PetAttentionInfo.Same(null, null) &&
+                          !PetAttentionInfo.Same(a, null) && !PetAttentionInfo.Same(null, a) &&
+                          PetAttentionInfo.Same(a, a2) && !PetAttentionInfo.Same(a, a3);
+            Check(diffOk, "attention diff：Same(null,null)=同值零动作；count 变化=不同",
+                  "同值→true；count 2→3→false（触发一次日志/重渲染）");
+
+            // (5) bubble.sticky / attentionCount 解析（缺省 false/1）
+            PetBubbleInfo plain = PetSnapshot.Parse(
+                "{\"rev\":7,\"bubble\":{\"id\":1,\"kind\":\"text\",\"text\":\"hi\"}}").Bubble;
+            PetBubbleInfo stick = PetSnapshot.Parse(
+                "{\"rev\":8,\"bubble\":{\"id\":2,\"kind\":\"attention\",\"text\":\"在等你审批\"," +
+                "\"sticky\":true,\"attentionCount\":3,\"priority\":100}}").Bubble;
+            bool stickyOk = plain != null && !plain.Sticky && plain.AttentionCount == 1 &&
+                            stick != null && stick.Sticky && stick.AttentionCount == 3 &&
+                            stick.Kind == "attention" && stick.Priority == 100;
+            Check(stickyOk, "bubble.sticky/attentionCount 解析（缺省 false/1）",
+                  "普通气泡 sticky=false count=1；attention 气泡 sticky=true count=3 priority=100");
+
+            // (6) 真实气泡窗呈现矩阵（在 TestWindows 已验证穿透的同一窗口上加断言）
+            // 放在 TestWindows 之后执行：此处独立再建一个气泡窗，不依赖前面的实例。
+            PetBubble bubble = null;
+            try
+            {
+                bubble = new PetBubble();
+                bubble.Opacity = 0;
+                bubble.Show();
+                Pump(120);
+                BitmapSource bmp = MakeSolidBubbleBitmap(24);
+
+                // 6a. 普通气泡：无头部条/无徽标/无按钮/无脉动
+                PetBubbleInfo tb = new PetBubbleInfo();
+                tb.Id = 1001; tb.Kind = "text"; tb.Text = "普通";
+                bubble.Show(tb, null);
+                bool plainOk = !bubble.IsAttentionPresentation && !bubble.GoButtonVisible &&
+                               bubble.BadgeText == null;
+                Check(plainOk, "普通气泡：无 attention 头部条/徽标/按钮/脉动", "全隐藏");
+
+                // 6b. attention 气泡：头部条+描边加粗+脉动；count=1 无徽标
+                PetBubbleInfo ab1 = new PetBubbleInfo();
+                ab1.Id = 1002; ab1.Kind = "attention"; ab1.Text = "在等你审批";
+                ab1.Sticky = true; ab1.AttentionCount = 1; ab1.Priority = 100; ab1.DurationMs = 4000;
+                bubble.Show(ab1, null);
+                bool at1Ok = bubble.IsAttentionPresentation && bubble.GoButtonVisible &&
+                             bubble.BadgeText == null;
+                Check(at1Ok, "attention 气泡：恒亮呈现（描边 2.5 + 脉动 + 去处理按钮）",
+                      "count=1 → 无徽标；IsAttentionPresentation=true");
+
+                // 6c. count=2 → 红色计数徽标 "2"
+                PetBubbleInfo ab2 = new PetBubbleInfo();
+                ab2.Id = 1003; ab2.Kind = "attention"; ab2.Text = "在等你审批";
+                ab2.Sticky = true; ab2.AttentionCount = 2; ab2.Priority = 100;
+                bubble.Show(ab2, null);
+                bool badgeOk = bubble.IsAttentionPresentation && bubble.GoButtonVisible &&
+                               bubble.BadgeText == "2";
+                Check(badgeOk, "attentionCount>=2 → 红色计数徽标", "徽标文本=2");
+
+                // 6d. 「去处理」按钮转发 focus-dsh（桩断言：GoAction 回调被触发）
+                int goHits = 0;
+                Action stub = delegate { goHits++; };
+                Action realGo = bubble.GoAction;
+                bubble.GoAction = stub;
+                try { bubble.RaiseGoForTest(); } catch { }
+                bubble.GoAction = realGo;
+                Check(goHits == 1, "「去处理」点击 → 转发 focus-dsh 链路（桩断言）",
+                      "GoAction 桩被调用 " + goHits + " 次（Program 装配的是 OnFocusDsh）");
+
+                // 6e. attention 解除 → 收起（Host attention=null 的落点）
+                bubble.HideAttention();
+                bool downOk = !bubble.IsAttentionPresentation && !bubble.GoButtonVisible &&
+                              !bubble.Showing;
+                Check(downOk, "attention=null → 气泡立刻收起（脉动停、头部条复位）",
+                      "Showing=false，各元素复位");
+            }
+            catch (Exception ex)
+            {
+                Check(false, "attention 气泡呈现矩阵", PetLog.Describe(ex));
+            }
+            finally
+            {
+                try { if (bubble != null) bubble.ForceClose(); } catch { }
+            }
         }
 
         private static void TestClamp()

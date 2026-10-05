@@ -92,6 +92,12 @@ export function defaultSettings () {
     statusAlways: false,
     /** AI 完成一回合并时弹一条提醒气泡（force，绕过静默期）。 */
     notifyComplete: true,
+    /**
+     * 授权/提问**常亮**提醒（用户点名的功能）：AI 要授权或提问时，
+     * 气泡一直亮着直到你处理完。**独立于 `bubble` 总开关** ——
+     * 关掉普通气泡不等于不想要审批提醒。
+     */
+    attentionReminder: true,
     /** 气泡文案语言；跟随 DSH 界面语言时可被客户端覆盖。 */
     locale: 'zh'
   }
@@ -129,7 +135,7 @@ export function normalizeSettings (input) {
   out.opacity = clamp(input.opacity, OPACITY_MIN, OPACITY_MAX, base.opacity)
 
   for (const key of ['clickThrough', 'topmost', 'bubble', 'bubbleImages',
-    'hint', 'statusAlways', 'notifyComplete']) {
+    'hint', 'statusAlways', 'notifyComplete', 'attentionReminder']) {
     if (typeof input[key] === 'boolean') out[key] = input[key]
   }
 
