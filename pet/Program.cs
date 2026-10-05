@@ -327,7 +327,7 @@ namespace DshZhuangFangyiPet
             };
             _tray.SetClickThrough = delegate(bool on) { _win.SetClickThrough(on); };
             _tray.SetTopmost = delegate(bool on) { _win.SetTopmost(on); _tray.SetTopmostCheck(on); };
-            _tray.SetScale = delegate(double s) { _win.SetScale(s); _win.ReclampPosition(false); };
+            _tray.SetScale = delegate(double s) { _win.SetScale(s); _win.ReclampPosition(false); _bubble.SetScale(s); };
             _tray.SetBubble = delegate(bool on)
             {
                 _bubbleOn = on;
@@ -515,6 +515,7 @@ namespace DshZhuangFangyiPet
                 if (Math.Abs(s - _win.Scale) > 0.001)
                 {
                     _win.SetScale(s);   // 内部含 ApplySizeForSheet + ReclampPosition
+                    _bubble.SetScale(s);  // 气泡同比缩放（它是独立窗口，不会自己跟）
                     PetLog.Info("settings: scale → " + s.ToString("0.0#", CultureInfo.InvariantCulture));
                     changed = true;
                 }
@@ -674,6 +675,8 @@ namespace DshZhuangFangyiPet
             _scalePostTimer.Stop();
             _scalePostTimer.Start();
             _tray.Refresh();   // 缩放档位勾选立即对齐
+            // 气泡同比缩放：滚轮时立刻重排（否则气泡僵在原尺寸，看着很突兀）
+            try { _bubble.SetScale(newScale); } catch (Exception ex) { PetLog.Warn("气泡缩放失败: " + PetLog.Describe(ex)); }
         }
 
         private void OnScalePostTick(object sender, EventArgs e)

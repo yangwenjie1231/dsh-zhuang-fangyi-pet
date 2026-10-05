@@ -33,6 +33,8 @@ namespace DshZhuangFangyiPet
         private readonly DispatcherTimer _pulseTimer;
         private bool _pulseOn;
         private bool _attentionMode;
+        /// <summary>当前是否为不透明满幅贴纸呈现（缩放重铺时要用同一分支）。</summary>
+        private bool _opaquePresentation;
 
         private readonly DispatcherTimer _hideTimer;
         private IntPtr _hwnd;
@@ -44,11 +46,29 @@ namespace DshZhuangFangyiPet
         private string _currentKind;
         private int _currentPriority = int.MinValue;
 
-        // 透明抠图气泡的默认外观（契约 §4 opaque=false 的呈现，保持历史值不动）
-        private static readonly Thickness DefaultPadding = new Thickness(10, 7, 10, 7);
-        private static readonly Thickness DefaultBorderWidth = new Thickness(1);
-        private const double DefaultImageMaxH = 160;
-        private const double DefaultImageMaxW = 200;
+        // 透明抠图气泡的默认外观（契约 §4 opaque=false 的呈现）。
+        //
+        // ⚠️ 这些值**随桌宠缩放同比变化**：气泡是独立窗口，过去尺寸/字号写死，
+        // 桌宠缩到 0.5× 时气泡还是原尺寸（比例崩掉）。基准值是 scale=1 时的取值，
+        // 实际值 = 基准 × scale（见 UpdateMetrics）。
+        private const double BasePaddingX = 10;
+        private const double BasePaddingY = 7;
+        private const double BaseBorderWidth = 1;
+        private const double BaseImageMaxH = 160;
+        private const double BaseImageMaxW = 200;
+        private const double BaseTextMaxW = 240;
+        private const double BaseFontSize = 13;
+        private const double BaseBadgeFontSize = 11;
+        private const double BaseGoFontSize = 12;
+        private const double BaseCornerRadius = 9;
+
+        /// <summary>当前缩放（0.3~3.0，与本体一致）。</summary>
+        private double _scale = 1.0;
+
+        private Thickness DefaultPadding;
+        private Thickness DefaultBorderWidth;
+        private double DefaultImageMaxH;
+        private double DefaultImageMaxW;
         private Brush _defaultBackground;
         private Brush _defaultBorderBrush;
         /// <summary>当前配色（ApplyTheme 时更新）。</summary>
@@ -56,13 +76,18 @@ namespace DshZhuangFangyiPet
 
         // 契约 §4 opaque=true：不透明满幅贴纸本身就是整张卡片（含文字），
         // 160px 高度下 baked-in 中文读不清 → 放宽到 240（窗口 SizeToContent 自适应）。
-        private const double OpaqueImageMaxH = 240;
-        private const double OpaqueImageMaxW = 240;
+        private double OpaqueImageMaxH = 240;
+        private double OpaqueImageMaxW = 240;
 
         /// <summary>取本体窗的屏幕矩形（物理像素），由 Program 注入。</summary>
         public Func<int[]> PetRectProvider;
 
         public long CurrentId { get { return _currentId; } }
+
+        /// <summary>自检诊断用：正文当前字号（缩放断言用）。</summary>
+        internal double DiagTextFontSize { get { return _text == null ? 0 : _text.FontSize; } }
+        /// <summary>自检诊断用：图片上限高度（缩放断言用）。</summary>
+        internal double DiagImageMaxH { get { return _image == null ? 0 : _image.MaxHeight; } }
         public bool Showing { get; private set; }
 
         /// <summary>
@@ -324,7 +349,8 @@ namespace DshZhuangFangyiPet
             // 再画气泡自己的底/边框/内边距会出现「白纸贴在浅色框里」的双层边框 → 全部去掉。
             // 透明抠图（缺省/显式 false）保持原有呈现不变。
             // task-8：attention 气泡恒走默认底（attention 有自己的描边/头部条，满幅贴纸语义不适用）。
-            ApplyBubbleChrome(hasImg && b.Opaque && !attention);
+            _opaquePresentation = hasImg && b.Opaque && !attention;
+            ApplyBubbleChrome(_opaquePresentation);
 
             // task-8：attention 头部条 —— 徽标（count>=2）与「去处理」按钮
             _attentionMode = attention;
@@ -413,6 +439,71 @@ namespace DshZhuangFangyiPet
             }
         }
 
+        /// <summary>
+        /// 按当前缩放重算所有外观尺寸（字号/内边距/图片上限/圆角/徽标/按钮）。
+        ///
+        /// **为什么要整体重算**：气泡是独立窗口，尺寸来自 `SizeToContent`，
+        /// 而字号与图片上限是布局的输入。只改窗口大小是没用的 ——
+        /// 必须改这些"内容尺寸"，窗口才会跟着缩。
+        /// </summary>
+        private void UpdateMetrics()
+        {
+            double s = _scale;
+            if (s <= 0) s = 1.0;
+            // 下限保护：字太小会糊成一团，小到 0.3× 时字号仍有 ~6.5pt 可读
+            double fs = Math.Max(6.5, BaseFontSize * s);
+            _text.FontSize = fs;
+            _text.MaxWidth = Math.Max(120, BaseTextMaxW * s);
+            _badgeText.FontSize = Math.Max(7, BaseBadgeFontSize * s);
+            _goText.FontSize = Math.Max(7, BaseGoFontSize * s);
+
+            DefaultPadding = new Thickness(BasePaddingX * s, BasePaddingY * s, BasePaddingX * s, BasePaddingY * s);
+            DefaultBorderWidth = new Thickness(Math.Max(0.5, BaseBorderWidth * s));
+            DefaultImageMaxH = BaseImageMaxH * s;
+            DefaultImageMaxW = BaseImageMaxW * s;
+            OpaqueImageMaxH = 240 * s;
+            OpaqueImageMaxW = 240 * s;
+            _badge.CornerRadius = new CornerRadius(Math.Max(2, 8 * s));
+            _goBtn.CornerRadius = new CornerRadius(Math.Max(2, 6 * s));
+        }
+
+        /// <summary>
+        /// 跟随桌宠缩放（由 Program 在 SetScale / 快照 settings.scale 变化时调用）。
+        ///
+        /// 正在显示的气泡会**立即**按新尺寸重排并重新贴到本体旁边，
+        /// 不必等下一个气泡 —— 否则用户滚轮缩放时，气泡会僵在原尺寸上很突兀。
+        /// </summary>
+        public void SetScale(double scale)
+        {
+            _scale = scale <= 0 ? 1.0 : scale;
+            UpdateMetrics();
+            try
+            {
+                // 已显示：重排内容并重新定位（PlaceNearPet 用 ActualWidth/Height，需先 Measure）
+                _root.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                UpdateLayout();
+                // 当前呈现方式要按新尺寸重铺（opaque 贴纸与普通气泡的内边距/圆角不同）
+                ApplyCurrentChrome();
+                PlaceNearPet();
+            }
+            catch (Exception ex) { PetLog.Warn("气泡缩放重排失败: " + PetLog.Describe(ex)); }
+        }
+        /// <summary>
+        /// 按**当前呈现方式**重铺外壳（缩放后必须重铺：内边距/圆角/图片上限都变了）。
+        /// opaque 满幅贴纸不套气泡底；普通气泡走默认外壳。
+        /// </summary>
+        private void ApplyCurrentChrome()
+        {
+            if (_currentKind == "attention")
+            {
+                // attention：保留自己的橙色描边与加粗，只同步内边距/图片上限
+                _border.Padding = DefaultPadding;
+                _image.MaxHeight = DefaultImageMaxH;
+                _image.MaxWidth = DefaultImageMaxW;
+                return;
+            }
+            ApplyBubbleChrome(_opaquePresentation);
+        }
         /// <summary>透明抠图气泡的默认外壳（背景/边框/圆角 9/内边距/图片上限 160x200）。</summary>
         private void ApplyDefaultChrome()
         {

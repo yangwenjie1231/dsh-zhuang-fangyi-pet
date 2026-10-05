@@ -1004,6 +1004,37 @@ namespace DshZhuangFangyiPet
                 Check(showNotified, "重新显示桌宠也会通知（气泡可重放）",
                       showNotified ? "VisibilityChanged(true) 已发出" : "显示时没有通知");
                 win.VisibilityChanged = delegate { };
+                // ⭐ 气泡必须**跟着桌宠同比缩放**：它是独立窗口，尺寸/字号写死的话
+                // 桌宠缩到 0.5× 时气泡还是原尺寸（比例崩掉）。
+                // 断言用"内容尺寸"而不是窗口尺寸 —— 窗口来自 SizeToContent，
+                // 只改窗口没用，必须改字号/图片上限这些布局输入。
+                // 先按 1× 铺一次，让图片上限等"布局输入"落到基准值
+                //（没 Show 过时 _image.MaxHeight 还是控件默认 0，直接比会误判）。
+                bubble.SetScale(1.0);
+                Pump(80);
+                double fsBefore = bubble.DiagTextFontSize;
+                double imgBefore = bubble.DiagImageMaxH;
+                bubble.SetScale(0.5);
+                Pump(120);
+                double fsSmall = bubble.DiagTextFontSize;
+                double imgSmall = bubble.DiagImageMaxH;
+                bubble.SetScale(2.0);
+                Pump(120);
+                double fsBig = bubble.DiagTextFontSize;
+                double imgBig = bubble.DiagImageMaxH;
+                bubble.SetScale(1.0);
+                Pump(120);
+                double fsBack = bubble.DiagTextFontSize;
+
+                bool scalesDown = fsSmall < fsBefore && imgSmall < imgBefore;
+                bool scalesUp = fsBig > fsBefore && imgBig > imgBefore;
+                bool returnsBack = Math.Abs(fsBack - fsBefore) < 0.01;
+                Check(scalesDown && scalesUp && returnsBack,
+                      "气泡跟随缩放：0.5× 变小 / 2× 变大 / 1× 复原",
+                      "字号 " + fsBefore.ToString("0.#") + " → " + fsSmall.ToString("0.#") +
+                      " → " + fsBig.ToString("0.#") + " → " + fsBack.ToString("0.#") +
+                      "；图片上限 " + imgBefore.ToString("0") + " → " + imgSmall.ToString("0") +
+                      " → " + imgBig.ToString("0"));
 
                 // ⭐ 深浅色主题：气泡外壳必须真的换色（原先只换贴纸图，白框在深色桌面上刺眼）。
                 PetTheme.BubblePalette darkPal = PetTheme.BubblePalette.For(true);
