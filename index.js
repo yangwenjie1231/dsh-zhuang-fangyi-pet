@@ -211,6 +211,31 @@ export function apply (ctx, config) {
   const home = resolveDshHome()
   const dataDir = path.join(home, DATA_DIR_NAME)
 
+  /**
+   * 启动面包屑。
+   *
+   * **为什么需要**：这个插件跑在宿主的进程里，它的 `apply()` 抛错只会出现在
+   * 宿主自己的控制台里 —— 而用户看不到那个控制台。于是"插件没生效"变成了
+   * 一个只能靠猜的现象（设置页空白、桌宠不出现、路由 404，全都没有原因）。
+   * 把每个阶段与任何异常写进一个**用户能读到的文件**，诊断就从猜变成看。
+   */
+  const bootLog = path.join(dataDir, 'boot.log')
+  const boot = stage => {
+    try {
+      fs.appendFileSync(bootLog, `${new Date().toISOString()} ${stage}\n`, 'utf8')
+    } catch { /* 日志失败绝不能影响启动 */ }
+  }
+  boot(`--- apply() 进入 build=${PLUGIN_BUILD} home=${home} ---`)
+
+  // 把整个装配包起来：任何未预期异常都先落盘再抛（照旧让宿主知道失败）。
+  try {
+    return applyInner()
+  } catch (error) {
+    boot(`❌ apply() 抛错：${error?.stack ?? error}`)
+    throw error
+  }
+
+  function applyInner () {
   let settings
   try {
     fs.mkdirSync(dataDir, { recursive: true })
@@ -225,6 +250,7 @@ export function apply (ctx, config) {
     })
   }
   ctx.effect(() => () => settings.dispose(), 'zhuang-fangyi-pet: settings store')
+  boot(`设置已就绪 mode=${settings.get().mode} enabled=${settings.get().enabled}`)
 
   // ── 素材清单：可重载（用户抠好图后跑 prepare-pet.py 再发 reload-art）────────
   let atlas = loadAtlas(ART_DIR, logger)
@@ -288,14 +314,35 @@ export function apply (ctx, config) {
   }
 
   /**
-   * 发消息能力的装配状态（**声明必须早于 `withSettings`**）。
+   * 发消息服务（`ctx.sessionController`）的**惰性解析**。
    *
-   * `withSettings` 每帧广播都会读它们，而广播可能在装配早期就发生 ——
-   * `let` 声明晚于使用会踩暂时性死区（TDZ）直接抛错。
-   * 真正的服务注入在下面（要用 `ctx.inject`），这里只放可变槽位。
+   * 位置要求：必须早于 `withSettings` —— 后者每帧广播都会读它，
+   * 而广播可能在装配早期就发生（`let`/`const` 声明晚于使用会踩暂时性死区）。
+   *
+   * ⚠️ **绝不能用 `ctx.inject` 在加载期拿这个服务**（这里踩过坑）：
+   * `ctx.inject` 会**创建一个子 fiber**；子 fiber 失败时可能连带父插件一起被判定失败，
+   * 而后面的**路由注册与 exe 启动会被一并回收** —— 症状是"桌宠不出现 + 设置页空白 +
+   * 路由 404"三连，且 `try/catch` 抓不到（失败是异步的）。
+   *
+   * 而发消息**只在用户真的发送时才需要**，加载期不必知道它在不在。
+   * 所以每次要用时现取；取不到就如实报不可用。
    */
-  let sendService = null
+  let sendServiceCache = null
   let sendMissingReason = '宿主未装配 sessionController 服务'
+  const resolveSendService = () => {
+    try {
+      const svc = typeof ctx.get === 'function' ? ctx.get('sessionController') : undefined
+      sendServiceCache = svc ?? null
+      sendMissingReason = (svc === undefined || svc === null)
+        ? '宿主未装配 sessionController 服务'
+        : null
+    } catch (error) {
+      // `ctx.get` 在部分宿主实现上可能抛（服务未注册）。按不可用处理，不中断任何东西。
+      sendServiceCache = null
+      sendMissingReason = `取 sessionController 失败：${error?.message ?? error}`
+    }
+    return sendServiceCache
+  }
 
   /**
    * exe 关心的设置子集（契约 §2 `snapshot.settings`）。
@@ -321,10 +368,10 @@ export function apply (ctx, config) {
     ...snap,
     settings: exeSettings(),
     // 能力位：两半边的 ✎ 入口都靠它决定显不显示（**不做没入口的错误**）。
-    // 每次广播时重新求值：sessionController 是异步装配的，早帧可能是 false。
+    // 每次广播时**现取**服务：它可能稍后才装配好，缓存一次会让入口永久消失。
     send: {
-      available: sendService !== null,
-      reason: sendService === null ? (sendMissingReason ?? '发消息能力不可用') : null
+      available: resolveSendService() !== null,
+      reason: sendMissingReason ?? null
     }
   })
 
@@ -354,6 +401,7 @@ export function apply (ctx, config) {
   // ── 事件桥：根 Context 收全部 scoped 事件（见 events.js 文件头）──────────
   const offEvents = bridgeHostEvents(ctx, machine, logger)
   ctx.effect(() => () => offEvents(), 'zhuang-fangyi-pet: host events')
+  boot('状态机 + 事件桥已就绪')
 
   // ── 空闲驱动：`sleeping` 需要时间推进，纯事件驱动不会自己发生 ─────────────
   // 每 15s tick 一次足够（sleepMs 默认 5 分钟，精度要求很低）。
@@ -369,32 +417,9 @@ export function apply (ctx, config) {
 
   // ── 发消息能力：`ctx.sessionController`（GUI 发消息走的就是这条服务）────────
   //
-  // **必须是可选的**：不是每个 profile 都装配了 session-controller（它是核心
-  // bundle 的一部分，但插件不该假设）。拿不到时：
-  //   · `/pet/send` 返回 503 + 原因；
-  //   · 快照的 `send.available=false`；
-  //   · 两半边的 ✎ 入口都不显示（点了报错比没有入口更像坏了）。
-  //
-  // 用嵌套 `ctx.inject` 而不是 `ctx.get()`：`get()` 在服务还没装配好时返回
-  // undefined 且**不会**在它稍后可用时重跑；`inject` 会在服务就绪时回调
-  //（webServer 上已经吃过一次这个教训，见下面的注释）。
-  try {
-    ctx.inject(['sessionController'], scopedSend => {
-      try {
-        sendService = scopedSend.sessionController ?? null
-        sendMissingReason = sendService === null
-          ? '宿主未装配 sessionController 服务'
-          : null
-        logger.info?.('zhuang-fangyi-pet: 发消息能力已就绪（sessionController）')
-      } catch (error) {
-        sendMissingReason = `装配 sessionController 失败：${error?.message ?? error}`
-      }
-    })
-  } catch (error) {
-    // 某些宿主版本的 `inject` 可能直接抛（服务名未注册）。这绝不能中断 apply。
-    sendMissingReason = `inject sessionController 不可用：${error?.message ?? error}`
-    logger.warn?.(`zhuang-fangyi-pet: ${sendMissingReason}`)
-  }
+  // 发消息服务（`ctx.sessionController`）已在上面以**惰性解析**方式准备就绪
+  //（`resolveSendService`），这里不再建立任何加载期依赖。
+
 
   /**
    * 发一条消息到某个会话（**排队语义**，不打断当前回合）。
@@ -406,12 +431,13 @@ export function apply (ctx, config) {
    * @returns {Promise<void>} 失败时抛错，由路由映射成 HTTP 状态码
    */
   const sendToSession = async (text, sessionId) => {
-    if (sendService === null) {
+    const svc = resolveSendService()
+    if (svc === null) {
       const error = new Error(sendMissingReason ?? '宿主未装配 sessionController 服务')
       error.code = 'unavailable'
       throw error
     }
-    await sendService.prompt({
+    await svc.prompt({
       sessionId,
       content: [{ type: 'text', text }],
       // 每次发送一个唯一 id：Host 用它做去重（同 id 重试不会插入第二条）。
@@ -440,7 +466,13 @@ export function apply (ctx, config) {
   }
 
   // ── exe launcher ────────────────────────────────────────────────────────
-  const launcher = createLauncher({
+  //
+  // ⚠️ **必须容错**：启动器出错会把后面的**路由注册**一起带走（路由在它之后），
+  // 症状是"桌宠不出现 + 设置页空白 + 路由 404"三连，而且看不出任何原因。
+  // 所以这里失败只降级成"没有原生窗口"，绝不中断装配。
+  let launcher = null
+  try {
+    launcher = createLauncher({
     ctx,
     pkgRoot: HERE,
     getSettings: () => settings.get(),
@@ -454,8 +486,22 @@ export function apply (ctx, config) {
         reason: status.reason ?? status.lastError ?? null
       })
     }
-  })
-  ctx.effect(() => () => launcher.dispose(), 'zhuang-fangyi-pet: exe launcher')
+    })
+  } catch (error) {
+    boot(`⚠️ exe 启动器创建失败（已降级为无原生窗口）：${error?.stack ?? error}`)
+    logger.warn?.(`zhuang-fangyi-pet: 启动器创建失败（已降级）：${error?.message ?? error}`)
+    launcher = {
+      status: { available: false, reason: `启动器创建失败：${error?.message ?? error}` },
+      start: () => false,
+      stop: () => {},
+      restart: () => false,
+      dispose: () => {}
+    }
+  }
+  if (launcher !== null && typeof launcher.dispose === 'function') {
+    ctx.effect(() => () => launcher.dispose(), 'zhuang-fangyi-pet: exe launcher')
+  }
+  boot(`exe 启动器已就绪（available=${launcher?.status?.available === true}）`)
 
   // ── 路由 ────────────────────────────────────────────────────────────────
   const handler = createHandler({
@@ -496,8 +542,8 @@ export function apply (ctx, config) {
       return { sessionId: target }
     },
     sendCapability: () => ({
-      available: sendService !== null,
-      reason: sendService === null ? (sendMissingReason ?? '发消息能力不可用') : null
+      available: resolveSendService() !== null,
+      reason: resolveSendService() !== null ? null : (sendMissingReason ?? '发消息能力不可用')
     }),
     getSettings: () => settings.get(),
     setSettings: next => {
@@ -537,12 +583,19 @@ export function apply (ctx, config) {
    * 这是本 profile 两个现有插件（主题插件、our-free-model）都记录过的坑。
    */
   ctx.inject(['webServer'], scoped => {
+    boot('webServer 就绪，开始注册路由')
     const server = scoped.webServer
-    scoped.effect(
-      () => server.register({ kind: 'prefix', path: ROUTE_PREFIX, handler }),
-      'zhuang-fangyi-pet: pet routes'
-    )
-    logger.info?.(`zhuang-fangyi-pet: 路由已挂载于 ${ROUTE_PREFIX}`)
+    try {
+      scoped.effect(
+        () => server.register({ kind: 'prefix', path: ROUTE_PREFIX, handler }),
+        'zhuang-fangyi-pet: pet routes'
+      )
+      boot(`路由已注册：${ROUTE_PREFIX}（port=${server?.port ?? '?'}）`)
+      logger.info?.(`zhuang-fangyi-pet: 路由已挂载于 ${ROUTE_PREFIX}`)
+    } catch (error) {
+      boot(`❌ 路由注册失败：${error?.stack ?? error}`)
+      throw error
+    }
 
     // 先广播一帧初始快照，再启动 exe。
     //
@@ -553,12 +606,21 @@ export function apply (ctx, config) {
 
     // webServer 就绪 = 端口已知 = 可以启动 exe 了。
     if (settings.get().enabled && settings.get().mode !== 'overlay') {
-      const started = launcher.start()
-      if (!started) {
-        logger.warn?.('zhuang-fangyi-pet: 原生窗口不可用，浏览器半边将渲染窗口内桌宠')
+      try {
+        const started = launcher.start()
+        if (!started) {
+          logger.warn?.('zhuang-fangyi-pet: 原生窗口不可用，浏览器半边将渲染窗口内桌宠')
+        }
+        boot(`exe 启动尝试：started=${started}`)
+      } catch (error) {
+        boot(`⚠️ exe 启动抛错（已忽略）：${error?.stack ?? error}`)
       }
+    } else {
+      boot(`未启动 exe（enabled=${settings.get().enabled} mode=${settings.get().mode}）`)
     }
+    boot('webServer inject 回调执行完毕')
   })
+  boot('路由挂载已提交（等待 webServer 就绪）')
 
   // ── 对外暴露（供测试与其它插件读取）─────────────────────────────────────
   //
@@ -586,6 +648,9 @@ export function apply (ctx, config) {
   } catch (error) {
     logger.warn?.(`zhuang-fangyi-pet: 暴露 ctx.zhuangFangyiPet 失败（已忽略）：${error?.message ?? error}`)
   }
+
+  boot('--- apply() 完成 ---')
+  } // applyInner
 }
 
 export { SETTINGS_VERSION }

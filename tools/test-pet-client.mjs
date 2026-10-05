@@ -778,6 +778,61 @@ ok('activity 字段归一化：非法值回落 normal', () => {
   assert.equal(normalizePet({}).activity, 'normal')
 })
 
+/* ── 设置页（Section）必须能渲染 ─────────────────────────────────────────
+ *
+ * 这一条是被真实事故逼出来的：设置页在用户那里**整片空白**，
+ * 而当时的测试只渲染了 Pet —— Section 里的运行时错误（例如未定义的取词器）
+ * 完全没被发现。一个"注册了却渲染不出来"的设置页，用户看到的就是坏了。
+ * ──────────────────────────────────────────────────────────────────────── */
+
+function renderSection (settingsPatch = {}) {
+  const l = loadClient()
+  l.exports.apply(l.ctx)
+  const { Section, runtime } = l.exports.__test
+  runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 1 } } }
+  runtime.__state.snapshot = { petState: 'idle', label: '', bubble: null, nativeAvailable: false }
+  runtime.__state.settings = normalizePet(settingsPatch)
+  l.react.resetHooks()
+  return Section({ runtime })
+}
+
+ok('⭐ 设置页能渲染（不抛错、不出空白）', () => {
+  const tree = renderSection()
+  assert.ok(tree !== null && tree !== undefined, 'Section 必须返回节点')
+  assert.equal(tree.type, 'div', '应渲染成容器')
+})
+
+ok('⭐ 设置页包含关键控件且反映当前值（大小/活跃度/双击/主题）', () => {
+  const values = []
+  const collect = node => {
+    if (node === null || node === undefined) return
+    if (typeof node === 'string') return
+    if (Array.isArray(node)) { node.forEach(collect); return }
+    if (typeof node !== 'object') return
+    if (node.props) {
+      if (typeof node.props.value === 'string' || typeof node.props.value === 'number') {
+        values.push(String(node.props.value))
+      }
+      collect(node.props.children)
+    }
+  }
+  collect(renderSection({ activity: 'playful', doubleClick: 'emote', theme: 'dark' }).props.children)
+  const joined = values.join('|')
+  assert.ok(joined.includes('playful'), '活跃度选择器应反映当前值')
+  assert.ok(joined.includes('emote'), '双击行为选择器应反映当前值')
+  assert.ok(joined.includes('dark'), '贴纸深浅色选择器应反映当前值')
+})
+
+ok('设置页在设置缺字段（旧设置文件）时也能渲染', () => {
+  const l = loadClient()
+  l.exports.apply(l.ctx)
+  const { Section, runtime } = l.exports.__test
+  runtime.__state.settings = { scale: 1, enabled: true } // 缺 activity/doubleClick 等新字段
+  l.react.resetHooks()
+  const tree = Section({ runtime })
+  assert.ok(tree !== null, '缺字段不该让设置页崩掉')
+})
+
 ok('缺该状态的素材时回落到 idle', () => {
   const l = loadClient()
   l.exports.apply(l.ctx)
