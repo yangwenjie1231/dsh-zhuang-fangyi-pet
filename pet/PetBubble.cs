@@ -86,6 +86,26 @@ namespace DshZhuangFangyiPet
 
         /// <summary>自检诊断用：正文当前字号（缩放断言用）。</summary>
         internal double DiagTextFontSize { get { return _text == null ? 0 : _text.FontSize; } }
+        /// <summary>
+        /// 自检诊断用：窗口屏幕矩形（物理像素）[x,y,w,h]。
+        /// 用 WPF 的 Left/Top/ActualWidth（不引 P/Invoke），DPI 换算后返回。
+        /// </summary>
+        internal int[] DiagWindowRect()
+        {
+            try
+            {
+                double dpi = _hwnd == IntPtr.Zero ? 1.0 : PetNative.GetDpiForWindowSafe(_hwnd) / 96.0;
+                if (dpi <= 0) dpi = 1.0;
+                double w = ActualWidth > 0 ? ActualWidth : _root.DesiredSize.Width;
+                double h = ActualHeight > 0 ? ActualHeight : _root.DesiredSize.Height;
+                return new int[]
+                {
+                    (int)Math.Round(Left * dpi), (int)Math.Round(Top * dpi),
+                    (int)Math.Round(w * dpi), (int)Math.Round(h * dpi)
+                };
+            }
+            catch { return null; }
+        }
         /// <summary>自检诊断用：图片上限高度（缩放断言用）。</summary>
         internal double DiagImageMaxH { get { return _image == null ? 0 : _image.MaxHeight; } }
         public bool Showing { get; private set; }
@@ -479,12 +499,26 @@ namespace DshZhuangFangyiPet
             UpdateMetrics();
             try
             {
-                // 已显示：重排内容并重新定位（PlaceNearPet 用 ActualWidth/Height，需先 Measure）
+                // 顺序很关键：
+                //   ① 先按新尺寸重铺外壳（内边距/圆角/图片上限都是布局输入）
+                //   ② 再 Measure —— 用**改完之后**的尺寸算 DesiredSize
+                //   ③ 定位
+                // 曾经写成"先 UpdateLayout 再铺外壳"，等于用旧内边距排完版才改样式。
+                ApplyCurrentChrome();
                 _root.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
                 UpdateLayout();
-                // 当前呈现方式要按新尺寸重铺（opaque 贴纸与普通气泡的内边距/圆角不同）
-                ApplyCurrentChrome();
                 PlaceNearPet();
+
+                // 兜底：SizeToContent 的窗口尺寸要到这一轮布局之后才真正落定，
+                // 此时再贴一次，保证位置与最终尺寸一致。
+                //
+                // 注意：**真正修好"坐标不变"的不是这里，而是上面的顺序**（先铺外壳再测量）。
+                // 顺序错了的话 DesiredSize 就是按旧内边距算的，位置必然错 ——
+                // 实测（回退顺序）右边会错开 19~52px，而这条延迟重贴救不回来。
+                Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(delegate
+                {
+                    try { PlaceNearPet(); } catch { }
+                }));
             }
             catch (Exception ex) { PetLog.Warn("气泡缩放重排失败: " + PetLog.Describe(ex)); }
         }
@@ -609,8 +643,18 @@ namespace DshZhuangFangyiPet
             double dpi = _hwnd == IntPtr.Zero ? 1.0 : PetNative.GetDpiForWindowSafe(_hwnd) / 96.0;
             if (dpi <= 0) dpi = 1.0;
 
-            int bw = (int)Math.Round(ActualWidth * dpi);
-            int bh = (int)Math.Round(ActualHeight * dpi);
+            // ⚠️ 尺寸取**刚测量出来的 DesiredSize**，不是 ActualWidth/ActualHeight。
+            //
+            // 原因：气泡窗是 `SizeToContent`，ActualWidth 要等**下一次布局**才更新。
+            // 缩放时"改字号 → 立刻定位"读到的是**旧尺寸**，于是气泡虽然缩小了、
+            // 位置却还按旧尺寸算（贴得不对/留一大块空）。
+            // DesiredSize 是 Measure 之后立刻可用的真实需求尺寸，不存在这个滞后。
+            double wDip = _root.DesiredSize.Width;
+            double hDip = _root.DesiredSize.Height;
+            if (wDip <= 0 || double.IsNaN(wDip)) wDip = ActualWidth;
+            if (hDip <= 0 || double.IsNaN(hDip)) hDip = ActualHeight;
+            int bw = (int)Math.Round(wDip * dpi);
+            int bh = (int)Math.Round(hDip * dpi);
             if (bw <= 0) bw = 200;
             if (bh <= 0) bh = 48;
 

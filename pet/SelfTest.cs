@@ -828,7 +828,50 @@ namespace DshZhuangFangyiPet
             }
             finally
             {
-                try { if (bubble != null) bubble.ForceClose(); } catch { }
+                    // ⭐ 缩放后气泡必须**重新贴齐桌宠**（用户反馈："气泡缩小之后坐标不变"）。
+                //
+                // 判据用"贴齐"而不是"坐标变了"：定位规则是右对齐（x = 桌宠右边 - 气泡宽），
+                // 所以缩放后**气泡右边必须仍与桌宠右边对齐**。
+                // 这条能抓住真 bug：若定位用了滞后的旧尺寸、且事后不重贴，
+                // 窗口会按新尺寸缩、位置却留在旧尺寸算出来的地方 → 右边错开。
+                // 假桌宠矩形必须落在**工作区内**，否则 PlaceNearPet 会把它 clamp 到屏幕边缘，
+                // 那样测的是 clamp 逻辑、不是缩放对齐（第一版就踩了这个坑：差值恒为常数）。
+                PetNative.WorkArea wa = PetNative.NearestScreen(0, 0);
+                int petW = 200, petH = 200;
+                int[] petRect = new int[] { wa.X + 120, wa.Y + 300, petW, petH };
+                bubble.PetRectProvider = delegate { return petRect; };
+                PetBubbleInfo probeBubble = new PetBubbleInfo();
+                probeBubble.Id = 99001;
+                probeBubble.Kind = "text";
+                probeBubble.Text = "缩放定位测试";
+                probeBubble.DurationMs = 60000;
+                bubble.Show(probeBubble, null);
+                Pump(150);
+
+                bool AlignedAt(double sc, out string detail)
+                {
+                    bubble.SetScale(sc);
+                    Pump(300);                       // 等布局落定 + 延迟重贴执行
+                    int[] r = bubble.DiagWindowRect();
+                    if (r == null) { detail = "拿不到窗口矩形"; return false; }
+                    int bubbleRight = r[0] + r[2];
+                    int petRight = petRect[0] + petRect[2];
+                    detail = sc.ToString("0.##") + "×: 气泡 " + r[2] + "x" + r[3] + "@" + r[0] + "," + r[1] +
+                             " 右边=" + bubbleRight + " 桌宠右边=" + petRight + " 差=" + (bubbleRight - petRight);
+                    return Math.Abs(bubbleRight - petRight) <= 3;   // 容 3px 舍入
+                }
+
+                string d1, d2, d3;
+                bool alignLo = AlignedAt(1.0, out d1);
+                bool alignSm = AlignedAt(0.4, out d2);
+                bool alignBg = AlignedAt(2.0, out d3);
+                Check(alignLo && alignSm && alignBg, "气泡缩放后仍贴齐桌宠右边（坐标随尺寸重算）",
+                      (alignLo ? "✓" : "✗") + d1 + " | " + (alignSm ? "✓" : "✗") + d2 + " | " + (alignBg ? "✓" : "✗") + d3);
+
+                bubble.SetScale(1.0);
+                bubble.HideNow();
+                Pump(100);
+            try { if (bubble != null) bubble.ForceClose(); } catch { }
             }
         }
 
