@@ -1354,6 +1354,22 @@ await ok('⭐⭐ 装了语音 DSH 插件 → 委派给它（`zfhVoice` 服务，
   // 释放方式（stop = 杀进程 / unload = 只卸模型）也要能推过去 ——
   // 否则语音插件新增的这个能力在桌宠设置页里够不着（"开关只有一处"就断了）。
   assert.equal(pushed.idleAction, 'unload', '释放方式应推给插件')
+  // ⭐⭐ **回归断言**：空的 ttsBackend 绝不能被推成 `'auto'`。
+  // 这里踩过真实 bug —— 原先无条件推 `backend: ... || 'auto'`，于是每次设置
+  // 变化都把插件 loader 里配好的 `backend: torch` 覆盖成 `auto`，
+  // 最后报"模型没装"，而用户明明配了 torch。
+  assert.ok(!('backend' in pushed),
+    `空 ttsBackend 不该推给插件（会覆盖 loader 里的 torch），实际推了 ${JSON.stringify(pushed.backend)}`)
+  assert.ok(!('gsvRoot' in pushed) && !('modelDir' in pushed),
+    '空的路径设置也不该推（同理会把插件的机器配置冲掉）')
+
+  // 正向：用户**显式设了** backend 就要推过去
+  await fetch(`${base}/api/zhuang-fangyi/pet/settings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: { ttsBackend: 'onnx' } })
+  })
+  assert.equal(calls.configure[calls.configure.length - 1].backend, 'onnx',
+    '显式设置的后端应推给插件')
 
   // 反向：没选具体值时**不能**推空串（那会盖掉插件自己的默认）
   await fetch(`${base}/api/zhuang-fangyi/pet/settings`, {

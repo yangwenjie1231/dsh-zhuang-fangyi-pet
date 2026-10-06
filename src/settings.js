@@ -268,7 +268,11 @@ export function defaultSettings () {
     /** 合成子插件仓库目录（留空 = 自动探测）。 */
     ttsRepoDir: '',
     /** 推理后端：'' = 用子插件默认；`torch`（快，占显存）/ `onnx`（慢，省显存）。 */
-    ttsBackend: ''
+    ttsBackend: '',
+    /** GPT-SoVITS 检出目录（torch 后端需要）。留空 = 用环境变量 ZFH_GSV_ROOT。 */
+    ttsGsvRoot: '',
+    /** 模型目录（等价 ZFH_MODEL_DIR）。留空 = 让 Python 侧自己找。 */
+    ttsModelDir: ''
   }
 }
 
@@ -342,7 +346,7 @@ export function normalizeSettings (input) {
   // 释放方式：只认两个值 + 空串（= 用插件默认）。别的值一律不传下去。
   if (TT_IDLE_ACTIONS.includes(input.ttsIdleAction)) out.ttsIdleAction = input.ttsIdleAction
   // 启动服务用的路径与后端。长度限住，后端只认两个值。
-  for (const key of ['ttsPython', 'ttsRepoDir']) {
+  for (const key of ['ttsPython', 'ttsRepoDir', 'ttsGsvRoot', 'ttsModelDir']) {
     if (typeof input[key] === 'string' && input[key].length <= 300) out[key] = input[key].trim()
   }
   if (TT_BACKENDS.includes(input.ttsBackend)) out.ttsBackend = input.ttsBackend

@@ -1103,19 +1103,38 @@ export function apply (ctx, config) {
     const svc = voiceService()
     if (svc !== null && typeof svc.configure === 'function') {
       try {
+        // ⚠️ **只推"用户真的设了"的键**。
+        //
+        // 这里踩过一个真实的坑：原先无条件推 `backend: ... || 'auto'`，于是每次
+        // 设置变化都会把插件 loader 里配好的 `backend: torch` 覆盖成 `auto` ——
+        // 而 `auto` 在没有 gsvRoot 时会去选 onnx，最后报"模型没装"。
+        // 症状是"我明明配了 torch，它却按 auto 跑"，排查方向全错。
+        //
+        // 分工写清楚：
+        //   · **桌宠推**运行时开关（resident / idleStopSec / idleAction）——
+        //     它们是设置页上的 UI，用户随时会拨；
+        //   · **插件自己的 loader 配置**保留机器相关路径
+        //     （backend / gsvRoot / modelDir / python / repoDir / port）——
+        //     那些是"装在哪"，不该被一个空设置项冲掉。
         const patch = {
           resident: cfg.ttsResident === true,
-          idleStopSec: Number(cfg.ttsIdleStopSec) || 0,
-          python: String(cfg.ttsPython ?? '').trim(),
-          repoDir: String(cfg.ttsRepoDir ?? '').trim(),
-          backend: String(cfg.ttsBackend ?? '').trim() || 'auto',
-          port: portFromUrl(String(cfg.ttsUrl ?? '').trim() || DEFAULT_TTS_URL)
+          idleStopSec: Number(cfg.ttsIdleStopSec) || 0
         }
-        // 释放方式只在用户**明确选了**才推 —— 空串表示"用插件自己的默认"，
-        // 推空串会把插件那边的默认值覆盖掉（`normalizeConfig` 只认白名单，
-        // 空串不在白名单里，于是它保留原值；但显式不传更不容易踩坑）。
+        // 释放方式只在用户**明确选了**才推（空串 = 用插件默认）。
         const idleAction = String(cfg.ttsIdleAction ?? '').trim()
         if (idleAction === 'stop' || idleAction === 'unload') patch.idleAction = idleAction
+        // 路径/后端只在设置了非空值时才推。
+        const explicit = {
+          backend: String(cfg.ttsBackend ?? '').trim(),
+          python: String(cfg.ttsPython ?? '').trim(),
+          repoDir: String(cfg.ttsRepoDir ?? '').trim(),
+          gsvRoot: String(cfg.ttsGsvRoot ?? '').trim(),
+          modelDir: String(cfg.ttsModelDir ?? '').trim()
+        }
+        for (const [k, v] of Object.entries(explicit)) if (v !== '') patch[k] = v
+        // 端口只在用户显式改了地址时才推（ttsUrl 有值意味着他指了别的服务）。
+        const url = String(cfg.ttsUrl ?? '').trim()
+        if (url !== '') patch.port = portFromUrl(url)
         svc.configure(patch)
       } catch (error) {
         logger.warn?.(`zhuang-fangyi-pet: 同步语音插件配置失败：${error?.message ?? error}`)
