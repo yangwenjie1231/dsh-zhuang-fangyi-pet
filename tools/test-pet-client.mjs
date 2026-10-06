@@ -433,6 +433,82 @@ ok('新增字段越界/非法值回落默认（不整体丢弃）', () => {
   assert.equal(d.notifyComplete, true)
 })
 
+/* ── v3 新设置（番茄钟 / 语音 / 聊天）────────────────────────────────────── */
+
+ok('v3 新字段有默认值，且"会打扰人"的两个默认关', () => {
+  const d = normalizePet(null)
+  // ⚠️ 这两条的默认值是**刻意的产品决定**，值得断言：
+  // 装完插件就自己开始 25 分钟倒计时、或者突然开口说话，都是骚扰。
+  assert.equal(d.pomodoro, false, '番茄钟默认关')
+  assert.equal(d.voice, false, '语音默认关')
+  assert.equal(d.chatEnabled, true, '聊天默认开（它不主动出声，只在用户点的时候用）')
+  assert.equal(d.pomodoroFocusMs, 25 * 60 * 1000)
+  assert.equal(d.pomodoroBreakMs, 5 * 60 * 1000)
+  assert.equal(d.pomodoroLongBreakMs, 15 * 60 * 1000, '用户点名"每 4 轮一次长休息（15 分）"')
+  assert.equal(d.pomodoroRounds, 4)
+  assert.equal(d.pomodoroCountdown, true)
+  assert.equal(d.persona, 'default')
+  assert.equal(d.chatWorkspace, '', '空 = 用默认目录')
+})
+
+ok('⭐ v3 布尔字段逐个归一化（不整体丢弃）', () => {
+  const n = normalizePet({
+    pomodoro: true, pomodoroAutoNext: false, pomodoroNotify: false,
+    pomodoroCountdown: false, voice: true, chatEnabled: false
+  })
+  assert.equal(n.pomodoro, true)
+  assert.equal(n.pomodoroAutoNext, false)
+  assert.equal(n.pomodoroNotify, false)
+  assert.equal(n.pomodoroCountdown, false)
+  assert.equal(n.voice, true)
+  assert.equal(n.chatEnabled, false)
+  // 非布尔值不该被当成 true（`typeof` 检查）
+  const m = normalizePet({ pomodoro: 'yes', voice: 1 })
+  assert.equal(m.pomodoro, false, '字符串不该被当成 true')
+  assert.equal(m.voice, false, '数字不该被当成 true')
+})
+
+ok('⭐⭐ 番茄钟时长范围与 Host **同口径**（三处必须一致）', () => {
+  // 三处：Host `src/settings.js`、客户端 `normalizePet`、番茄钟模块
+  // `POMODORO_LIMITS`。差一处就会出现"设置页能拖到 500 分钟、
+  // 但 Host 夹回 240"这种界面与行为不一致。
+  const n = normalizePet({
+    pomodoroFocusMs: 1,                      // 太小 → 夹到 60s
+    pomodoroBreakMs: 99 * 60 * 60 * 1000,    // 太大 → 夹到 60min
+    pomodoroLongBreakMs: 'abc',              // 非数 → 回落默认
+    pomodoroRounds: 999                      // 太大 → 夹到 12
+  })
+  assert.equal(n.pomodoroFocusMs, 60 * 1000, '专注下限 1 分钟')
+  assert.equal(n.pomodoroBreakMs, 60 * 60 * 1000, '短休上限 60 分钟')
+  assert.equal(n.pomodoroLongBreakMs, 15 * 60 * 1000, '非法值回落默认')
+  assert.equal(n.pomodoroRounds, 12, '轮数上限 12')
+  // 范围内的值必须原样保留（不能被夹掉）
+  const keep = normalizePet({
+    pomodoroFocusMs: 45 * 60 * 1000,
+    pomodoroBreakMs: 10 * 60 * 1000,
+    pomodoroLongBreakMs: 30 * 60 * 1000,
+    pomodoroRounds: 3
+  })
+  assert.equal(keep.pomodoroFocusMs, 45 * 60 * 1000)
+  assert.equal(keep.pomodoroBreakMs, 10 * 60 * 1000)
+  assert.equal(keep.pomodoroLongBreakMs, 30 * 60 * 1000)
+  assert.equal(keep.pomodoroRounds, 3)
+})
+
+ok('⭐ 人设名与工作区路径的保守校验', () => {
+  // 合法值原样保留（含中文名 —— 用户会用人名）
+  assert.equal(normalizePet({ persona: '庄方宜' }).persona, '庄方宜')
+  assert.equal(normalizePet({ persona: ' strict ' }).persona, 'strict', '应 trim')
+  // 空/超长/非字符串 → 回落默认
+  assert.equal(normalizePet({ persona: '' }).persona, 'default')
+  assert.equal(normalizePet({ persona: 'x'.repeat(65) }).persona, 'default', '超长回落')
+  assert.equal(normalizePet({ persona: 42 }).persona, 'default', '非字符串回落')
+  // 工作区：空字符串是**合法值**（= 用默认目录），不能被回落成别的
+  assert.equal(normalizePet({ chatWorkspace: '' }).chatWorkspace, '')
+  assert.equal(normalizePet({ chatWorkspace: '  D:\\x  ' }).chatWorkspace, 'D:\\x', '应 trim')
+  assert.equal(normalizePet({ chatWorkspace: 'x'.repeat(261) }).chatWorkspace, '', '超长回落空')
+})
+
 ok('opacity 被夹到 0.3~1', () => {
   assert.equal(normalizePet({ opacity: 5 }).opacity, 1)
   assert.equal(normalizePet({ opacity: 0 }).opacity, 0.3)

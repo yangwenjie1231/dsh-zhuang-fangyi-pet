@@ -27,6 +27,12 @@ import {
   DEFAULT_POMODORO,
   POMODORO_LIMITS
 } from '../src/pet/pomodoro.js'
+import {
+  POMODORO_FOCUS_MIN, POMODORO_FOCUS_MAX,
+  POMODORO_BREAK_MIN, POMODORO_BREAK_MAX,
+  POMODORO_LONG_BREAK_MIN, POMODORO_LONG_BREAK_MAX,
+  POMODORO_ROUNDS_MIN, POMODORO_ROUNDS_MAX
+} from '../src/settings.js'
 
 let passed = 0
 let failed = 0
@@ -61,9 +67,13 @@ function makeClock (start = 1_000_000) {
  *
  * 为什么不用更小的值（比如 10 秒）：`normalizePomodoro` 会把它们夹到下限
  * （那是给真实设置用的护栏，不该为测试开后门）。而时钟是假的，
- * 用 60/30/90 秒这些"真实尺度"跑完整个 4 轮循环**耗时依然是 0**。
+ * 用 60/60/90 秒这些"真实尺度"跑完整个 4 轮循环**耗时依然是 0**。
+ *
+ * ⚠️ `breakMs` 也必须是 60 秒 —— 它的下限与 `src/settings.js` 的
+ * `POMODORO_BREAK_MIN` 同值（曾经这里是 30 秒而 settings 是 60 秒，
+ * 是一个真实的三方口径不一致，已被上面那条断言锁住）。
  */
-const FAST = { focusMs: 60_000, breakMs: 30_000, longBreakMs: 90_000, roundsPerLongBreak: 4 }
+const FAST = { focusMs: 60_000, breakMs: 60_000, longBreakMs: 90_000, roundsPerLongBreak: 4 }
 
 /* ══════════════════════════════════════════════════════════════════════════
  * 1. 纯函数
@@ -78,6 +88,39 @@ ok('默认参数就是用户点名的 25/5/15 + 每 4 轮', () => {
   assert.equal(DEFAULT_POMODORO.roundsPerLongBreak, 4)
   // 默认**不开**：装完插件就自己开始 25 分钟倒计时是骚扰，不是功能。
   assert.equal(DEFAULT_POMODORO.enabled, false)
+})
+
+ok('⭐⭐ 时长范围与 Host settings.js **同口径**（三方必须一致）', () => {
+  // 三方：`src/settings.js`（Host 归一化）、`client.js`（设置页归一化）、
+  // 本模块的 `POMODORO_LIMITS`。
+  //
+  // ⚠️ 这条断言抓出过一个真实不一致：本模块的 `breakMs` 下限是 30 秒，
+  // 而 settings.js 是 60 秒 —— 于是"设置页拖不到、直接构造却可以"，
+  // 文档说的范围与实际能设的范围对不上。
+  //
+  // 客户端那一份无法在这里 import（它是浏览器 bundle），由
+  // `test-pet-client.mjs` 的"番茄钟时长范围与 Host 同口径"覆盖；
+  // 这里锁住 Host 与模块这两份。
+  assert.deepEqual(POMODORO_LIMITS.focusMs, [POMODORO_FOCUS_MIN, POMODORO_FOCUS_MAX],
+    'focusMs 范围与 settings.js 不一致')
+  assert.deepEqual(POMODORO_LIMITS.breakMs, [POMODORO_BREAK_MIN, POMODORO_BREAK_MAX],
+    'breakMs 范围与 settings.js 不一致')
+  assert.deepEqual(POMODORO_LIMITS.longBreakMs, [POMODORO_LONG_BREAK_MIN, POMODORO_LONG_BREAK_MAX],
+    'longBreakMs 范围与 settings.js 不一致')
+  assert.deepEqual(POMODORO_LIMITS.roundsPerLongBreak, [POMODORO_ROUNDS_MIN, POMODORO_ROUNDS_MAX],
+    'roundsPerLongBreak 范围与 settings.js 不一致')
+})
+
+ok('⭐ 默认值必须落在合法范围内（否则"默认设置"本身就是非法的）', () => {
+  for (const [key, [lo, hi]] of Object.entries(POMODORO_LIMITS)) {
+    const v = DEFAULT_POMODORO[key]
+    assert.ok(v >= lo && v <= hi,
+      `默认 ${key}=${v} 不在 [${lo},${hi}] 内 —— 用户什么都不改就已经越界`)
+  }
+  // 交叉检查：normalizePomodoro(默认值) 必须**逐字段不变**
+  //（若默认值越界，归一化会把它夹走，这条就会失败）
+  assert.deepEqual(normalizePomodoro(DEFAULT_POMODORO), { ...DEFAULT_POMODORO },
+    '默认值经过归一化后不该被改动')
 })
 
 ok('normalizePomodoro 逐字段回落，不整体丢弃', () => {
@@ -648,11 +691,11 @@ ok('跑着的时候改时长，**下一段**生效', () => {
   const clock = makeClock()
   const p = createPomodoro({ now: clock.now, config: FAST })
   p.start(clock.now())
-  // 用合法范围内的另一个值（30s 是 breakMs 的下限，取 45s 才有区分度）。
-  p.setConfig({ breakMs: 45_000 })
+  // 用合法范围内的另一个值（breakMs 下限是 60s，取 2 分钟才有区分度）。
+  p.setConfig({ breakMs: 2 * 60 * 1000 })
   runPhaseToEnd(p, clock)              // 专注结束 → 进休息
   assert.equal(p.internals.phase, 'break')
-  assert.equal(p.internals.remainingMs, 45_000, '休息应使用新时长')
+  assert.equal(p.internals.remainingMs, 2 * 60 * 1000, '休息应使用新时长')
 })
 
 ok('停着的时候改时长，剩余时间对齐到新时长（但不超过）', () => {

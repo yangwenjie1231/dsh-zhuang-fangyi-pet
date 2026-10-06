@@ -178,6 +178,52 @@ window.__ModuleLoader__.load({
         hint: '悬停时显示状态',
         statusAlways: '桌宠下方常显状态',
         statusAlwaysHint: '开启后状态文字一直挂在桌宠下方，不用悬停',
+        // ── 番茄钟（v3）─────────────────────────────────────────────────────
+        groupPomodoro: '番茄钟',
+        pomodoro: '启用番茄钟',
+        pomodoroHint: '专注一段、休息一段。默认关闭 —— 打开后自己按开始',
+        pomodoroFocusMs: '专注时长',
+        pomodoroBreakMs: '短休息',
+        pomodoroLongBreakMs: '长休息',
+        pomodoroRounds: '每几轮长休息',
+        pomodoroRoundsHint: '连续专注这么多轮之后给一次长休息',
+        pomodoroAutoNext: '自动进入下一段',
+        pomodoroAutoNextHint: '关掉后每段结束会停下等你按开始',
+        pomodoroNotify: '阶段结束时提醒我',
+        pomodoroNotifyHint: '气泡 + 表情（开了语音还会说话）',
+        pomodoroCountdown: '桌宠下方显示倒计时',
+        pomodoroStart: '开始专注',
+        pomodoroPause: '暂停',
+        pomodoroResume: '继续',
+        pomodoroSkip: '跳过当前段',
+        pomodoroReset: '重置',
+        minutes: '分钟',
+        rounds: '轮',
+        // ── 语音（v3）───────────────────────────────────────────────────────
+        groupVoice: '语音',
+        voice: '让庄方宜说话',
+        voiceHint: '点击、完成、出错、番茄钟到点时播一句。默认关闭 —— 突然出声容易吓人',
+        voiceCount: '语音包',
+        voiceCountHint: '用 tools/build-voice.ps1 生成；缺失时静音运行',
+        // ── 聊天与人设（v3）─────────────────────────────────────────────────
+        groupChat: '聊天',
+        chatEnabled: '允许在气泡里聊天',
+        chatEnabledHint: '关闭后只在设置页这里聊',
+        persona: '人设',
+        personaHint: '切换后写入工作区的 AGENTS.md —— DSH 会自动读它',
+        personaReload: '重新扫描人设目录',
+        personaDir: '人设目录',
+        personaDirHint: '把你的 .md 丢进这个目录，再点"重新扫描"',
+        chatWorkspace: '聊天工作区',
+        chatWorkspaceHint: '留空 = ~/Downloads/庄方宜',
+        chatOpen: '打开工作区目录',
+        chatStatus: '聊天状态',
+        chatSend: '发一条',
+        chatPlaceholder: '和庄方宜说点什么…',
+        chatSending: '发送中…',
+        chatSent: '已发送',
+        chatReplyNote: '回复会显示在桌宠气泡里（记得让桌宠可见）',
+        chatNoSession: '还没建立聊天会话（发第一条消息时会自动建）',
         groupStatus: '运行状态',
         nativeOn: '桌面窗口运行中',
         nativeOff: '桌面窗口不可用',
@@ -236,6 +282,52 @@ window.__ModuleLoader__.load({
         hint: 'Show status on hover',
         statusAlways: 'Always show status below pet',
         statusAlwaysHint: 'Keeps the status text visible without hovering',
+        // ── Pomodoro (v3) ───────────────────────────────────────────────────
+        groupPomodoro: 'Pomodoro',
+        pomodoro: 'Enable pomodoro',
+        pomodoroHint: 'Focus, then rest. Off by default — press start yourself',
+        pomodoroFocusMs: 'Focus length',
+        pomodoroBreakMs: 'Short break',
+        pomodoroLongBreakMs: 'Long break',
+        pomodoroRounds: 'Rounds per long break',
+        pomodoroRoundsHint: 'A long break after this many focus rounds',
+        pomodoroAutoNext: 'Auto-start next phase',
+        pomodoroAutoNextHint: 'When off, it stops after each phase and waits for you',
+        pomodoroNotify: 'Notify me when a phase ends',
+        pomodoroNotifyHint: 'Bubble + expression (and voice, if enabled)',
+        pomodoroCountdown: 'Show countdown below pet',
+        pomodoroStart: 'Start focus',
+        pomodoroPause: 'Pause',
+        pomodoroResume: 'Resume',
+        pomodoroSkip: 'Skip phase',
+        pomodoroReset: 'Reset',
+        minutes: 'min',
+        rounds: 'rounds',
+        // ── Voice (v3) ──────────────────────────────────────────────────────
+        groupVoice: 'Voice',
+        voice: 'Let her speak',
+        voiceHint: 'Speaks on click, completion, errors and pomodoro phase ends. Off by default',
+        voiceCount: 'Voice pack',
+        voiceCountHint: 'Build it with tools/build-voice.ps1; runs silent when missing',
+        // ── Chat & persona (v3) ─────────────────────────────────────────────
+        groupChat: 'Chat',
+        chatEnabled: 'Allow chatting from the bubble',
+        chatEnabledHint: 'When off, chat only from this settings page',
+        persona: 'Persona',
+        personaHint: 'Switching writes the workspace AGENTS.md — DSH reads it automatically',
+        personaReload: 'Rescan persona folder',
+        personaDir: 'Persona folder',
+        personaDirHint: 'Drop your .md files there, then hit rescan',
+        chatWorkspace: 'Chat workspace',
+        chatWorkspaceHint: 'Empty = ~/Downloads/庄方宜',
+        chatOpen: 'Open workspace folder',
+        chatStatus: 'Chat status',
+        chatSend: 'Send',
+        chatPlaceholder: 'Say something to her…',
+        chatSending: 'Sending…',
+        chatSent: 'Sent',
+        chatReplyNote: 'Replies show up in the pet bubble (keep the pet visible)',
+        chatNoSession: 'No chat session yet (created on your first message)',
         groupStatus: 'Status',
         nativeOn: 'Desktop window running',
         nativeOff: 'Desktop window unavailable',
@@ -322,6 +414,23 @@ window.__ModuleLoader__.load({
         notifyComplete: true,
         /** 授权/提问常亮提醒（Host 用它决定 attention；独立于 bubble 总开关）。 */
         attentionReminder: true,
+        // ── 番茄钟（v3）─────────────────────────────────────────────────────
+        // **默认关**：装完就自己开始 25 分钟倒计时是骚扰，不是功能。
+        pomodoro: false,
+        pomodoroFocusMs: 25 * 60 * 1000,
+        pomodoroBreakMs: 5 * 60 * 1000,
+        pomodoroLongBreakMs: 15 * 60 * 1000,
+        pomodoroRounds: 4,
+        pomodoroAutoNext: true,
+        pomodoroNotify: true,
+        pomodoroCountdown: true,
+        // ── 语音（v3）───────────────────────────────────────────────────────
+        // **默认关**：桌宠突然开口是强打扰，用户主动打开才生效。
+        voice: false,
+        // ── 聊天与人设（v3）─────────────────────────────────────────────────
+        persona: 'default',
+        chatWorkspace: '',
+        chatEnabled: true,
         locale: 'zh'
       }
       if (input === null || typeof input !== 'object') return base
@@ -334,8 +443,26 @@ window.__ModuleLoader__.load({
       if (Number.isFinite(input.scale)) out.scale = Math.min(3, Math.max(0.3, input.scale))
       if (Number.isFinite(input.opacity)) out.opacity = Math.min(1, Math.max(0.3, input.opacity))
       for (const k of ['clickThrough', 'topmost', 'bubble', 'bubbleImages',
-        'hint', 'statusAlways', 'notifyComplete', 'attentionReminder']) {
+        'hint', 'statusAlways', 'notifyComplete', 'attentionReminder',
+        'pomodoro', 'pomodoroAutoNext', 'pomodoroNotify', 'pomodoroCountdown',
+        'voice', 'chatEnabled']) {
         if (typeof input[k] === 'boolean') out[k] = input[k]
+      }
+      // 番茄钟时长：与 Host 的 settings.js **同范围**（三处口径必须一致：
+      // Host 归一化、客户端归一化、番茄钟模块自己的 POMODORO_LIMITS）。
+      const num = (v, min, max, fb) => (Number.isFinite(v) ? Math.min(max, Math.max(min, Math.round(v))) : fb)
+      out.pomodoroFocusMs = num(input.pomodoroFocusMs, 60000, 240 * 60000, base.pomodoroFocusMs)
+      out.pomodoroBreakMs = num(input.pomodoroBreakMs, 60000, 60 * 60000, base.pomodoroBreakMs)
+      out.pomodoroLongBreakMs = num(input.pomodoroLongBreakMs, 60000, 120 * 60000, base.pomodoroLongBreakMs)
+      out.pomodoroRounds = num(input.pomodoroRounds, 2, 12, base.pomodoroRounds)
+      if (typeof input.persona === 'string') {
+        const p = input.persona.trim()
+        if (p !== '' && p.length <= 64) out.persona = p
+      }
+      if (typeof input.chatWorkspace === 'string') {
+        const w = input.chatWorkspace.trim()
+        if (w === '') out.chatWorkspace = ''
+        else if (w.length <= 260) out.chatWorkspace = w
       }
       if (Number.isFinite(input.x)) out.x = Math.round(input.x)
       if (Number.isFinite(input.y)) out.y = Math.round(input.y)
@@ -902,6 +1029,103 @@ window.__ModuleLoader__.load({
 
       const set = patch => runtime.updateSettings?.(patch)
 
+      // ── v3：番茄钟 / 语音 / 聊天 的本地状态 ──────────────────────────────
+      //
+      // 为什么不放进全局 runtime：这些都是**设置页自己的**临时 UI 状态
+      //（草稿文本、加载中、提示语），桌宠与 overlay 都不关心。
+      // 放全局会让每次按键都触发一次全局重渲染。
+      const [voiceInfo, setVoiceInfo] = useState(null)
+      const [personas, setPersonas] = useState(null)
+      const [chatStatus, setChatStatus] = useState(null)
+      const [chatBusy, setChatBusy] = useState(false)
+      const [chatNote, setChatNote] = useState(null)
+      /** 草稿用 ref 而不是 state：它每敲一个字都变，不该触发重渲染。 */
+      const chatDraftRef = useRef('')
+      const chatDraft = chatDraftRef.current
+
+      /**
+       * 番茄钟动作：POST /pet/pomodoro。
+       *
+       * 失败也要给提示 —— "点了没反应"是最糟的（用户会以为坏了）。
+       */
+      const pomodoroAction = action => {
+        const doPost = runtime.pomodoroAction
+        if (typeof doPost !== 'function') {
+          setChatNote('番茄钟不可用（宿主未装配）')
+          return
+        }
+        Promise.resolve(doPost(action))
+          .then(r => { if (r !== null && r !== undefined) setChatNote(null) })
+          .catch(e => setChatNote(`番茄钟操作失败：${e?.message ?? e}`))
+      }
+
+      const reloadPersonas = () => {
+        const fn = runtime.reloadPersonas
+        if (typeof fn !== 'function') return
+        Promise.resolve(fn())
+          .then(list => { if (list !== null && list !== undefined) setPersonas(list) })
+          .catch(() => { /* 保持原列表 */ })
+      }
+
+      const selectPersona = name => {
+        const fn = runtime.selectPersona
+        if (typeof fn !== 'function') return
+        Promise.resolve(fn(name))
+          .then(r => {
+            if (r?.ok === true) {
+              setChatNote(r.note ?? null)
+              set({ persona: name })
+              if (typeof runtime.loadPersonas === 'function') {
+                Promise.resolve(runtime.loadPersonas()).then(setPersonas).catch(() => {})
+              }
+            } else {
+              setChatNote(`切换人设失败：${r?.error ?? r?.reason ?? '未知原因'}`)
+            }
+          })
+          .catch(e => setChatNote(`切换人设失败：${e?.message ?? e}`))
+      }
+
+      const sendChatMessage = () => {
+        const text = chatDraftRef.current
+        if (typeof text !== 'string' || text.trim() === '') return
+        const fn = runtime.sendChat
+        if (typeof fn !== 'function') {
+          setChatNote('聊天不可用（宿主未装配）')
+          return
+        }
+        setChatBusy(true)
+        setChatNote(null)
+        Promise.resolve(fn(text))
+          .then(() => {
+            chatDraftRef.current = ''
+            setChatNote(t('chatSent'))
+          })
+          .catch(e => setChatNote(`发送失败：${e?.message ?? e}`))
+          .finally(() => {
+            setChatBusy(false)
+            // 刷一次状态（会话 id / 计数会变）
+            if (typeof runtime.loadChatStatus === 'function') {
+              Promise.resolve(runtime.loadChatStatus()).then(setChatStatus).catch(() => {})
+            }
+          })
+      }
+
+      // 首次挂载时拉三份数据（语音包信息 / 人设列表 / 聊天状态）。
+      // **失败一律忽略**：拉不到只是界面少一行信息，不该让设置页报错。
+      useEffect(() => {
+        let alive = true
+        if (typeof runtime.loadVoiceInfo === 'function') {
+          Promise.resolve(runtime.loadVoiceInfo()).then(v => { if (alive) setVoiceInfo(v) }).catch(() => {})
+        }
+        if (typeof runtime.loadPersonas === 'function') {
+          Promise.resolve(runtime.loadPersonas()).then(v => { if (alive) setPersonas(v) }).catch(() => {})
+        }
+        if (typeof runtime.loadChatStatus === 'function') {
+          Promise.resolve(runtime.loadChatStatus()).then(v => { if (alive) setChatStatus(v) }).catch(() => {})
+        }
+        return () => { alive = false }
+      }, [runtime])
+
       const coverage = atlas?.report ?? null
       const missingCount = coverage?.missingCount ?? 0
 
@@ -1088,6 +1312,185 @@ window.__ModuleLoader__.load({
           value: settings.statusAlways,
           onChange: v => set({ statusAlways: v })
         }),
+
+        h('h3', { key: 'g6', className: 'zf-pet-settings__group' }, t('groupPomodoro')),
+        h(Toggle, {
+          key: 'pomodoro',
+          label: t('pomodoro'),
+          hint: t('pomodoroHint'),
+          value: settings.pomodoro,
+          onChange: v => set({ pomodoro: v })
+        }),
+        // 时长只在启用后显示：默认关着的时候摆一堆滑块是噪音。
+        settings.pomodoro
+          ? h('div', { key: 'pomoControls' }, [
+              h(Slider, {
+                key: 'pomodoroFocusMs',
+                label: t('pomodoroFocusMs'),
+                value: Math.round(settings.pomodoroFocusMs / 60000),
+                min: 1,
+                max: 240,
+                step: 1,
+                suffix: t('minutes'),
+                onChange: v => set({ pomodoroFocusMs: v * 60000 })
+              }),
+              h(Slider, {
+                key: 'pomodoroBreakMs',
+                label: t('pomodoroBreakMs'),
+                value: Math.round(settings.pomodoroBreakMs / 60000),
+                min: 1,
+                max: 60,
+                step: 1,
+                suffix: t('minutes'),
+                onChange: v => set({ pomodoroBreakMs: v * 60000 })
+              }),
+              h(Slider, {
+                key: 'pomodoroLongBreakMs',
+                label: t('pomodoroLongBreakMs'),
+                value: Math.round(settings.pomodoroLongBreakMs / 60000),
+                min: 1,
+                max: 120,
+                step: 1,
+                suffix: t('minutes'),
+                onChange: v => set({ pomodoroLongBreakMs: v * 60000 })
+              }),
+              h(Slider, {
+                key: 'pomodoroRounds',
+                label: t('pomodoroRounds'),
+                value: settings.pomodoroRounds,
+                min: 2,
+                max: 12,
+                step: 1,
+                suffix: t('rounds'),
+                hint: t('pomodoroRoundsHint'),
+                onChange: v => set({ pomodoroRounds: v })
+              }),
+              h(Toggle, {
+                key: 'pomodoroAutoNext',
+                label: t('pomodoroAutoNext'),
+                hint: t('pomodoroAutoNextHint'),
+                value: settings.pomodoroAutoNext,
+                onChange: v => set({ pomodoroAutoNext: v })
+              }),
+              h(Toggle, {
+                key: 'pomodoroNotify',
+                label: t('pomodoroNotify'),
+                hint: t('pomodoroNotifyHint'),
+                value: settings.pomodoroNotify,
+                onChange: v => set({ pomodoroNotify: v })
+              }),
+              h(Toggle, {
+                key: 'pomodoroCountdown',
+                label: t('pomodoroCountdown'),
+                value: settings.pomodoroCountdown,
+                onChange: v => set({ pomodoroCountdown: v })
+              }),
+              // 开始/暂停按钮：设置页也能控制（桌宠不在手边时用得上）。
+              h('div', { key: 'pomoBtns', className: 'zf-pet-settings__btns' }, [
+                h('button', {
+                  key: 'toggle',
+                  className: 'zf-pet-settings__btn',
+                  onClick: () => pomodoroAction(snapshot?.pomodoro?.running === true ? 'pause' : 'start')
+                }, snapshot?.pomodoro?.running === true ? t('pomodoroPause') : t('pomodoroStart')),
+                h('button', {
+                  key: 'skip',
+                  className: 'zf-pet-settings__btn',
+                  onClick: () => pomodoroAction('skip')
+                }, t('pomodoroSkip')),
+                h('button', {
+                  key: 'reset',
+                  className: 'zf-pet-settings__btn',
+                  onClick: () => pomodoroAction('reset')
+                }, t('pomodoroReset'))
+              ]),
+              snapshot?.pomodoro?.show === true
+                ? h('p', { key: 'pomoNow', className: 'zf-pet-settings__note' },
+                    `${snapshot.pomodoro.text ?? ''} · 第 ${snapshot.pomodoro.round ?? 1}/${snapshot.pomodoro.roundsPerLongBreak ?? 4} 轮`)
+                : null
+            ])
+          : null,
+
+        h('h3', { key: 'g7', className: 'zf-pet-settings__group' }, t('groupVoice')),
+        h(Toggle, {
+          key: 'voice',
+          label: t('voice'),
+          hint: t('voiceHint'),
+          value: settings.voice,
+          onChange: v => set({ voice: v })
+        }),
+        h('p', { key: 'voiceInfo', className: 'zf-pet-settings__note' },
+          `${t('voiceCount')}：${voiceInfo === null
+            ? t('voiceCountHint')
+            : `${voiceInfo.count ?? 0} 条 / ${Math.round((voiceInfo.totalMs ?? 0) / 1000)}s`}`),
+
+        h('h3', { key: 'g8', className: 'zf-pet-settings__group' }, t('groupChat')),
+        h(Toggle, {
+          key: 'chatEnabled',
+          label: t('chatEnabled'),
+          hint: t('chatEnabledHint'),
+          value: settings.chatEnabled,
+          onChange: v => set({ chatEnabled: v })
+        }),
+        h('label', { key: 'persona', className: 'zf-pet-row' }, [
+          h('span', { key: 'l', className: 'zf-pet-row__label' }, t('persona')),
+          h('select', {
+            key: 's',
+            className: 'zf-pet-row__input',
+            value: settings.persona,
+            onChange: e => selectPersona(e.target.value)
+          }, (personas?.items ?? [{ name: 'default', title: '默认（内置）' }]).map(p =>
+            h('option', { key: p.name, value: p.name }, p.title ?? p.name)))
+        ]),
+        h('p', { key: 'personaHint', className: 'zf-pet-settings__note' }, t('personaHint')),
+        h('div', { key: 'personaBtns', className: 'zf-pet-settings__btns' }, [
+          h('button', {
+            key: 'reload',
+            className: 'zf-pet-settings__btn',
+            onClick: () => reloadPersonas()
+          }, t('personaReload'))
+        ]),
+        h('p', { key: 'personaDir', className: 'zf-pet-settings__note' },
+          `${t('personaDir')}：${personas?.dir ?? t('personaDirHint')}`),
+        h('label', { key: 'chatWs', className: 'zf-pet-row' }, [
+          h('span', { key: 'l', className: 'zf-pet-row__label' }, t('chatWorkspace')),
+          h('input', {
+            key: 'i',
+            className: 'zf-pet-row__input',
+            type: 'text',
+            value: settings.chatWorkspace,
+            placeholder: t('chatWorkspaceHint'),
+            onChange: e => set({ chatWorkspace: e.target.value })
+          })
+        ]),
+        h('div', { key: 'chatRow', className: 'zf-pet-chatrow' }, [
+          h('input', {
+            key: 'msg',
+            className: 'zf-pet-chatrow__input',
+            type: 'text',
+            value: chatDraft,
+            placeholder: t('chatPlaceholder'),
+            disabled: chatBusy,
+            onInput: e => { chatDraft = e.target.value },
+            onKeyDown: e => {
+              if (e.key === 'Enter' && !chatBusy) sendChatMessage()
+            }
+          }),
+          h('button', {
+            key: 'send',
+            className: 'zf-pet-settings__btn',
+            disabled: chatBusy,
+            onClick: () => sendChatMessage()
+          }, chatBusy ? t('chatSending') : t('chatSend'))
+        ]),
+        chatNote === null
+          ? null
+          : h('p', { key: 'chatNote', className: 'zf-pet-settings__note' }, chatNote),
+        h('p', { key: 'chatReplyNote', className: 'zf-pet-settings__note' }, t('chatReplyNote')),
+        h('p', { key: 'chatState', className: 'zf-pet-settings__note' },
+          chatStatus === null
+            ? t('chatNoSession')
+            : `${t('chatStatus')}：${chatStatus.sessionId ?? t('chatNoSession')} · ` +
+              `已发 ${chatStatus.sentCount ?? 0} / 已回 ${chatStatus.replyCount ?? 0}`),
 
         h('h3', { key: 'g5', className: 'zf-pet-settings__group' }, t('groupStatus')),
         h('div', { key: 'status', className: 'zf-pet-status' }, [
@@ -1347,6 +1750,20 @@ window.__ModuleLoader__.load({
   color:var(--dsw-alias-label-primary);font-size:12px;cursor:pointer;
 }
 .zf-pet-settings__btn:hover{ border-color:var(--dsw-alias-brand-primary); }
+.zf-pet-settings__btn:disabled{ opacity:.5;cursor:default; }
+/* 按钮组（v3：番茄钟三个按钮 / 人设重扫）—— 横排，间距一致 */
+.zf-pet-settings__btns{ display:flex;gap:6px;flex-wrap:wrap;margin-top:6px; }
+.zf-pet-settings__btns .zf-pet-settings__btn{ margin-top:0; }
+/* 聊天输入行（v3）：输入框占满剩余宽度，按钮不缩 */
+.zf-pet-chatrow{ display:flex;gap:6px;align-items:center;margin-top:8px; }
+.zf-pet-chatrow__input{
+  flex:1 1 auto;min-width:0;padding:6px 8px;border-radius:8px;
+  border:1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.14));
+  background:var(--dsw-alias-bg-layer-2, transparent);
+  color:var(--dsw-alias-label-primary);font-size:12px;
+}
+.zf-pet-chatrow__input:disabled{ opacity:.6; }
+.zf-pet-chatrow .zf-pet-settings__btn{ margin-top:0;flex:0 0 auto; }
 `
     }
 
@@ -1456,6 +1873,43 @@ window.__ModuleLoader__.load({
        * @param {string} text
        * @returns {Promise<void>} 失败时抛错（带可读原因），由 UI 就地展示
        */
+      /**
+       * 通用 `/pet/*` 请求（v3 新增）。
+       *
+       * 抽出来的理由：v3 加了 5 个端点（番茄钟/语音/人设/聊天），
+       * 每个都手写一遍 fetch + 错误归一化会让"错误处理"有 5 个版本，
+       * 早晚有一个忘了把宿主的原因带出来（502 那次就是这么丢的）。
+       *
+       * **同源请求**：浏览器半边靠 loopback 围栏（与 `/pet/state` 一致），
+       * 不带令牌 —— EventSource 连请求头都设不了，令牌那条路对浏览器不存在。
+       *
+       * @param {string} method
+       * @param {string} path - `/pet` 之后的路径
+       * @param {object} [body]
+       * @returns {Promise<object>} 失败时抛错，message 里带宿主给的原因
+       */
+      async function api (method, path, body) {
+        let res
+        try {
+          res = await fetch(`${ROUTE}${path}`, {
+            method,
+            headers: body === undefined ? {} : { 'content-type': 'application/json' },
+            body: body === undefined ? undefined : JSON.stringify(body)
+          })
+        } catch (error) {
+          throw new Error(`网络错误：${error?.message ?? error}`)
+        }
+        let payload = null
+        try { payload = await res.json() } catch { /* 非 JSON 响应 */ }
+        if (!res.ok) {
+          // ⚠️ **必须把宿主给的原因带出来**（`message` → `reason` → 状态码）。
+          // 只显示"HTTP 502"会让用户和开发者都不知道发生了什么 —— 这个坑踩过。
+          const reason = payload?.message ?? payload?.reason ?? payload?.error ?? `HTTP ${res.status}`
+          throw new Error(String(reason))
+        }
+        return payload
+      }
+
       async function sendMessage (text, sessionId) {
         let res
         try {
@@ -1562,6 +2016,36 @@ window.__ModuleLoader__.load({
         reportPosition,
         sendCommand,
         sendMessage,
+        // ── v3：番茄钟 / 语音 / 人设 / 聊天 ────────────────────────────────
+        //
+        // 全部走上面那个 `api()`，共用错误归一化与围栏处理。
+        pomodoroAction (action) {
+          return api('POST', '/pomodoro', { action })
+        },
+        loadVoiceInfo () {
+          return api('GET', '/voices')
+        },
+        loadPersonas () {
+          return api('GET', '/personas')
+        },
+        /**
+         * 重新扫描人设目录。
+         *
+         * ⚠️ 没有"reload"专用端点 —— 直接重新 GET 一次 `/personas` 就是重扫
+         *（`list()` 每次都现读磁盘）。少一个端点就少一处不一致的可能。
+         */
+        reloadPersonas () {
+          return api('GET', '/personas')
+        },
+        selectPersona (name) {
+          return api('POST', '/personas', { name })
+        },
+        loadChatStatus () {
+          return api('GET', '/chat')
+        },
+        sendChat (text) {
+          return api('POST', '/chat', { text })
+        },
         connect,
         dispose () {
           disposed = true

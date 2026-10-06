@@ -67,7 +67,9 @@ export const DEFAULT_POMODORO = {
 /** 各字段的合法范围（Host 归一化与测试共用）。 */
 export const POMODORO_LIMITS = {
   focusMs: [60 * 1000, 4 * 60 * 60 * 1000],
-  breakMs: [30 * 1000, 60 * 60 * 1000],
+  // 短休下限必须与 src/settings.js 的 POMODORO_BREAK_MIN 一致（曾经这里是 30s
+  // 而设置那边是 60s，是真实的三方口径不一致：设置页拖不到、直接构造却可以）。
+  breakMs: [60 * 1000, 60 * 60 * 1000],
   longBreakMs: [60 * 1000, 2 * 60 * 60 * 1000],
   roundsPerLongBreak: [2, 12]
 }
