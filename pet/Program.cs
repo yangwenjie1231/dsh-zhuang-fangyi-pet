@@ -190,6 +190,8 @@ namespace DshZhuangFangyiPet
         private PetBubble _bubble;
         /// <summary>状态文字窗（独立窗口，纯展示恒穿透）。见 `PetStatusLabel` 的类注释。</summary>
         private PetStatusLabel _status;
+        /// <summary>番茄钟倒计时窗（独立窗口，纯展示恒穿透）。见 `PetPomodoro` 的类注释。</summary>
+        private PetPomodoro _pomo;
         /// <summary>本体当前是否被悬停（`hint` 用它决定状态文字显隐）。</summary>
         private bool _hovering;
         private PetTray _tray;
@@ -228,6 +230,11 @@ namespace DshZhuangFangyiPet
 
         // task-8：attention 常亮提醒（上次应用的值；null=无提醒）
         private PetAttentionInfo _lastAttention;
+
+        // v7：番茄钟（上次应用的块；null=旧 Host 或不支持）
+        private PetPomodoroInfo _lastPomodoro;
+        /// <summary>倒计时窗每秒重绘的定时器（Host 不每秒推帧，见下）。</summary>
+        private DispatcherTimer _pomoTimer;
 
         private static readonly string[] PreviewStates = new string[]
         {
@@ -314,6 +321,11 @@ namespace DshZhuangFangyiPet
             // 基于 ActualWidth 的 alpha 命中归一化（见 PetStatusLabel 类注释）。
             _status = new PetStatusLabel();
 
+            // 番茄钟倒计时窗（用户点名"增加番茄钟提醒我休息"）。
+            // 独立窗口的理由与状态文字完全相同（不能撑大本体窗、不能破坏 alpha 命中），
+            // 但**显隐规则不同**：只要在跑就必须看得见，且穿透时照显示 —— 见 PetPomodoro。
+            _pomo = new PetPomodoro();
+
             // 气泡大小按"桌宠显示宽度 × 70%"算，所以要把帧尺寸与 DPI 喂给气泡。
             // 高 DPI 下写死绝对像素会让气泡反超桌宠（用户反馈过）。
             PushPetMetricsToBubble();
@@ -384,6 +396,55 @@ namespace DshZhuangFangyiPet
             _tray.FocusDsh = delegate { OnFocusDsh(); };
             _tray.OpenGallery = delegate { OpenGallery(); };
             _tray.Quit = delegate { Quit(); };
+
+            // ── 番茄钟（托盘）───────────────────────────────────────────────
+            //
+            // 每个动作都**先本地发请求、再靠快照回来更新界面** —— 不在本地
+            // 猜"按了之后该是什么状态"。Host 是唯一真相：本地乐观更新一旦
+            // 与 Host 不一致（比如时间已经走完了），界面就会说谎。
+            _tray.GetPomodoroSummary = delegate
+            {
+                PetPomodoroInfo p = _lastPomodoro;
+                if (p == null || !p.Enabled || !p.Show) return "";
+                string label = PomodoroPhaseLabel(p.Phase);
+                long remain = p.RemainingAt(NowMs());
+                string text = FormatRemaining(remain);
+                return label + " " + text + (p.Running ? "" : "（暂停）");
+            };
+            _tray.GetPomodoroRunning = delegate
+            {
+                return _lastPomodoro != null && _lastPomodoro.Running;
+            };
+            _tray.GetPomodoroEnabled = delegate
+            {
+                // 块缺失（旧 Host）→ 按"关"处理：不给用户一个点了没反应的菜单。
+                return _lastPomodoro != null && _lastPomodoro.Enabled;
+            };
+            _tray.GetPomodoroCountdown = delegate
+            {
+                return _lastPomodoro != null && _lastPomodoro.Show;
+            };
+            _tray.TogglePomodoro = delegate
+            {
+                if (_http != null) _http.PostPomodoro("toggle");
+            };
+            _tray.SkipPomodoro = delegate
+            {
+                if (_http != null) _http.PostPomodoro("skip");
+            };
+            _tray.ResetPomodoro = delegate
+            {
+                if (_http != null) _http.PostPomodoro("reset");
+            };
+            _tray.SetPomodoroEnabled = delegate(bool on)
+            {
+                // 总开关是**设置**（要持久化），走 /pet/settings 而不是 /pet/pomodoro。
+                if (_http != null) _http.PostSettingsPomodoro(on, null);
+            };
+            _tray.SetPomodoroCountdown = delegate(bool on)
+            {
+                if (_http != null) _http.PostSettingsPomodoro(null, on);
+            };
 
             _win.Show();
             _tray.Install();
@@ -930,15 +991,145 @@ namespace DshZhuangFangyiPet
             {
                 int x, y, w, h;
                 _win.GetScreenRect(out x, out y, out w, out h);
+                // 倒计时在跑时，状态文字要**让位到它下面** —— 否则两个窗口重叠。
+                // 锚点传"倒计时窗的矩形"，PetStatusLabel 的 ComputeTarget 会贴它下方。
+                int[] anchor = StatusAnchorRect(x, y, w, h);
                 _status.Update(
                     _win.VisibleLabel(),
                     _statusAlways,
                     _hintOn,
                     _win.ClickThrough,
                     _hovering,
-                    new int[] { x, y, w, h });
+                    anchor);
             }
             catch (Exception ex) { PetLog.Warn("状态文字刷新失败: " + PetLog.Describe(ex)); }
+        }
+
+        // ── 番茄钟（v7）─────────────────────────────────────────────────────
+
+        /// <summary>当前 epoch 毫秒（与 Host 同一系统时钟 —— 本地插值的前提）。</summary>
+        private static long NowMs()
+        {
+            return (long)(DateTime.UtcNow - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalMilliseconds;
+        }
+
+        /// <summary>阶段名 → 界面标签。纯函数（自检直接断言）。</summary>
+        internal static string PomodoroPhaseLabel(string phase)
+        {
+            if (phase == "break") return "休息";
+            if (phase == "long-break") return "长休息";
+            return "专注";
+        }
+
+        /// <summary>
+        /// 剩余毫秒 → `24:59` / `1:05:00`。
+        ///
+        /// ⚠️ **必须与 Host 的 `formatRemaining` 同一口径（向上取整）**：
+        /// 两边差一秒时，用户在托盘里看到 `24:59`、桌宠下面却是 `25:00`，
+        /// 会以为其中一个坏了。自检里有一条"同口径"断言盯着这个。
+        /// </summary>
+        internal static string FormatRemaining(long ms)
+        {
+            long total = (ms + 999) / 1000;      // 向上取整（与 Host 的 Math.ceil 一致）
+            if (total < 0) total = 0;
+            long h = total / 3600;
+            long m = (total % 3600) / 60;
+            long s = total % 60;
+            if (h > 0) return h.ToString(CultureInfo.InvariantCulture) + ":" +
+                              m.ToString("00", CultureInfo.InvariantCulture) + ":" +
+                              s.ToString("00", CultureInfo.InvariantCulture);
+            return m.ToString("00", CultureInfo.InvariantCulture) + ":" +
+                   s.ToString("00", CultureInfo.InvariantCulture);
+        }
+
+        /// <summary>
+        /// 倒计时窗要显示的文字（null = 不显示）。纯函数，自检直接断言。
+        ///
+        /// 格式：`专注 24:59`；超过一轮时补上 `· 2/4`（用户要知道长休还有几轮）。
+        /// </summary>
+        internal static string PomodoroTextFor(PetPomodoroInfo p, long nowMs)
+        {
+            if (p == null || !p.Enabled || !p.Show) return null;
+            string label = PomodoroPhaseLabel(p.Phase);
+            string time = FormatRemaining(p.RemainingAt(nowMs));
+            // 轮次只在专注阶段显示：休息时说"第 3/4 轮"会让人误以为在专注。
+            if (p.Phase == "focus" && p.RoundsPerLongBreak > 1)
+            {
+                return label + " " + time + " · " + p.Round.ToString(CultureInfo.InvariantCulture) +
+                       "/" + p.RoundsPerLongBreak.ToString(CultureInfo.InvariantCulture);
+            }
+            return label + " " + time;
+        }
+
+        /// <summary>倒计时窗当前是否该占位（决定状态文字要不要让位）。</summary>
+        private bool PomodoroVisible()
+        {
+            PetPomodoroInfo p = _lastPomodoro;
+            if (p == null || !p.Enabled || !p.Show) return false;
+            if (_win == null || !_win.IsVisible) return false;
+            return true;
+        }
+
+        /// <summary>
+        /// 状态文字的定位锚点：倒计时可见时用**倒计时窗的矩形**（贴它下方），
+        /// 否则用本体矩形。这样两者自然堆叠，且倒计时一消失状态文字就自动上移
+        /// —— 不需要任何"重排"逻辑。
+        /// </summary>
+        private int[] StatusAnchorRect(int petX, int petY, int petW, int petH)
+        {
+            if (_pomo == null || !_pomo.IsVisible) return new int[] { petX, petY, petW, petH };
+            try
+            {
+                double dpi = PetNative.GetDpiForWindowSafe(_pomo.Handle) / 96.0;
+                if (dpi <= 0) dpi = 1.0;
+                int bw, bh;
+                _pomo.DiagMetrics(out bw, out bh);
+                int px = (int)Math.Round(_pomo.Left * dpi);
+                int py = (int)Math.Round(_pomo.Top * dpi);
+                return new int[] { px, py, bw, bh };
+            }
+            catch
+            {
+                return new int[] { petX, petY, petW, petH };
+            }
+        }
+
+        /// <summary>
+        /// 刷新倒计时窗（**单点入口**：快照/设置/缩放/移动都走这里）。
+        /// </summary>
+        private void RefreshPomodoro()
+        {
+            if (_pomo == null || _win == null) return;
+            try
+            {
+                int x, y, w, h;
+                _win.GetScreenRect(out x, out y, out w, out h);
+                string text = PomodoroTextFor(_lastPomodoro, NowMs());
+                _pomo.Update(text, _lastPomodoro != null && _lastPomodoro.Show,
+                    _win.IsVisible, new int[] { x, y, w, h }, null);
+            }
+            catch (Exception ex) { PetLog.Warn("番茄钟窗刷新失败: " + PetLog.Describe(ex)); }
+        }
+
+        /// <summary>
+        /// 每秒推进一次倒计时显示。
+        ///
+        /// **为什么不让 Host 每秒推帧**：25 分钟 = 1500 帧无意义的状态广播，
+        /// 而且 exe 还得为每帧重绘。Host 只在**阶段切换**时推（那才是真事件），
+        /// 秒级显示由 exe 用 `EndsAt` 本地插值 —— 两个进程读同一个系统时钟，
+        /// 所以插值是安全的。
+        ///
+        /// ⚠️ **exe 绝不在这里判定"阶段结束"**：那只在 Host 里做。
+        /// 这里到 0 只是"显示到 0"，真正的提醒与切换等下一帧快照。
+        /// </summary>
+        private void OnPomodoroTick(object sender, EventArgs e)
+        {
+            PetPomodoroInfo p = _lastPomodoro;
+            if (p == null || !p.Enabled || !p.Show) return;
+            if (!p.Running) return;      // 暂停/停止时不必每秒重绘
+            RefreshPomodoro();
+            // 托盘标题也带倒计时 —— 但每 5 秒刷一次就够（菜单没打开时刷新是白做功）。
+            if ((DateTime.Now.Second % 5) == 0) _tray.Refresh();
         }
         /// <summary>
         /// 桌宠移动时让输入窗跟着走。

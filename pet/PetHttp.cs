@@ -624,6 +624,38 @@ namespace DshZhuangFangyiPet
         }
 
         /// <summary>
+        /// 契约 §3 新增：番茄钟动作（POST /pet/pomodoro）。
+        ///
+        /// ⚠️ **动作名必须在 exe 侧就是常量**（`start`/`pause`/...），
+        /// 且**只从这里发出**。绝不把界面上的字符串直接拼进请求体 ——
+        /// 那等于给了一个任意动作注入点（宿主侧也有白名单，两层都要有）。
+        ///
+        /// 失败只记日志（`PostJson` 的既有语义）：托盘点了"开始"但宿主不在，
+        /// 不该弹错误框打断用户 —— 倒计时窗下个快照自然会显示真实状态。
+        /// </summary>
+        public void PostPomodoro(string action)
+        {
+            if (!IsKnownPomodoroAction(action)) return;
+            PostJson("/api/zhuang-fangyi/pet/pomodoro", "{\"action\":\"" + action + "\"}");
+        }
+
+        /// <summary>允许的番茄钟动作（**唯一真相**，与 Host 的白名单同集合）。</summary>
+        internal static readonly string[] PomodoroActions =
+            new string[] { "start", "pause", "toggle", "skip", "reset" };
+
+        /// <summary>动作名是否合法。纯函数（SelfTest 直接断言，不必起服务）。</summary>
+        internal static bool IsKnownPomodoroAction(string action)
+        {
+            if (string.IsNullOrEmpty(action)) return false;
+            for (int i = 0; i < PomodoroActions.Length; i++)
+            {
+                // 序号比较：动作名是 ASCII 常量，别让区域设置影响判定。
+                if (string.Equals(PomodoroActions[i], action, StringComparison.Ordinal)) return true;
+            }
+            return false;
+        }
+
+        /// <summary>
         /// 契约 §3 新增：GET /pet/settings → {"settings":{…}}。
         /// 原生 exe 目前不用它（位置走 POST /pet/position），但保留读取入口，
         /// 供将来「宿主侧持久化缩放/穿透」使用；失败一律返回 null，绝不抛。

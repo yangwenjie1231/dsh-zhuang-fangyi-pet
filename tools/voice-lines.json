@@ -1,0 +1,165 @@
+{
+  "version": 1,
+  "_说明": [
+    "庄方宜桌宠 · 语音台词表（**封闭集合**，构建期一次性生成）。",
+    "",
+    "⚠️ 为什么必须预生成、绝不在运行时合成：实测 synth.py 冷启动 30.6 秒、",
+    "热态约 5 秒/句。桌宠要在一秒内回应一次点击 —— 运行时合成等于按了没反应。",
+    "所以：**构建期把全部台词压成 mp3，运行时只播放**。",
+    "",
+    "source=real  用素材里现成的真人语音（`新素材/音频/语音合集_分条`）。",
+    "             优先用它 —— 那是官方配音，比合成自然得多。",
+    "source=synth 官方素材里没有合适台词的，用 GPT-SoVITS 合成。",
+    "",
+    "name 就是 /pet/voice/<name> 的文件名（白名单，见 routes.js）。",
+    "event 是触发时机（exe 侧据此播放）。"
+  ],
+  "lines": [
+    {
+      "name": "wake",
+      "event": "pet/wake",
+      "source": "real",
+      "real": "018_打招呼1.mp3",
+      "text": "我正好要去实验室，顺路的话，一起走。",
+      "why": "桌宠刚出现时的招呼。官方原声，最自然。"
+    },
+    {
+      "name": "click-1",
+      "event": "pet/click",
+      "source": "real",
+      "real": "019_打招呼2.mp3",
+      "text": "真巧，刚还是要去找你呢。",
+      "why": "单击反应。短（2.5s），适合高频触发。"
+    },
+    {
+      "name": "click-2",
+      "event": "pet/click",
+      "source": "real",
+      "real": "060_回应激励1.mp3",
+      "text": "过奖了。",
+      "why": "第二短句，与 click-1 轮换，避免每次点都一样。"
+    },
+    {
+      "name": "click-3",
+      "event": "pet/click",
+      "source": "real",
+      "real": "063_作战开始2.mp3",
+      "text": "我这就来。",
+      "why": "第三短句，轮换用。"
+    },
+    {
+      "name": "work-start",
+      "event": "agent/working",
+      "source": "real",
+      "real": "062_作战开始1.mp3",
+      "text": "不怕苦战，只怕无谓之戰。",
+      "why": "AI 开始干活。"
+    },
+    {
+      "name": "done-1",
+      "event": "turn/complete",
+      "source": "real",
+      "real": "064_作战胜利1.mp3",
+      "text": "赢这一次，其实不算很难。",
+      "why": "回合完成。用户点名的『AI 完成时提醒』。"
+    },
+    {
+      "name": "done-2",
+      "event": "turn/complete",
+      "source": "real",
+      "real": "067_作战胜利4.mp3",
+      "text": "能咬牙坚持下来，就不算输。",
+      "why": "完成时轮换。"
+    },
+    {
+      "name": "error-1",
+      "event": "agent/error",
+      "source": "real",
+      "real": "055_危险提醒.mp3",
+      "text": "小心。",
+      "why": "出错。只有 0.71 秒，最短最醒目 —— 出错要立刻被注意到。"
+    },
+    {
+      "name": "error-2",
+      "event": "agent/error",
+      "source": "real",
+      "real": "056_负伤.mp3",
+      "text": "没事，不用管我。",
+      "why": "出错轮换。"
+    },
+    {
+      "name": "waiting",
+      "event": "attention/approval",
+      "source": "real",
+      "real": "074_连携技就绪1.mp3",
+      "text": "嗯，就等你了。",
+      "why": "等你审批。语义完全对得上。"
+    },
+    {
+      "name": "pomodoro-focus-end",
+      "event": "pomodoro/focus-end",
+      "source": "real",
+      "real": "052_休整.mp3",
+      "text": "暂且歇歇吧，留着精力，更难的还在后面呢。",
+      "why": "⭐ 专注结束 → 该休息了。官方『休整』台词，是为这个功能量身定做的。"
+    },
+    {
+      "name": "pomodoro-break-end",
+      "event": "pomodoro/break-end",
+      "source": "synth",
+      "text": "歇够了，我们继续吧。",
+      "why": "休息结束 → 回来干活。官方素材里没有『回来继续』的短句，只能合成。"
+    },
+    {
+      "name": "pomodoro-long-end",
+      "event": "pomodoro/long-end",
+      "source": "synth",
+      "text": "长休息结束了，状态不错，接着来。",
+      "why": "长休结束。同上，官方没有对应台词。"
+    },
+    {
+      "name": "pomodoro-start",
+      "event": "pomodoro/start",
+      "source": "synth",
+      "text": "好，开始专注。这段时间就交给我吧。",
+      "why": "开始专注。"
+    },
+    {
+      "name": "feed",
+      "event": "pet/feed",
+      "source": "real",
+      "real": "043_发现资源1.mp3",
+      "text": "有些好东西，我们不算白来。",
+      "why": "投喂。官方『发现资源』，正好是收到好东西的语气。"
+    },
+    {
+      "name": "praise",
+      "event": "pet/praise",
+      "source": "real",
+      "real": "058_小队激励1.mp3",
+      "text": "干净利落，真漂亮。",
+      "why": "夸奖她时她的回应。"
+    },
+    {
+      "name": "pet-head",
+      "event": "pet/pet-head",
+      "source": "synth",
+      "text": "嗯……这样也挺好的。",
+      "why": "摸摸头。官方素材里没有这种亲密互动的短句。"
+    },
+    {
+      "name": "sleepy",
+      "event": "pet/sleeping",
+      "source": "synth",
+      "text": "有点困了，我先眯一会儿。",
+      "why": "进入睡眠状态。"
+    },
+    {
+      "name": "chat-reply",
+      "event": "chat/reply",
+      "source": "synth",
+      "text": "让我想想……",
+      "why": "聊天时『正在思考』的填充音（回复内容由 AI 生成，不能预生成）。"
+    }
+  ]
+}

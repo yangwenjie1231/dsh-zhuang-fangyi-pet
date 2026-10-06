@@ -44,6 +44,34 @@ namespace DshZhuangFangyiPet
         public Action<string> SetStatusMode = delegate { };
         public Func<string> GetStatusMode = delegate { return "hint"; };
 
+        // ── 番茄钟（用户点名："增加番茄钟提醒我休息"）─────────────────────────
+        //
+        // 为什么番茄钟控制放托盘而不是只放设置页：设置页在 DSH 窗口里，
+        // 而番茄钟是"我要专注了"这个瞬间的动作 —— 让用户切到 DSH 里点开关
+        // 本身就是打断专注。托盘是桌面上随时可及的那个入口。
+        /// <summary>开始/暂停切换。</summary>
+        public Action TogglePomodoro = delegate { };
+        /// <summary>跳过当前阶段。</summary>
+        public Action SkipPomodoro = delegate { };
+        /// <summary>重置回第一轮专注。</summary>
+        public Action ResetPomodoro = delegate { };
+        /// <summary>总开关（持久化到设置）。</summary>
+        public Action<bool> SetPomodoroEnabled = delegate { };
+        /// <summary>倒计时是否常显（持久化到设置）。</summary>
+        public Action<bool> SetPomodoroCountdown = delegate { };
+        /// <summary>取当前番茄钟状态摘要（菜单标题上显示"专注 24:59"）。</summary>
+        public Func<string> GetPomodoroSummary = delegate { return ""; };
+        public Func<bool> GetPomodoroRunning = delegate { return false; };
+        public Func<bool> GetPomodoroEnabled = delegate { return false; };
+        public Func<bool> GetPomodoroCountdown = delegate { return true; };
+
+        private ToolStripMenuItem _miPomodoro;
+        private ToolStripMenuItem _miPomodoroToggle;
+        private ToolStripMenuItem _miPomodoroSkip;
+        private ToolStripMenuItem _miPomodoroReset;
+        private ToolStripMenuItem _miPomodoroEnabled;
+        private ToolStripMenuItem _miPomodoroCountdown;
+
         public bool BubbleToggleEnabled = true;
         public Action<bool> SetBubble = delegate { };
         public Func<bool> GetBubble = delegate { return true; };
@@ -148,6 +176,37 @@ namespace DshZhuangFangyiPet
             gallery.Click += delegate { OpenGallery(); };
             _menu.Items.Add(gallery);
 
+            // ── 番茄钟 ──────────────────────────────────────────────────────
+            //
+            // 菜单**标题带实时倒计时**（"番茄钟 · 专注 24:59"），这样不打开子菜单
+            // 也能一眼看到还剩多久 —— 用户开这个功能就是为了"知道还剩多久"。
+            _miPomodoro = new ToolStripMenuItem("番茄钟(&P)");
+            _miPomodoro.DropDownOpening += delegate { Refresh(); };
+
+            _miPomodoroToggle = new ToolStripMenuItem("开始专注(&S)");
+            _miPomodoroToggle.Click += delegate { TogglePomodoro(); Refresh(); };
+            _miPomodoro.Add(_miPomodoroToggle);
+
+            _miPomodoroSkip = new ToolStripMenuItem("跳过当前阶段(&K)");
+            _miPomodoroSkip.Click += delegate { SkipPomodoro(); Refresh(); };
+            _miPomodoro.Add(_miPomodoroSkip);
+
+            _miPomodoroReset = new ToolStripMenuItem("重置(&R)");
+            _miPomodoroReset.Click += delegate { ResetPomodoro(); Refresh(); };
+            _miPomodoro.Add(_miPomodoroReset);
+
+            _miPomodoro.DropDownItems.Add(new ToolStripSeparator());
+
+            _miPomodoroEnabled = new ToolStripMenuItem("启用番茄钟");
+            _miPomodoroEnabled.Click += delegate { SetPomodoroEnabled(!GetPomodoroEnabled()); Refresh(); };
+            _miPomodoro.Add(_miPomodoroEnabled);
+
+            _miPomodoroCountdown = new ToolStripMenuItem("显示倒计时");
+            _miPomodoroCountdown.Click += delegate { SetPomodoroCountdown(!GetPomodoroCountdown()); Refresh(); };
+            _miPomodoro.Add(_miPomodoroCountdown);
+
+            _menu.Items.Add(_miPomodoro);
+
             ToolStripMenuItem focus = new ToolStripMenuItem("打开 DSH 窗口(&D)");
             focus.Click += delegate { FocusDsh(); };
             _menu.Items.Add(focus);
@@ -206,6 +265,33 @@ namespace DshZhuangFangyiPet
                 {
                     string k = _themeItems[i].Tag as string;
                     _themeItems[i].Checked = string.Equals(k, th, StringComparison.Ordinal);
+                }
+
+                // 番茄钟：标题带实时摘要，勾选反映真实状态。
+                //
+                // ⚠️ 用 `GetPomodoroRunning()` 而不是"摘要非空"来判断 ——
+                // 暂停时摘要仍然有内容（"专注 12:34（暂停）"），
+                // 拿摘要判会把"暂停"显示成"暂停"按钮，点下去反而继续跑。
+                if (_miPomodoro != null)
+                {
+                    string summary = GetPomodoroSummary();
+                    bool enabled = GetPomodoroEnabled();
+                    _miPomodoro.Text = string.IsNullOrEmpty(summary)
+                        ? "番茄钟(&P)"
+                        : ("番茄钟 · " + summary + "(&P)");
+                    if (_miPomodoroToggle != null)
+                    {
+                        _miPomodoroToggle.Text = GetPomodoroRunning() ? "暂停(&S)" : "开始专注(&S)";
+                        _miPomodoroToggle.Enabled = enabled;
+                    }
+                    if (_miPomodoroSkip != null) _miPomodoroSkip.Enabled = enabled;
+                    if (_miPomodoroReset != null) _miPomodoroReset.Enabled = enabled;
+                    if (_miPomodoroEnabled != null) _miPomodoroEnabled.Checked = enabled;
+                    if (_miPomodoroCountdown != null)
+                    {
+                        _miPomodoroCountdown.Checked = GetPomodoroCountdown();
+                        _miPomodoroCountdown.Enabled = enabled;
+                    }
                 }
             }
             catch { }

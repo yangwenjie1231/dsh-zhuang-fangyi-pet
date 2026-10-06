@@ -121,6 +121,71 @@ namespace DshZhuangFangyiPet
         }
     }
 
+    /// <summary>
+    /// 契约 §2（v7，additive）：snapshot.pomodoro —— 番茄钟状态。
+    ///
+    /// 块缺失（旧 Host 快照）→ Pomodoro=null → exe 完全不显示倒计时（零回归）。
+    ///
+    /// ⚠️ **exe 绝不自算"该提醒了"**：阶段结束的判定与提醒都在 Host 里
+    ///（它是唯一真相）。exe 只用 `EndsAt` 做**显示**用的本地插值 ——
+    /// 每秒推一帧太重，而让两边各判一次必然分叉（DSH 重启/断线时口径就不同了）。
+    /// </summary>
+    internal sealed class PetPomodoroInfo
+    {
+        /// <summary>总开关。false → 不显示（用户没开番茄钟）。</summary>
+        public bool Enabled;
+        /// <summary>'focus' | 'break' | 'long-break'</summary>
+        public string Phase = "focus";
+        /// <summary>是否正在计时。false = 暂停/未开始（倒计时不跳）。</summary>
+        public bool Running;
+        /// <summary>剩余毫秒（Host 计算值；断线/暂停时的权威值）。</summary>
+        public long RemainingMs;
+        /// <summary>本阶段总时长（进度显示用）。</summary>
+        public long TotalMs;
+        /// <summary>阶段结束的绝对时刻（epoch ms，UTC）；未运行时为 0（= 无）。</summary>
+        public long EndsAt;
+        /// <summary>已完成的专注轮数（累计）。</summary>
+        public int Completed;
+        /// <summary>当前是第几轮专注（1-based）。</summary>
+        public int Round = 1;
+        /// <summary>每几轮一次长休。</summary>
+        public int RoundsPerLongBreak = 4;
+        /// <summary>Host 已格式化好的 `24:59`（**两端同一套格式化**，exe 不自己算字符串）。</summary>
+        public string Text;
+        /// <summary>是否显示倒计时（= enabled，但由 Host 给，语义单一）。</summary>
+        public bool Show;
+
+        /// <summary>块是否"值相同"（Program diff 用，值没变零日志）。</summary>
+        public static bool Same(PetPomodoroInfo a, PetPomodoroInfo b)
+        {
+            if (a == null && b == null) return true;
+            if (a == null || b == null) return false;
+            return a.Enabled == b.Enabled && a.Phase == b.Phase && a.Running == b.Running &&
+                   a.RemainingMs == b.RemainingMs && a.TotalMs == b.TotalMs &&
+                   a.EndsAt == b.EndsAt && a.Completed == b.Completed &&
+                   a.Round == b.Round && a.RoundsPerLongBreak == b.RoundsPerLongBreak &&
+                   a.Show == b.Show;
+        }
+
+        /// <summary>
+        /// 本地插值出"此刻还剩多少毫秒"。
+        ///
+        /// ⚠️ 只在 **Running 且 EndsAt 有效** 时用 `EndsAt - now`；否则用 Host 给的
+        /// `RemainingMs`。理由：
+        ///   · 暂停时 `EndsAt` 为 0（Host 不给），用它会算出荒唐的负数；
+        ///   · 时钟不同步时 `EndsAt` 可能偏差，但**同一台机器上**两个进程读的是
+        ///     同一个系统时钟，所以插值是安全的（这也正是敢用绝对时刻的前提）。
+        /// 下限夹 0：负数会让显示出现 "-00:03"。
+        /// </summary>
+        /// <param name="nowMs">当前 epoch 毫秒</param>
+        public long RemainingAt(long nowMs)
+        {
+            if (!Running || EndsAt <= 0) return RemainingMs < 0 ? 0 : RemainingMs;
+            long remain = EndsAt - nowMs;
+            return remain < 0 ? 0 : remain;
+        }
+    }
+
     internal sealed class PetSnapshot
     {
         public long Rev = -1;
@@ -131,6 +196,8 @@ namespace DshZhuangFangyiPet
         public PetSettingsInfo Settings;
         public PetSendInfo Send;
         public PetAttentionInfo Attention;
+        /// <summary>契约 §2 v7（additive）：番茄钟块。块缺失 = null（旧 Host）。</summary>
+        public PetPomodoroInfo Pomodoro;
         public List<PetSessionInfo> Sessions = new List<PetSessionInfo>();
         public bool NativeAvailable = true;
         public string NativeError;
@@ -253,6 +320,36 @@ namespace DshZhuangFangyiPet
                 pi.Available = send.Bool("available", false);
                 pi.Reason = send.Str("reason", null);
                 s.Send = pi;
+            }
+
+            // 契约 §2 v7（additive）：番茄钟块。**块缺失 → Pomodoro=null**，
+            // exe 据此完全不显示倒计时（旧 Host 快照零回归）。
+            PetJson.JVal pomo = root.Get("pomodoro");
+            if (pomo != null && pomo.IsObj)
+            {
+                PetPomodoroInfo pi = new PetPomodoroInfo();
+                pi.Enabled = pomo.Bool("enabled", false);
+                pi.Phase = pomo.Str("phase", "focus");
+                if (pi.Phase != "focus" && pi.Phase != "break" && pi.Phase != "long-break")
+                {
+                    pi.Phase = "focus";   // 非法回落，不崩
+                }
+                pi.Running = pomo.Bool("running", false);
+                pi.RemainingMs = (long)pomo.Num("remainingMs", 0);
+                if (pi.RemainingMs < 0) pi.RemainingMs = 0;
+                pi.TotalMs = (long)pomo.Num("totalMs", 0);
+                if (pi.TotalMs < 0) pi.TotalMs = 0;
+                pi.EndsAt = (long)pomo.Num("endsAt", 0);
+                pi.Completed = pomo.Int("completed", 0);
+                if (pi.Completed < 0) pi.Completed = 0;
+                pi.Round = pomo.Int("round", 1);
+                if (pi.Round < 1) pi.Round = 1;
+                pi.RoundsPerLongBreak = pomo.Int("roundsPerLongBreak", 4);
+                if (pi.RoundsPerLongBreak < 1) pi.RoundsPerLongBreak = 4;
+                pi.Text = pomo.Str("text", null);
+                // `show` 缺省跟随 enabled（旧 Host 若只给 enabled 也能工作）。
+                pi.Show = pomo.Get("show") != null ? pomo.Bool("show", pi.Enabled) : pi.Enabled;
+                s.Pomodoro = pi;
             }
 
             PetJson.JVal sess = root.Get("sessions");

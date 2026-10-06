@@ -1,0 +1,161 @@
+{
+    "version":  1,
+    "generatedAt":  "2026-10-06T01:42:58Z",
+    "count":  19,
+    "totalMs":  50680,
+    "totalBytes":  416068,
+    "lines":  [
+                  {
+                      "name":  "wake",
+                      "file":  "wake.mp3",
+                      "event":  "pet/wake",
+                      "source":  "real",
+                      "durationMs":  5290,
+                      "bytes":  42884
+                  },
+                  {
+                      "name":  "click-1",
+                      "file":  "click-1.mp3",
+                      "event":  "pet/click",
+                      "source":  "real",
+                      "durationMs":  2480,
+                      "bytes":  20315
+                  },
+                  {
+                      "name":  "click-2",
+                      "file":  "click-2.mp3",
+                      "event":  "pet/click",
+                      "source":  "real",
+                      "durationMs":  920,
+                      "bytes":  7985
+                  },
+                  {
+                      "name":  "click-3",
+                      "file":  "click-3.mp3",
+                      "event":  "pet/click",
+                      "source":  "real",
+                      "durationMs":  910,
+                      "bytes":  7776
+                  },
+                  {
+                      "name":  "work-start",
+                      "file":  "work-start.mp3",
+                      "event":  "agent/working",
+                      "source":  "real",
+                      "durationMs":  2670,
+                      "bytes":  21986
+                  },
+                  {
+                      "name":  "done-1",
+                      "file":  "done-1.mp3",
+                      "event":  "turn/complete",
+                      "source":  "real",
+                      "durationMs":  2570,
+                      "bytes":  21150
+                  },
+                  {
+                      "name":  "done-2",
+                      "file":  "done-2.mp3",
+                      "event":  "turn/complete",
+                      "source":  "real",
+                      "durationMs":  2940,
+                      "bytes":  24076
+                  },
+                  {
+                      "name":  "error-1",
+                      "file":  "error-1.mp3",
+                      "event":  "agent/error",
+                      "source":  "real",
+                      "durationMs":  710,
+                      "bytes":  6313
+                  },
+                  {
+                      "name":  "error-2",
+                      "file":  "error-2.mp3",
+                      "event":  "agent/error",
+                      "source":  "real",
+                      "durationMs":  2240,
+                      "bytes":  18434
+                  },
+                  {
+                      "name":  "waiting",
+                      "file":  "waiting.mp3",
+                      "event":  "attention/approval",
+                      "source":  "real",
+                      "durationMs":  1530,
+                      "bytes":  12791
+                  },
+                  {
+                      "name":  "pomodoro-focus-end",
+                      "file":  "pomodoro-focus-end.mp3",
+                      "event":  "pomodoro/focus-end",
+                      "source":  "real",
+                      "durationMs":  4450,
+                      "bytes":  36197
+                  },
+                  {
+                      "name":  "pomodoro-break-end",
+                      "file":  "pomodoro-break-end.mp3",
+                      "event":  "pomodoro/break-end",
+                      "source":  "synth",
+                      "durationMs":  2660,
+                      "bytes":  21777
+                  },
+                  {
+                      "name":  "pomodoro-long-end",
+                      "file":  "pomodoro-long-end.mp3",
+                      "event":  "pomodoro/long-end",
+                      "source":  "synth",
+                      "durationMs":  4060,
+                      "bytes":  33062
+                  },
+                  {
+                      "name":  "pomodoro-start",
+                      "file":  "pomodoro-start.mp3",
+                      "event":  "pomodoro/start",
+                      "source":  "synth",
+                      "durationMs":  5300,
+                      "bytes":  42884
+                  },
+                  {
+                      "name":  "feed",
+                      "file":  "feed.mp3",
+                      "event":  "pet/feed",
+                      "source":  "real",
+                      "durationMs":  2570,
+                      "bytes":  21150
+                  },
+                  {
+                      "name":  "praise",
+                      "file":  "praise.mp3",
+                      "event":  "pet/praise",
+                      "source":  "real",
+                      "durationMs":  2040,
+                      "bytes":  16971
+                  },
+                  {
+                      "name":  "pet-head",
+                      "file":  "pet-head.mp3",
+                      "event":  "pet/pet-head",
+                      "source":  "synth",
+                      "durationMs":  3380,
+                      "bytes":  27629
+                  },
+                  {
+                      "name":  "sleepy",
+                      "file":  "sleepy.mp3",
+                      "event":  "pet/sleeping",
+                      "source":  "synth",
+                      "durationMs":  3180,
+                      "bytes":  25957
+                  },
+                  {
+                      "name":  "chat-reply",
+                      "file":  "chat-reply.mp3",
+                      "event":  "chat/reply",
+                      "source":  "synth",
+                      "durationMs":  780,
+                      "bytes":  6731
+                  }
+              ]
+}
