@@ -230,6 +230,10 @@ window.__ModuleLoader__.load({
         ttsResident: '让语音模型常驻',
         ttsResidentHint: '常驻：启动一次后一直留在显存里，每次合成立刻开始（占显存）。关闭：空闲后自动停掉释放显存，但每次会话第一次合成要等模型加载',
         ttsIdleStopSec: '空闲多少秒后释放（秒，0 = 不停）',
+        ttsIdleAction: '空闲时怎么释放',
+        ttsIdleActionDefault: '用插件默认',
+        ttsIdleActionUnload: '只卸模型（恢复快，进程留着）',
+        ttsIdleActionStop: '杀进程（全释放）',
         svcStart: '启动服务',
         svcStop: '停止并释放',
         svcState: '合成服务',
@@ -385,6 +389,10 @@ window.__ModuleLoader__.load({
         ttsResident: 'Keep the voice model resident',
         ttsResidentHint: 'Resident: load once and stay in VRAM — every synthesis starts instantly (uses VRAM). Off: unload when idle to free VRAM, but the first synthesis of each session waits for model load',
         ttsIdleStopSec: 'Unload after idle (seconds, 0 = never)',
+        ttsIdleAction: 'How to release when idle',
+        ttsIdleActionDefault: 'Plugin default',
+        ttsIdleActionUnload: 'Unload model only (fast resume)',
+        ttsIdleActionStop: 'Stop process (full release)',
         svcStart: 'Start service',
         svcStop: 'Stop & free VRAM',
         svcState: 'TTS service',
@@ -1708,6 +1716,22 @@ window.__ModuleLoader__.load({
           value: settings.ttsResident,
           onChange: v => set({ ttsResident: v })
         }),
+        // 非常驻时：多久释放 + **怎么**释放（杀进程省内存 / 只卸模型恢复快）
+        settings.ttsResident
+          ? null
+          : h('label', { key: 'idleAction', className: 'zf-pet-row' }, [
+              h('span', { key: 'l', className: 'zf-pet-row__label' }, t('ttsIdleAction')),
+              h('select', {
+                key: 's',
+                className: 'zf-pet-settings__input',
+                value: settings.ttsIdleAction ?? '',
+                onChange: e => set({ ttsIdleAction: e.target.value })
+              }, [
+                h('option', { key: 'd', value: '' }, t('ttsIdleActionDefault')),
+                h('option', { key: 'u', value: 'unload' }, t('ttsIdleActionUnload')),
+                h('option', { key: 'k', value: 'stop' }, t('ttsIdleActionStop'))
+              ])
+            ]),
         settings.ttsResident
           ? null
           : h('label', { key: 'idleStop', className: 'zf-pet-row' }, [

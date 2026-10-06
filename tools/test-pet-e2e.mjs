@@ -1343,7 +1343,7 @@ await ok('⭐⭐ 装了语音 DSH 插件 → 委派给它（`zfhVoice` 服务，
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ settings: {
       chatWorkspace: path.join(chatHome, 'ws'), speakReplies: true, voice: true,
-      ttsResident: true, ttsIdleStopSec: 120
+      ttsResident: true, ttsIdleStopSec: 120, ttsIdleAction: 'unload'
     } })
   })
   // ① 设置推给了插件（开关只有一处）
@@ -1351,6 +1351,18 @@ await ok('⭐⭐ 装了语音 DSH 插件 → 委派给它（`zfhVoice` 服务，
   const pushed = calls.configure[calls.configure.length - 1]
   assert.equal(pushed.resident, true, '常驻开关应推给插件')
   assert.equal(pushed.idleStopSec, 120, '空闲释放时间应推给插件')
+  // 释放方式（stop = 杀进程 / unload = 只卸模型）也要能推过去 ——
+  // 否则语音插件新增的这个能力在桌宠设置页里够不着（"开关只有一处"就断了）。
+  assert.equal(pushed.idleAction, 'unload', '释放方式应推给插件')
+
+  // 反向：没选具体值时**不能**推空串（那会盖掉插件自己的默认）
+  await fetch(`${base}/api/zhuang-fangyi/pet/settings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: { ttsIdleAction: '' } })
+  })
+  const lastPatch = calls.configure[calls.configure.length - 1]
+  assert.ok(!('idleAction' in lastPatch),
+    `空值不该推给插件（会盖掉它的默认），实际推了 ${JSON.stringify(lastPatch.idleAction)}`)
   // ② 状态里说明 mode=plugin（排查时要能分清"谁在管"）
   const st = await (await fetch(`${base}/api/zhuang-fangyi/pet/speech`)).json()
   assert.equal(st.service.mode, 'plugin', `状态应报 mode=plugin，实际 ${st.service.mode}`)

@@ -1103,14 +1103,20 @@ export function apply (ctx, config) {
     const svc = voiceService()
     if (svc !== null && typeof svc.configure === 'function') {
       try {
-        svc.configure({
+        const patch = {
           resident: cfg.ttsResident === true,
           idleStopSec: Number(cfg.ttsIdleStopSec) || 0,
           python: String(cfg.ttsPython ?? '').trim(),
           repoDir: String(cfg.ttsRepoDir ?? '').trim(),
           backend: String(cfg.ttsBackend ?? '').trim() || 'auto',
           port: portFromUrl(String(cfg.ttsUrl ?? '').trim() || DEFAULT_TTS_URL)
-        })
+        }
+        // 释放方式只在用户**明确选了**才推 —— 空串表示"用插件自己的默认"，
+        // 推空串会把插件那边的默认值覆盖掉（`normalizeConfig` 只认白名单，
+        // 空串不在白名单里，于是它保留原值；但显式不传更不容易踩坑）。
+        const idleAction = String(cfg.ttsIdleAction ?? '').trim()
+        if (idleAction === 'stop' || idleAction === 'unload') patch.idleAction = idleAction
+        svc.configure(patch)
       } catch (error) {
         logger.warn?.(`zhuang-fangyi-pet: 同步语音插件配置失败：${error?.message ?? error}`)
       }

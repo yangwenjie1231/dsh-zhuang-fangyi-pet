@@ -101,6 +101,9 @@ export const POMODORO_ROUNDS_MAX = 12
 /** 推理后端白名单（'' = 用子插件默认）。 */
 export const TT_BACKENDS = ['', 'torch', 'onnx']
 
+/** 空闲释放方式白名单（'' = 用语音插件默认）。 */
+export const TT_IDLE_ACTIONS = ['', 'stop', 'unload']
+
 export const SETTINGS_VERSION = 1
 
 /** 默认设置。 */
@@ -254,6 +257,12 @@ export function defaultSettings () {
     ttsResident: false,
     /** 非常驻模式下，空闲多少秒后停掉服务释放显存（0 = 永不自动停）。 */
     ttsIdleStopSec: 300,
+    /**
+     * 空闲时**怎么**释放：`stop`（杀进程，全释放、恢复慢）或
+     * `unload`（只卸模型、留进程，显存同样释放、恢复快）。
+     * 空串 = 用语音插件自己的默认值。
+     */
+    ttsIdleAction: '',
     /** 启动合成服务用的 python（留空 = 自动探测）。 */
     ttsPython: '',
     /** 合成子插件仓库目录（留空 = 自动探测）。 */
@@ -330,6 +339,8 @@ export function normalizeSettings (input) {
   out.speechMaxChars = clamp(input.speechMaxChars, 10, 300, base.speechMaxChars)
   // 空闲释放时间：0 = 不自动停；上限一天（再长就没有"释放显存"的意义了）。
   out.ttsIdleStopSec = clamp(input.ttsIdleStopSec, 0, 86400, base.ttsIdleStopSec)
+  // 释放方式：只认两个值 + 空串（= 用插件默认）。别的值一律不传下去。
+  if (TT_IDLE_ACTIONS.includes(input.ttsIdleAction)) out.ttsIdleAction = input.ttsIdleAction
   // 启动服务用的路径与后端。长度限住，后端只认两个值。
   for (const key of ['ttsPython', 'ttsRepoDir']) {
     if (typeof input[key] === 'string' && input[key].length <= 300) out[key] = input[key].trim()
