@@ -1304,6 +1304,90 @@ await ok('⭐⭐ 常驻开关真的存下去并进状态（点了等于没点是
   for (const d of local.__effects) if (typeof d === 'function') assert.doesNotThrow(() => d())
 })
 
+await ok('⭐⭐ 装了语音 DSH 插件 → 委派给它（`zfhVoice` 服务，桌宠不再自己起进程）', async () => {
+  // 为什么必须有这条：现在有**两条**合成路 —— 装了语音插件走服务，
+  // 没装走桌宠自己的进程+HTTP。两条路的代码不同，必须各自被覆盖，
+  // 否则"装了插件反而更糟"这类问题发现不了（而用户装插件是常态）。
+  fs.rmSync(path.join(tmpHome, 'zhuang-fangyi-pet', 'chat.json'), { force: true })
+  const chatHome = fs.mkdtempSync(path.join(os.tmpdir(), 'zf-svc-delegate-'))
+  const local = makeCtx(makeWebServer())
+  const calls = { synth: [], configure: [], start: 0, stop: 0 }
+  const fakeVoice = {
+    async synthesize (text) {
+      calls.synth.push(text)
+      return { bytes: fakeWav(1600), durationMs: 50, backend: 'torch' }
+    },
+    async health () { return { ok: true, backend: 'torch' } },
+    status () {
+      return {
+        ready: true, ours: true, pid: 777, backend: 'torch', resident: true,
+        idleMs: 0, idleStopSec: 300, lastError: null, launchable: true
+      }
+    },
+    start () { calls.start += 1; return true },
+    stop () { calls.stop += 1; return true },
+    configure (patch) { calls.configure.push(patch); return this.status() }
+  }
+  local.provide('zfhVoice', fakeVoice)
+  local.provide('sessionController', {
+    async list () { return { items: [] } },
+    async create () { return { sessionId: 'chat-svc-1' } },
+    async prompt (req, signal) { signal.throwIfAborted(); return { accepted: true } }
+  })
+  const petIndex = await import(`file://${path.join(ROOT, 'index.js').replace(/\\/g, '/')}`)
+  petIndex.apply(toCordisLike(local, ['webServer']), {})
+  const ws = local.__services.get('webServer')
+  await ws.listen()
+  const base = `http://127.0.0.1:${ws.port}`
+  await fetch(`${base}/api/zhuang-fangyi/pet/settings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: {
+      chatWorkspace: path.join(chatHome, 'ws'), speakReplies: true, voice: true,
+      ttsResident: true, ttsIdleStopSec: 120
+    } })
+  })
+  // ① 设置推给了插件（开关只有一处）
+  assert.ok(calls.configure.length >= 1, '设置应推给语音插件（否则开关点了没用）')
+  const pushed = calls.configure[calls.configure.length - 1]
+  assert.equal(pushed.resident, true, '常驻开关应推给插件')
+  assert.equal(pushed.idleStopSec, 120, '空闲释放时间应推给插件')
+  // ② 状态里说明 mode=plugin（排查时要能分清"谁在管"）
+  const st = await (await fetch(`${base}/api/zhuang-fangyi/pet/speech`)).json()
+  assert.equal(st.service.mode, 'plugin', `状态应报 mode=plugin，实际 ${st.service.mode}`)
+  assert.equal(st.service.pid, 777, '状态应来自插件而不是本地监管器')
+  // ③ 发消息 + 回复 → 合成**走插件**
+  await fetch(`${base}/api/zhuang-fangyi/pet/chat`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text: '在吗？' })
+  })
+  local.emit('session/event', { id: 'chat-svc-1' }, {
+    type: 'assistant/message', seq: 9500, time: Date.now(),
+    data: {
+      turn: 1, step: 1,
+      message: {
+        id: 'msg-svc-1', role: 'assistant',
+        content: [{ type: 'text', text: '**插件路径**也要能念出来。' }],
+        source: { kind: 'model', provider: 'e2e', model: 'e2e' }
+      },
+      stream: []
+    }
+  })
+  const deadline = Date.now() + 6000
+  while (Date.now() < deadline && calls.synth.length === 0) await new Promise(r => setTimeout(r, 50))
+  assert.equal(calls.synth.length, 1, `应调用插件的 synthesize 一次，实际 ${calls.synth.length}`)
+  assert.ok(!calls.synth[0].includes('**'), `送进插件的文本必须已清洗：${calls.synth[0]}`)
+  assert.ok(calls.synth[0].includes('插件路径'), '清洗后应保留文字')
+  // ④ 服务控制委派给插件
+  const ctl = await (await fetch(`${base}/api/zhuang-fangyi/pet/speech/service`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ action: 'stop' })
+  })).json()
+  assert.equal(ctl.mode, 'plugin', '控制也应走插件')
+  assert.equal(calls.stop, 1, '应真的调了插件的 stop')
+  await ws.close()
+  for (const d of local.__effects) if (typeof d === 'function') assert.doesNotThrow(() => d())
+})
+
 /* ── 画廊（读操作，无副作用）────────────────────────────────────────────── */
 
 await ok('⭐ 快照 settings 块带 hint/statusAlways（原生窗状态显示的依据，契约 §2 v6）', async () => {

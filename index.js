@@ -985,31 +985,56 @@ export function apply (ctx, config) {
     return null
   }
 
-  const homeDir = () => { try { return os.homedir() } catch { return '' } }
-
-  /** 找 python：优先已知的 torch 环境（本机实测那份有 cu128 torch）。 */
-  const detectPython = () => {
-    const hit = firstExisting([
-      path.join(homeDir(), 'miniconda3', 'envs', 'voice', 'python.exe'),
-      path.join(homeDir(), 'anaconda3', 'envs', 'voice', 'python.exe'),
-      path.join(homeDir(), 'miniconda3', 'python.exe')
-    ])
-    // 都找不到 → 交给 PATH 上的 python（子插件用 onnx 后端时够用）。
-    return hit ?? 'python'
+  const envOf = name => {
+    try { return String(process.env[name] ?? '').trim() } catch { return '' }
   }
 
-  /** 找合成子插件仓库目录。 */
+  /**
+   * 找 python。
+   *
+   * ⚠️ **不许硬编码绝对路径**（用户明确要求）—— 全部按可移植顺序推导：
+   *   设置 → 环境变量 `ZFH_VOICE_PYTHON` → 仓库里的 `.venv` → PATH 上的 python。
+   * 第一版写死了 `~/miniconda3/envs/voice/python.exe`，那是我这台机器的布局，
+   * 换台机器就是错的（而且错得毫无提示）。
+   */
+  const detectPython = repoDir => {
+    const fromEnv = envOf('ZFH_VOICE_PYTHON')
+    if (fromEnv !== '') return fromEnv
+    if (repoDir !== null) {
+      const hit = firstExisting([
+        path.join(repoDir, '.venv', 'Scripts', 'python.exe'),
+        path.join(repoDir, '.venv', 'bin', 'python'),
+        path.join(repoDir, 'venv', 'Scripts', 'python.exe'),
+        path.join(repoDir, 'venv', 'bin', 'python')
+      ])
+      if (hit !== null) return hit
+    }
+    // 交给 PATH（名字随平台）。
+    return process.platform === 'win32' ? 'python' : 'python3'
+  }
+
+  /**
+   * 找语音子插件仓库目录 —— **只用相对位置与环境变量**。
+   *
+   * `HERE` 是桌宠插件自己的安装目录（`<profile>/node_modules/dsh-zhuang-fangyi-pet`），
+   * 所以 `HERE/../dsh-zhuang-fangyi-voice` 同时覆盖两种装法：
+   *   · 语音插件也装在同一个 `node_modules` 下（DSH 插件管理器装的）；
+   *   · 两个仓库并排签出（开发者本地）。
+   */
   const detectRepoDir = () => firstExisting([
-    'D:\\A\\dsh-zhuang-fangyi-voice',
+    envOf('DSH_ZFH_VOICE_DIR'),
+    envOf('ZFH_VOICE_DIR'),
     path.join(HERE, '..', 'dsh-zhuang-fangyi-voice'),
-    path.join(homeDir(), 'dsh-zhuang-fangyi-voice')
+    path.join(HERE, '..', '..', 'dsh-zhuang-fangyi-voice')
   ])
 
-  /** 找 GPT-SoVITS 检出目录（torch 后端需要）。 */
-  const detectGsvRoot = repoDir => firstExisting([
-    path.join(repoDir, 'third_party', 'GPT-SoVITS'),
-    'D:\\A\\voiceclone\\GPT-SoVITS'
-  ])
+  /** 找 GPT-SoVITS 检出目录（torch 后端需要）—— 同样只用相对位置与环境变量。 */
+  const detectGsvRoot = repoDir => {
+    const fromEnv = envOf('ZFH_GSV_ROOT')
+    if (fromEnv !== '') return fromEnv
+    if (repoDir === null) return null
+    return firstExisting([path.join(repoDir, 'third_party', 'GPT-SoVITS')])
+  }
 
   /**
    * 解析启动参数（设置优先，其次自动探测）。
@@ -1019,9 +1044,9 @@ export function apply (ctx, config) {
    */
   const resolveLaunch = () => {
     const cfg = settings.get()
-    const python = String(cfg.ttsPython ?? '').trim() || detectPython()
     const repoDir = String(cfg.ttsRepoDir ?? '').trim() || detectRepoDir()
-    if (python === null || repoDir === null) return null
+    if (repoDir === null) return null
+    const python = String(cfg.ttsPython ?? '').trim() || detectPython(repoDir)
     const backend = String(cfg.ttsBackend ?? '').trim()
     return buildServeCommand({
       python,
@@ -1031,6 +1056,24 @@ export function apply (ctx, config) {
       gsvRoot: detectGsvRoot(repoDir),
       port: portFromUrl(String(cfg.ttsUrl ?? '').trim() || DEFAULT_TTS_URL)
     })
+  }
+
+  /**
+   * 装了语音 DSH 插件吗？装了就把一切交给它。
+   *
+   * `dsh-zhuang-fangyi-voice` 会挂一个 `zfhVoice` 服务，它自己负责进程生命周期
+   * （启动/保活/释放显存）。此时桌宠**不再自己起进程**（避免两个监管者抢同一个
+   * 端口/进程），只把开关推给它、并调用它的 `synthesize`。
+   *
+   * 没装 → 退回"自己起进程 + HTTP"的老路（那套仍然完整可用）。
+   */
+  const voiceService = () => {
+    try {
+      const svc = typeof ctx.get === 'function' ? ctx.get('zfhVoice') : undefined
+      if (svc === null || svc === undefined) return null
+      if (typeof svc.synthesize !== 'function') return null
+      return svc
+    } catch { return null }
   }
 
   const supervisor = createTtsSupervisor({
@@ -1056,6 +1099,22 @@ export function apply (ctx, config) {
       idleStopSec: Number(cfg.ttsIdleStopSec) || 0,
       launch: resolveLaunch()
     })
+    // 装了语音插件 → 把开关与路径推给它（设置页仍是**唯一**的控制面）。
+    const svc = voiceService()
+    if (svc !== null && typeof svc.configure === 'function') {
+      try {
+        svc.configure({
+          resident: cfg.ttsResident === true,
+          idleStopSec: Number(cfg.ttsIdleStopSec) || 0,
+          python: String(cfg.ttsPython ?? '').trim(),
+          repoDir: String(cfg.ttsRepoDir ?? '').trim(),
+          backend: String(cfg.ttsBackend ?? '').trim() || 'auto',
+          port: portFromUrl(String(cfg.ttsUrl ?? '').trim() || DEFAULT_TTS_URL)
+        })
+      } catch (error) {
+        logger.warn?.(`zhuang-fangyi-pet: 同步语音插件配置失败：${error?.message ?? error}`)
+      }
+    }
   }
   syncTtsService()
 
@@ -1101,12 +1160,19 @@ export function apply (ctx, config) {
           } catch { fromCache = false }
         }
         if (!fromCache) {
-          // ⭐ "需要时才启动"：非常驻模式下服务可能没在跑 —— 先确保它起来。
-          // 有启动命令时 ensure() 会起进程并等它加载完模型（CUDA 下可能几十秒）；
-          // 没命令就只探测，探测不到直接退回固定台词。
+          // ⭐ 两条路：
+          //   · 装了语音 DSH 插件 → 交给它的 `synthesize`（它自己管进程与常驻策略）
+          //   · 没装 → 桌宠自己起进程 + HTTP（"需要时才启动"）
           // 全程在 fire-and-forget 的异步块里，chat 不受任何影响。
-          await supervisor.ensure()
-          const r = await client.synthesize(text)
+          const svc = voiceService()
+          let r = null
+          if (svc !== null) {
+            const out = await svc.synthesize(text)
+            r = out === null ? null : { bytes: out.bytes, durationMs: out.durationMs }
+          } else {
+            await supervisor.ensure()
+            r = await client.synthesize(text)
+          }
           if (r === null) {
             // 服务没起 / 超时 / 返回垃圾 —— 退回固定台词（exe 侧会播 chat/reply）。
             boot('动态语音合成不可用 → 退回固定台词')
@@ -2208,7 +2274,34 @@ export function apply (ctx, config) {
        * **我们自己起的**（用户自己起的那份绝不终止）；`status` = 只读快照。
        */
       service: async action => {
-        if (action === 'status') return { ok: true, ...supervisor.status() }
+        // 装了语音插件 → 控制权在它那儿（同一时间只该有一个监管者）。
+        const svc = voiceService()
+        if (svc !== null && typeof svc.status === 'function') {
+          try {
+            if (action === 'status') return { ok: true, mode: 'plugin', ...svc.status() }
+            if (action === 'stop') {
+              const stopped = typeof svc.stop === 'function' ? svc.stop() : false
+              return {
+                ok: true,
+                mode: 'plugin',
+                stopped,
+                note: stopped ? null : '这个服务不是你起的（或插件未托管），桌宠不会去停它',
+                ...svc.status()
+              }
+            }
+            const ready = typeof svc.start === 'function' ? await svc.start() : false
+            const st = svc.status()
+            return {
+              ok: ready === true,
+              mode: 'plugin',
+              reason: ready === true ? null : (st.lastError ?? '启动超时或进程没能就绪'),
+              ...st
+            }
+          } catch (error) {
+            return { ok: false, mode: 'plugin', reason: String(error?.message ?? error) }
+          }
+        }
+        if (action === 'status') return { ok: true, mode: 'http', ...supervisor.status() }
         if (action === 'stop') {
           const stopped = supervisor.stop()
           return {
@@ -2247,8 +2340,21 @@ export function apply (ctx, config) {
           latest: speechLatest === null
             ? null
             : { name: speechLatest.name, durationMs: speechLatest.durationMs, text: speechLatest.text },
-          /** 进程监管状态（常驻/谁起的/pid/空闲多久/上次错误）。 */
-          service: supervisor.status(),
+          /**
+           * 进程监管状态。
+           *
+           * `mode` 说明用的是哪条路：
+           *   · `plugin` —— 装了语音 DSH 插件，进程由它管（这里的状态从它那儿取）；
+           *   · `http`   —— 没装插件，桌宠自己起进程 + HTTP。
+           * 用户看设置页时要能分清"到底谁在管"，否则排查时会找错地方。
+           */
+          service: (() => {
+            const svc = voiceService()
+            if (svc !== null && typeof svc.status === 'function') {
+              try { return { mode: 'plugin', ...svc.status() } } catch { /* 退回本地状态 */ }
+            }
+            return { mode: 'http', ...supervisor.status() }
+          })(),
           /** 解析出来的启动命令（诊断用：用户能看到桌宠到底会执行什么）。 */
           launch: (() => {
             const l = resolveLaunch()

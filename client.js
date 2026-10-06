@@ -238,6 +238,7 @@ window.__ModuleLoader__.load({
         svcDown: '未运行',
         svcResidentOn: '常驻',
         svcUnknown: '合成服务：状态未知',
+        svcByPlugin: '由语音插件托管',
         svcLaunch: '启动命令',
         svcStartOk: '服务已就绪',
         svcStartFail: '启动失败',
@@ -392,6 +393,7 @@ window.__ModuleLoader__.load({
         svcDown: 'not running',
         svcResidentOn: 'resident',
         svcUnknown: 'TTS service: unknown',
+        svcByPlugin: 'managed by the voice plugin',
         svcLaunch: 'Launch command',
         svcStartOk: 'Service ready',
         svcStartFail: 'Start failed',
@@ -1726,6 +1728,8 @@ window.__ModuleLoader__.load({
             : `${t('svcState')}：${speakStatus.service.ready
                 ? (speakStatus.service.ours ? t('svcOurs') : t('svcExternal'))
                 : t('svcDown')}` +
+              // 谁在管进程（装了语音 DSH 插件 vs 桌宠自己起）—— 排查时要能分清
+              (speakStatus.service.mode === 'plugin' ? ` · ${t('svcByPlugin')}` : '') +
               (speakStatus.service.backend ? ` · ${speakStatus.service.backend}` : '') +
               (speakStatus.service.pid ? ` · pid ${speakStatus.service.pid}` : '') +
               (speakStatus.service.resident ? ` · ${t('svcResidentOn')}` : '') +
