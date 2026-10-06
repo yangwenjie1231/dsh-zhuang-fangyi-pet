@@ -165,6 +165,15 @@ export function normalizeAtlas (raw) {
         // 该图**没有 alpha、铺满整个画布**（黑白线稿自带白底）。
         // 渲染侧据此**不套气泡自己的底/内边距**，避免"白纸贴在浅色框里"的双层边框。
         opaque: entry.opaque === true,
+        // 动态气泡（契约 §4 v-next）：帧数 > 1 时渲染方解出全部帧并做动画。
+        //
+        // ⚠️ 这两个字段**必须原样透传**：渲染方（原生 exe）读的是宿主这一跳，
+        // 不是磁盘上的 pet.json。第一版只改了管线、没改这里，于是 `/pet/atlas`
+        // 把 frames 吃掉 → 表情"在池子里、永远不动"，而自检（直接读 pet.json）
+        // 却是绿的 —— 正是本文件上方警告过的"只测从磁盘读不够，HTTP 这一跳也要测"。
+        // 缺省 1/100 = 静态，旧清单零改动仍可用。
+        frames: Number.isFinite(entry.frames) && entry.frames > 1 ? Math.round(entry.frames) : 1,
+        frameMs: Number.isFinite(entry.frameMs) && entry.frameMs > 0 ? Math.round(entry.frameMs) : 100,
         fileDark
       })
     }

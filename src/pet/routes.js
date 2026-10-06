@@ -212,6 +212,23 @@ export function createHandler (deps) {
     res.end(text)
   }
 
+  /**
+   * `/pet/art/` 的 MIME —— **按扩展名**，不再硬编码 `image/png`。
+   *
+   * 为什么现在必须区分：动态气泡（契约 §4 v-next 的 `frames`）交付的是 **GIF**。
+   * 类型贴错在"只服务 PNG"的年代看不出来，一旦有 GIF 就会让按 MIME 处理的
+   * 客户端/代理走错分支（`nosniff` 一开更是直接坏掉）。
+   * 认不出的扩展名回落 `application/octet-stream`（安全侧：不去猜）。
+   */
+  const ART_MIME = {
+    '.png': 'image/png',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg'
+  }
+  const artMime = rel => ART_MIME[path.extname(String(rel)).toLowerCase()] ?? 'application/octet-stream'
+
   const deny = (res, code) => {
     res.writeHead(code, { 'content-type': 'text/plain; charset=utf-8' })
     res.end(code === 401 ? 'unauthorized' : 'forbidden')
@@ -351,7 +368,10 @@ export function createHandler (deps) {
           return
         }
         res.writeHead(200, {
-          'content-type': 'image/png',
+          // ⚠️ 按扩展名给 MIME。原先硬编码 `image/png` —— 在气泡只有 PNG 时没暴露，
+          // 但动态气泡（契约 §4 v-next 的 `frames`）交付的是 **GIF**，
+          // 贴错类型会让浏览器/代理按 PNG 处理（`nosniff` 一开就是直接坏掉）。
+          'content-type': artMime(rel),
           'content-length': stat.size,
           // 文件名随内容变化（prepare-pet.py 重跑会换名），可以长缓存。
           'cache-control': 'public, max-age=604800, immutable'

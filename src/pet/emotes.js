@@ -68,6 +68,7 @@ export const EMOTE_BY_KEY = {
   // ── 思考中：懵、过载、无聊 ───────────────────────────────────────────────
   thinking: [
     'bubble/18-confused.png',               // 有点懵
+    'bubble/starry-formula.gif',            // 星空公式（满屏公式的"看不懂"；动图）
     'bubble/new/06-brain-overload.png',
     'bubble/new/01-bored.png',              // 庄很无聊
     'bubble/25-reading.png'
@@ -84,6 +85,7 @@ export const EMOTE_BY_KEY = {
   // ── 出错：生气、不开心、讨厌、哭 ─────────────────────────────────────────
   error: [
     'bubble/22-annoyed.png',                // 好气人哦
+    'bubble/angry-charge.gif',              // 生气蓄力→爆发（动图）
     'bubble/new/20-unhappy.png',            // 庄不开心
     'bubble/new/10-hate-you.png',           // 庄讨厌你
     'bubble/new/17-crying.png',             // 庄一直哭
@@ -91,6 +93,7 @@ export const EMOTE_BY_KEY = {
   ],
   'tool/failed': [
     'bubble/22-annoyed.png',
+    'bubble/angry-charge.gif',              // 一肚子火正好对上"工具炸了"
     'bubble/new/20-unhappy.png',
     'bubble/new/18-disgusted.png'
   ],

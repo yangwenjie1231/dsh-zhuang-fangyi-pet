@@ -192,6 +192,24 @@ namespace DshZhuangFangyiPet
             // 缺状态时回落 idle（契约 §4）
             Check(PetJson.NormalizeState("不存在的状态") == "idle", "未知状态回落 idle",
                   "NormalizeState(\"不存在的状态\") → idle");
+
+            // 契约 §4 v-next：气泡动图字段（缺省即静态；越界钳制）
+            PetJson.BubbleEntry animEntry = null, clampEntry = null, staticEntry = null;
+            for (int i = 0; i < a.Bubble.Count; i++)
+            {
+                PetJson.BubbleEntry be = a.Bubble[i];
+                if (be.File == "bubble/anim-selftest.gif") animEntry = be;
+                else if (be.File == "bubble/03.png") clampEntry = be;
+                else if (be.File == "bubble/01.png") staticEntry = be;
+            }
+            bool animParsed = animEntry != null && animEntry.Frames == 5 && animEntry.FrameMs == 40;
+            bool staticDefault = staticEntry != null && staticEntry.Frames == 1 && staticEntry.FrameMs == 100;
+            bool clamped = clampEntry != null && clampEntry.Frames == 1 && clampEntry.FrameMs == 20;
+            Check(animParsed && staticDefault && clamped,
+                  "气泡动图字段：frames/frameMs 解析 + 缺省静态 + 越界钳制",
+                  "动图=" + (animEntry == null ? "缺" : animEntry.Frames + "帧/" + animEntry.FrameMs + "ms") +
+                  "，缺省=" + (staticEntry == null ? "缺" : staticEntry.Frames + "帧/" + staticEntry.FrameMs + "ms") +
+                  "，越界(frames:0,frameMs:1)=" + (clampEntry == null ? "缺" : clampEntry.Frames + "帧/" + clampEntry.FrameMs + "ms"));
             return a;
         }
 
@@ -2197,6 +2215,56 @@ namespace DshZhuangFangyiPet
                 bool backOk = !bubble.IsOpaquePresentation;
                 Check(backOk, "透明抠图气泡：opaque 贴纸之后恢复默认底/边框/内边距 + 上限 160x200",
                       "第二次显示普通抠图，IsOpaquePresentation=" + bubble.IsOpaquePresentation + " 期望 false");
+
+                // ---- 契约 §4 v-next：气泡**动图**（真 GIF → 全帧解码 → 定时器真推进）----
+                //
+                // 原先气泡永远只显示首帧（`Decode` 取 `Frames[0]`），所以动态表情包
+                // 一直是"定格图"。这里逐环验证，**任何一环断掉都要红**：
+                //   解码多帧 → 缩到显示尺寸 → Show 启动定时器 → 泵消息后帧号前进
+                //   → 静态气泡重置动画器（防串台）→ 收起停推进（不后台空转）。
+                MakeGif(Path.Combine(artDir, "bubble", "anim-selftest.gif"), 96, 5);
+                BitmapSource[] anim = store.GetBubbleFrames("bubble/anim-selftest.gif", 48);
+                bool decOk = anim != null && anim.Length == 5 &&
+                             Math.Max(anim[0].PixelWidth, anim[0].PixelHeight) <= 48;
+                Check(decOk, "动图解码：解出全部帧并缩到显示尺寸",
+                      anim == null ? "null" : (anim.Length + " 帧，首帧 " +
+                      anim[0].PixelWidth + "x" + anim[0].PixelHeight + "（源 96，上限 48）"));
+
+                BitmapSource[] oneFrame = store.GetBubbleFrames("bubble/01.png", 48);
+                Check(oneFrame != null && oneFrame.Length == 1,
+                      "静态图走同一条路只解出 1 帧（据此判定不做动画）",
+                      oneFrame == null ? "null" : (oneFrame.Length + " 帧"));
+
+                PetBubbleInfo ab = new PetBubbleInfo();
+                ab.Id = 990003;
+                ab.Kind = "image";
+                ab.DurationMs = 600000;              // 别到点自己收掉，干扰后面的断言
+                bubble.Show(ab, anim == null ? bmp : anim[0], anim, 40);
+                bool started = bubble.DiagAnimRunning && bubble.DiagAnimFrameCount == 5;
+                int f0 = bubble.DiagAnimFrame;
+                for (int k = 0; k < 5; k++) Pump(60);   // 分段泵，给 Render 优先级多次机会
+                int ticks = bubble.DiagAnimTicks;
+                int f1 = bubble.DiagAnimFrame;
+                // ⚠️ 断言必须用**单调的 Tick 次数**，不能只看帧号：
+                // 帧号是模 5 循环的，正好跑完整一轮（5 次 Tick）会回到 0 ——
+                // 第一版就是这么写的，于是"真的在动"被判成失败（假红）。
+                Check(started && ticks >= 2 && f1 == ticks % 5,
+                      "动图真的在推进（Tick 前进 + 帧号按帧数取模）",
+                      "running=" + started + " 帧数=" + bubble.DiagAnimFrameCount +
+                      " ticks=" + ticks + " 帧号 " + f0 + " → " + f1 + "（期望 " + (ticks % 5) + "）");
+
+                PetBubbleInfo sb = new PetBubbleInfo();
+                sb.Id = 990004;
+                sb.Kind = "image";
+                bubble.Show(sb, bmp);
+                Check(!bubble.DiagAnimRunning, "静态气泡会重置动画器（防上一条动图串台）",
+                      "running=" + bubble.DiagAnimRunning + " 期望 false");
+
+                bubble.Show(ab, anim == null ? bmp : anim[0], anim, 40);
+                Pump(60);
+                bubble.HideNow();
+                Check(!bubble.DiagAnimRunning, "收起气泡会停帧推进（不后台空转烧 CPU）",
+                      "running=" + bubble.DiagAnimRunning + " 期望 false");
             }
             catch (Exception ex)
             {
@@ -2400,6 +2468,39 @@ namespace DshZhuangFangyiPet
             }
         }
 
+        /// <summary>
+        /// 造一个**真正的多帧 GIF**（自检用）。
+        ///
+        /// 为什么必须真 GIF：动图链路每一环都跟"帧"有关 —— 解码器解不解全部帧、
+        /// 缩放是否逐帧生效、定时器有没有推进。拿 PNG 冒充测不出来（PNG 天生 1 帧）。
+        /// 用 WPF 自带的 `GifBitmapEncoder` 生成，不引第三方编码器；
+        /// 每帧画在不同位置，保证帧与帧**真的不同**（否则"帧号前进"毫无意义）。
+        /// </summary>
+        private static void MakeGif(string path, int size, int frames)
+        {
+            // 全程**全限定**：SelfTest 里 `Color` 指的是 System.Drawing.Color，
+            // 引 `using System.Windows.Media` 会让它变成二义（既有代码全在用它）。
+            GifBitmapEncoder enc = new GifBitmapEncoder();
+            for (int i = 0; i < frames; i++)
+            {
+                RenderTargetBitmap rtb = new RenderTargetBitmap(
+                    size, size, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+                System.Windows.Media.DrawingVisual dv = new System.Windows.Media.DrawingVisual();
+                using (System.Windows.Media.DrawingContext dc = dv.RenderOpen())
+                {
+                    double off = 2 + i * 5;
+                    dc.DrawEllipse(
+                        new System.Windows.Media.SolidColorBrush(
+                            System.Windows.Media.Color.FromArgb(255, 255, 214, 102)),
+                        null, new System.Windows.Point(off, off), size / 5.0, size / 5.0);
+                }
+                rtb.Render(dv);
+                rtb.Freeze();
+                enc.Frames.Add(BitmapFrame.Create(rtb));
+            }
+            using (FileStream fs = File.Create(path)) enc.Save(fs);
+        }
+
         private static void Pump(int ms)
         {
             DispatcherFrame frame = new DispatcherFrame();
@@ -2534,7 +2635,10 @@ namespace DshZhuangFangyiPet
                 sb.AppendLine("  },");
             }
             sb.AppendLine("  \"bubble\": [");
-            sb.AppendLine("    { \"file\": \"bubble/01.png\", \"w\": 96, \"h\": 96 }");
+            sb.AppendLine("    { \"file\": \"bubble/01.png\", \"w\": 96, \"h\": 96 },");
+            // 契约 §4 v-next：动图声明 + 越界钳制（frames<1 → 1，frameMs<20 → 20）
+            sb.AppendLine("    { \"file\": \"bubble/anim-selftest.gif\", \"w\": 96, \"h\": 96, \"frames\": 5, \"frameMs\": 40 },");
+            sb.AppendLine("    { \"file\": \"bubble/03.png\", \"w\": 96, \"h\": 96, \"frames\": 0, \"frameMs\": 1 }");
             sb.AppendLine("  ],");
             sb.AppendLine("  \"missing\": [");
             sb.AppendLine("    { \"name\": \"表情包_08_爱你哦\", \"reason\": \"needsCutout\" }");

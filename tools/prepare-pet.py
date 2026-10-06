@@ -22,7 +22,29 @@
   | **F1** 细笔触半身像 · 深色作战服 · **无文字** | `gif 01/02/03/04/06/07` + `wx 1..8` | **主体**（`states`） | — |
   | **F2** 鲨鱼睡衣贴纸 · **中文印在图上** | 用户抠的 16 张（`08`~`23`） | **表情包**（`bubble`） | `true` |
   | **F3** 简笔场景 · 无文字 · 风格自成一派 | `gif 24/26/28/29` + 用户抠的 `25_看书` | **表情包**（`bubble`） | `false` |
+  | **F3b** 有实心帧的动画 · **整段保留为动态气泡** | `gif 05_星空公式` / `27_生气指人` | **表情包**（`bubble`） | `false` |
   | **F4** 黑白线稿贴纸 · **白底铺满整图** · 中文大字 | `fromQQ/新表情包/庄方宜(未扣背景)/*.png` 20 张 | **表情包**（`bubble`） | `true` |
+
+  F3b 是「判据拒了、但**根本不用手工抠图**」的那一类（2026-10 补，原先挂在 `missing`
+  里等人工抠图）。关键要把两件事分开：
+
+    · **判据拦的是"当主体动画用"** —— `min_transparent_ratio` 要求任何一帧都不能铺满
+      不透明像素，否则播到那一帧，桌面上会出现一个矩形色块（那是对**本体**的要求）；
+    · **气泡没有这条约束** —— 气泡本来就是一张卡片/贴纸，满幅不透明正是"贴纸"的语义
+      （F4 那 20 张就是 0% 透明的满幅贴纸，一直在用）。
+
+  所以这两张**整段原样当动态气泡**（`opaque` 各按画面内容定），既不用抠图也不用挑帧：
+
+    · `05_星空公式`（33 帧，`frameMs` 30）：深蓝紫渐变底 + **满屏手写数学公式**，
+      模仿 "Confused Math Lady" —— **公式就是画面内容**，抠掉反而毁梗 →
+      按 F4 那套「不透明满幅贴纸」用（不抠、不键控、不 flatten，`opaque=true`）；
+    · `27_生气指人`（18 帧，`frameMs` 60）：蓄力→能量爆发→怒意高潮。它有 10 帧"实心"，
+      那是**满屏爆炸特效**（白闪/蓝光/烟尘），不是背景板；其余帧背景本来就透明
+      （帧 0 实测 43% 像素 alpha=0）→ `opaque=false`，照常套气泡底。
+
+  交付方式：GIF **整文件原样拷贝**到 `art/pet/bubble/<语义名>.gif`，清单写
+  `frames` / `frameMs`（契约 §4 v-next）；播放能力在原生窗（`GifBitmapDecoder`
+  解全部帧 + 一只 DispatcherTimer 推进）。overlay 冻结、只显示首帧，这是**已知降级**。
 
   为什么 F2 只能当表情包：它每张都 baked-in 一句中文（"晚安啦"）。当**主体**会让桌宠
   永远挂着同一句话；当**气泡**时若 Host 再叠一句 `bubble.text`，屏幕上会**出现两段
@@ -180,6 +202,25 @@ BUBBLE_F3 = (
 CUTOUT_EXTRA = (
     ('25-reading', '25-reading.png', False),
 )
+
+# ── F3b：整段动画里有「实心帧」→ 不能当**主体动画**，但可以直接当**动态气泡** ──
+# 见文件上方 F3b 那一行的说明。判据（`min_transparent_ratio`）拦的是"当状态动画用"：
+# 只要有一帧铺满不透明像素，播到那一帧桌面上就会出现矩形色块 —— 那是对**本体**的要求。
+# 气泡不同：**气泡本来就是一张卡片/贴纸**，满幅不透明在气泡里正是"贴纸"的语义
+# （F4 那 20 张就是 0% 透明的满幅贴纸，早就在用了）。
+#
+# 所以这两张**整段保留为动画**，不做任何抠图、也不取单帧。
+BUBBLE_ANIM = (
+    # (语义名, 源文件名, hasText, opaque)
+    ('starry-formula', '表情包_05_星空公式.gif', False, True),   # 满屏公式=画面内容 → 不套气泡底
+    ('angry-charge',   '表情包_27_生气指人.gif', False, False),  # 透明抠图 → 照常套气泡底
+)
+
+# 源文件名 → 语义名/是否不透明（`scan_sources` 用它把「被判据拒掉」换成「登记为动态气泡」）。
+ANIM_BY_FILE = {
+    fname: {'semantic': semantic, 'opaque': opaque}
+    for semantic, fname, _has_text, opaque in BUBBLE_ANIM
+}
 
 # ── F4：黑白线稿贴纸（20 张，**不透明满幅**，带深色变体）────────────────────
 # 语义名**逐张看图**取自图上 baked-in 的中文大字（不是照抄 `1 (1).png` 这类文件名）。
@@ -405,6 +446,13 @@ def resolve_bubble_pool(by_semantic):
         else:
             miss.append({'name': fname, 'reason': 'needsCutout',
                          'detail': 'F3 用户手动抠图（简笔、无文字）'})
+    for semantic, fname, has_text, _opaque in BUBBLE_ANIM:
+        it = by_semantic.get(semantic)
+        if it is not None:
+            pool.append((it, has_text))
+        else:
+            miss.append({'name': fname, 'reason': 'missing',
+                         'detail': 'F3b 动态气泡的源 GIF 不存在（%s）' % ASSETS_QQ})
     for nn, semantic, fname, text in BUBBLE_F4:
         p = f4_source(fname)
         if p is None:
@@ -414,7 +462,7 @@ def resolve_bubble_pool(by_semantic):
         # `opaque=True`：0% alpha、白底铺满整图 → 渲染方不套气泡底/内边距。
         # **没有 `dark=True`** —— 深色模式直接用原图，不再产深色变体。
         pool.append(({'kind': 'png', 'semantic': '%s-%s' % (nn, semantic), 'name': fname,
-                      'path': p, 'opaque': True, 'label': text}, True))
+                      'path': p, 'opaque': True, 'subdir': F4_SUBDIR, 'label': text}, True))
     return pool, miss
 
 
@@ -427,6 +475,9 @@ def has_text_of(semantic):
         if s == semantic:
             return ht
     for s, _, ht in CUTOUT_EXTRA:
+        if s == semantic:
+            return ht
+    for s, _f, ht, _o in BUBBLE_ANIM:
         if s == semantic:
             return ht
     for _nn, s, _f, _t in BUBBLE_F4:
@@ -464,8 +515,17 @@ def discover():
     for p in sorted(glob.glob(os.path.join(ASSETS_QQ, '*.gif'))):
         base = os.path.basename(p)
         idx = base.split('_')[1] if '_' in base else ''
-        frames, _ = gif_frames(p)
+        frames, durations = gif_frames(p)
         mt = min_transparent_ratio(frames)
+        still = ANIM_BY_FILE.get(base)
+        if still is not None:
+            # F3b：这张登记为**动态气泡** → 跳过「当状态动画」的判据。
+            # 不是放水：它不进 `states`（不在 STATE_PLAN 里），只作为**气泡**出现；
+            # 而气泡本来就允许满幅不透明（F4 那批全是）。
+            usable.append({'kind': 'anim', 'semantic': still['semantic'], 'name': base,
+                           'path': p, 'minT': mt, 'frames': len(frames),
+                           'frameMs': median_ms(durations), 'opaque': still['opaque']})
+            continue
         if mt < SOLID_EPS:
             solid = sum(1 for f in frames
                         if f.getchannel('A').histogram()[0] / float(f.width * f.height) < SOLID_EPS)
@@ -619,19 +679,37 @@ def write_bubble(item, has_text, report):
     **深色模式直接用原图**（v2 起不再产深色变体，`fileDark` 缺省）。
     """
     src = item.get('cutout') or item['path']
+
+    # ── F3b：动态气泡 —— **整个 GIF 原样交付**，不取帧、不抠图 ──────────────
+    #
+    # 为什么不转成"PNG 条带"（精灵那套）：气泡动图的帧**不共享画布**（GIF 每帧
+    # 可以只覆盖一部分），拼条带要先统一成网格，还得逐帧合成；而 WPF 的
+    # `GifBitmapDecoder` 本来就会解出全部帧 —— 直接给 GIF 最省事也最不失真。
+    # 契约 §4（v-next）用 `frames` / `frameMs` 声明它，渲染方据此做动画。
+    if item.get('kind') == 'anim':
+        rel = os.path.join('bubble', '%s.gif' % item['semantic'])
+        path = os.path.join(ART, rel)
+        shutil.copy2(src, path)                       # 原字节直传：GIF 已经是最终格式
+        report['made'].append((rel, 'copy', os.path.getsize(path)))
+        return {'file': rel.replace(os.sep, '/'), 'w': BUBBLE_MAX, 'h': BUBBLE_MAX,
+                'hasText': bool(has_text), 'opaque': bool(item.get('opaque')),
+                'frames': int(item.get('frames') or 1),
+                'frameMs': int(item.get('frameMs') or 60)}
+
     if item['kind'] == 'gif':
         im = gif_frames(src)[0][0]              # 气泡用首帧（静态）
     else:
         im = read_rgba(src)
 
     if item.get('opaque'):
-        # F4：满幅不透明贴纸。原图**原样保留 alpha**（其实是 0% 透明，即整幅不透明），
-        # 只做等比缩放 —— 绝不抠白底、绝不 flatten。
+        # 满幅不透明贴纸（F4 线稿 + F3b 的 `05_星空公式`）。原图**原样保留 alpha**
+        # （其实是 0% 透明，即整幅不透明），只做等比缩放 —— 绝不抠底、绝不 flatten。
         #
         # **不再产出深色变体**（用户决定，见文件上方「深色变体：已废弃」处的说明）：
         # 深色模式直接用这张原图。所以契约 §4 的 `fileDark` 为**缺省**。
         base = fit_bubble(im).convert('RGB')
-        rel = os.path.join('bubble', F4_SUBDIR, '%s.png' % item['semantic'])
+        rel = os.path.join('bubble', item.get('subdir') or '',
+                           '%s.png' % item['semantic'].replace(':', '-'))
         path = os.path.join(ART, rel)
         base.save(path, 'PNG', optimize=True)
         report['made'].append((rel, base.size, os.path.getsize(path)))
@@ -663,7 +741,7 @@ def stage_sources(usable, report, refresh_raw=False):
     """
     staged = {'png': 0, 'gif': 0, 'raw': 0, 'rawSkipped': 0}
     for u in usable:
-        sub = {'wx': 'png', 'gif': 'gif'}[u['kind']]
+        sub = {'wx': 'png', 'gif': 'gif', 'anim': 'gif'}[u['kind']]
         copy_if_different(u['path'], os.path.join(SRC, sub, u['name']))
         staged[sub] += 1
     for p in sorted(glob.glob(os.path.join(ASSETS_QQ, '*.png'))):
@@ -979,7 +1057,9 @@ def main():
     print('产出 %d 个文件到 art/pet/（合计 %.2f MB）'
           % (len(report['made']), total / 1024.0 / 1024.0))
     for name, size, nbytes in report['made']:
-        if size is None:
+        if size == 'copy':
+            print('  %-30s %s' % (name, '原样交付（GIF 不重编码） %8.0f KB' % (nbytes / 1024.0)))
+        elif size is None:
             print('  %-30s %s' % (name, '（同素材复用）'))
         elif size == (0, 0):
             print('  %-30s %s' % (name, '清单'))
@@ -999,9 +1079,9 @@ def main():
     n_text = sum(1 for b in bubbles if b['hasText'])
     n_opaque = sum(1 for b in bubbles if b.get('opaque'))
     n_dark = sum(1 for b in bubbles if b.get('fileDark'))
-    print('气泡池（表情包，F2+F3+F4）：%d 张；其中 hasText=true %d 张、false %d 张'
+    print('气泡池（表情包，F2+F3+F3b+F4）：%d 张；其中 hasText=true %d 张、false %d 张'
           % (len(bubbles), n_text, len(bubbles) - n_text))
-    print('  F4 不透明满幅贴纸：opaque=true %d 张' % n_opaque)
+    print('  不透明满幅贴纸（F4 + F3b）：opaque=true %d 张' % n_opaque)
     # 深色变体已废弃：这里断言"清单里一个都没有"，防止将来又有人加回来。
     if n_dark != 0:
         print('  ★★ 意外：仍有 %d 张带 fileDark —— 深色模式应直接用原图（v2 决定）' % n_dark)

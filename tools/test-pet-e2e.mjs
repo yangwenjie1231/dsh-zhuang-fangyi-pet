@@ -201,6 +201,48 @@ async function get (p) {
   return { status: res.status, body: text, headers: res.headers }
 }
 
+/**
+ * 数 GIF 里**真正的帧数**（按块结构走一遍）。
+ *
+ * 为什么不用"扫 `0x21 0xF9`（图形控制扩展）出现次数"：那两个字节序列在
+ * **LZW 压缩数据里也会出现**，实测把 33 帧的 `05_星空公式` 数成 45 帧 ——
+ * 于是断言红在一个**根本不存在的产品问题**上。校验工具本身必须先是对的，
+ * 否则它只是在产生噪音（这条断言第一次跑就是这么被打回来的）。
+ *
+ * @returns {number} 帧数；结构异常返回负数（让调用方直接判失败）
+ */
+function gifFrameCount (buf) {
+  const sig = buf.toString('ascii', 0, 6)
+  if (sig !== 'GIF89a' && sig !== 'GIF87a') return -1
+  let p = 6
+  const screenFlags = buf[p + 4]
+  p += 7
+  if (screenFlags & 0x80) p += 3 * (1 << ((screenFlags & 0x07) + 1))  // 全局色表
+  const skipSubBlocks = () => {
+    while (p < buf.length && buf[p] !== 0) p += buf[p] + 1
+    p += 1
+  }
+  let frames = 0
+  while (p < buf.length) {
+    const b = buf[p]
+    if (b === 0x3b) break                       // trailer
+    if (b === 0x2c) {                           // image descriptor = 一帧
+      frames++
+      const localFlags = buf[p + 9]
+      p += 10
+      if (localFlags & 0x80) p += 3 * (1 << ((localFlags & 0x07) + 1))
+      p += 1                                    // LZW 最小码长
+      skipSubBlocks()
+    } else if (b === 0x21) {                    // 扩展块（GCE/注释/应用）
+      p += 2
+      skipSubBlocks()
+    } else {
+      return -2                                 // 认不出的块 → 文件有问题
+    }
+  }
+  return frames
+}
+
 /** 同源 POST（JSON body）。 */
 async function post2 (p, body) {
   const res = await fetch(`${BASE}${p}`, {
@@ -1632,6 +1674,39 @@ await ok('每个状态的素材文件都能通过 /pet/art/ 真的取到字节',
     // PNG magic
     assert.equal(buf[0], 0x89, `${entry.file} 不是 PNG`)
   }
+})
+
+await ok('⭐ 动态气泡：GIF 能取到字节、MIME 正确、清单声明与文件真实帧数一致', async () => {
+  // 这条覆盖的是"气泡动图"整条**交付链**（契约 §4 v-next）：
+  //   管线产出 GIF → 清单声明 frames/frameMs → 宿主 atlas 透传 → 白名单放行 → MIME image/gif。
+  // 原先 `/pet/art/` 硬编码 `image/png`，且宿主 atlas 解析**没有** frames 字段：
+  // 前者一旦交付 GIF 就贴错类型，后者会让表情"在池子里、永远不动"。
+  // 两处都只有走真实 HTTP 这一跳才暴露 —— 所以这里用真实产物验，不用假 fixture。
+  const body = JSON.parse((await get('/api/zhuang-fangyi/pet/atlas')).body)
+  const animated = (body.bubble ?? []).filter(b => (b.frames ?? 1) > 1)
+  assert.ok(animated.length >= 2,
+    `清单里应至少 2 张动态气泡（starry-formula / angry-charge），实际 ${animated.length}`)
+
+  for (const b of animated) {
+    assert.match(b.file, /\.gif$/, `动态气泡应交付 GIF，实际 ${b.file}`)
+    const res = await fetch(`${ROUTE}/art/${encodeURIComponent(b.file)}`)
+    assert.equal(res.status, 200, `${b.file} 取不到（${res.status}）`)
+    assert.equal(res.headers.get('content-type'), 'image/gif',
+      `${b.file} 的 MIME 应是 image/gif，实际 ${res.headers.get('content-type')}`)
+    const buf = Buffer.from(await res.arrayBuffer())
+    assert.equal(buf.toString('ascii', 0, 6), 'GIF89a', `${b.file} 不是 GIF89a`)
+    // 清单声明的帧数必须与文件里真实帧数一致 —— 声明多了末尾空转、少了漏播，
+    // 都是"看着在动但不对"。
+    const real = gifFrameCount(buf)
+    assert.ok(real > 0, `${b.file} 结构异常（gifFrameCount=${real}）`)
+    assert.equal(b.frames, real, `${b.file} 声明 ${b.frames} 帧，文件里 ${real} 帧`)
+    assert.ok(b.frameMs >= 20 && b.frameMs <= 5000, `${b.file} frameMs 越界：${b.frameMs}`)
+    assert.ok(b.w > 0 && b.h > 0, `${b.file} 缺 w/h（渲染方要用它定解码上限）`)
+  }
+  // 静态气泡不能被误标成动图（否则每次显示都要白解一遍全部帧）
+  const png = (body.bubble ?? []).filter(b => /\.png$/.test(b.file))
+  assert.ok(png.every(b => (b.frames ?? 1) === 1),
+    '静态 PNG 气泡不该声明 frames > 1')
 })
 
 await ok('条带的实际宽度 == frames × frameWidth（几何自洽）', async () => {

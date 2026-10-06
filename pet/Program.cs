@@ -569,6 +569,8 @@ namespace DshZhuangFangyiPet
             _lastBubbleId = snap.Bubble.Id;
             _shownBubbleId = snap.Bubble.Id;
             BitmapSource img = null;
+            BitmapSource[] frames = null;
+            int frameMs = 0;
 
             // 契约 §4 fileDark：只有渲染方知道实际主题 → exe 自己判深色选图。
             // task-6 优先级：argv --dark 0|1 > settings.theme > 注册表。
@@ -595,13 +597,39 @@ namespace DshZhuangFangyiPet
                     string alt = _store.RandomBubbleFile();
                     if (alt != null) img = _store.GetBubbleImage(alt);
                 }
+
+                // 动图（契约 §4 v-next）：清单声明 `frames > 1` 才去解全部帧。
+                // 帧数/帧间隔属于**素材清单**，快照里没有 → 按 rel 回查 atlas。
+                // 静态气泡完全不进这条分支（不加内存、不加开销）。
+                PetJson.BubbleEntry be = _store.GetBubbleEntry(rel);
+                if (img != null && be != null && be.Frames > 1)
+                {
+                    try
+                    {
+                        int maxSide = Math.Max(be.W, be.H);
+                        frames = _store.GetBubbleFrames(rel, maxSide);
+                        frameMs = be.FrameMs;
+                        if (frames == null || frames.Length <= 1)
+                        {
+                            frames = null;   // 解不出多帧 → 老实退回静态，不假装会动
+                            PetLog.Warn("气泡声明动图但解不出多帧，按静态显示: " + rel);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        frames = null;
+                        PetLog.Warn("气泡动图加载失败（按静态显示）: " + PetLog.Describe(ex));
+                    }
+                }
+
                 PetLog.Info("气泡取图 rel=" + rel + " dark=" + (dark ? "1" : "0") +
                             (img != null ? " → 解码成功" : " → 解码失败（走兜底）") +
                             " opaque=" + (snap.Bubble.Opaque ? "1" : "0") +
+                            (frames != null ? " 动图=" + frames.Length + "帧/" + frameMs + "ms" : "") +
                             " theme=" + _settingsTheme);
             }
 
-            try { _bubble.Show(snap.Bubble, img); }
+            try { _bubble.Show(snap.Bubble, img, frames, frameMs); }
             catch (Exception ex) { PetLog.Warn("气泡显示失败: " + PetLog.Describe(ex)); }
         }
 
@@ -1731,7 +1759,17 @@ namespace DshZhuangFangyiPet
                             b.DurationMs = 4000;
                             b.Priority = 95;
                             BitmapSource img = _store.GetBubbleImage(file);
-                            _bubble.Show(b, img);
+                            // 画廊里点一张动图 → 也按动图播（预览就得跟真的一样）
+                            BitmapSource[] frames = null;
+                            int frameMs = 0;
+                            PetJson.BubbleEntry be = _store.GetBubbleEntry(file);
+                            if (img != null && be != null && be.Frames > 1)
+                            {
+                                frames = _store.GetBubbleFrames(file, Math.Max(be.W, be.H));
+                                frameMs = be.FrameMs;
+                                if (frames != null && frames.Length <= 1) frames = null;
+                            }
+                            _bubble.Show(b, img, frames, frameMs);
                         }
                         catch (Exception ex) { PetLog.Warn("画廊选图失败: " + PetLog.Describe(ex)); }
                     };

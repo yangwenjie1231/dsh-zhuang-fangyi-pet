@@ -148,6 +148,24 @@
       "w": 256
     },
     {
+      "file": "bubble/starry-formula.gif",
+      "frameMs": 30,
+      "frames": 33,
+      "h": 256,
+      "hasText": false,
+      "opaque": true,
+      "w": 256
+    },
+    {
+      "file": "bubble/angry-charge.gif",
+      "frameMs": 60,
+      "frames": 18,
+      "h": 256,
+      "hasText": false,
+      "opaque": false,
+      "w": 256
+    },
+    {
       "file": "bubble/new/01-bored.png",
       "h": 256,
       "hasText": true,
@@ -387,18 +405,7 @@
   },
   "frameHeight": 256,
   "generatedAt": "1970-01-01T00:00:00.000Z",
-  "missing": [
-    {
-      "detail": "有实心帧（33/33 帧铺满不透明），播放会出现矩形块；已排除动画，等手动抠图",
-      "name": "表情包_05_星空公式.gif",
-      "reason": "needsCutout"
-    },
-    {
-      "detail": "有实心帧（10/18 帧铺满不透明），播放会出现矩形块；已排除动画，等手动抠图",
-      "name": "表情包_27_生气指人.gif",
-      "reason": "needsCutout"
-    }
-  ],
+  "missing": [],
   "states": {
     "error": {
       "anchorY": 1.0,

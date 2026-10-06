@@ -36,6 +36,18 @@ namespace DshZhuangFangyiPet
         /// <summary>当前是否为不透明满幅贴纸呈现（缩放重铺时要用同一分支）。</summary>
         private bool _opaquePresentation;
 
+        /// <summary>
+        /// 气泡**动图**的帧推进器（静态气泡永不启动）。
+        ///
+        /// 与精灵动画（`PetWindow`）同一套做法：一只 DispatcherTimer + 帧号递增 + 换
+        /// `_image.Source`。气泡这边更简单 —— 帧是 decoder 逐帧解好的，不用切条带。
+        /// </summary>
+        private readonly DispatcherTimer _animTimer;
+        private BitmapSource[] _animFrames;
+        private int _animIndex;
+        /// <summary>自检用：Tick 实际触发次数（只增不减，StartBubbleAnim 里清零）。</summary>
+        private int _animTicks;
+
         private readonly DispatcherTimer _hideTimer;
         private IntPtr _hwnd;
         private HwndSource _source;
@@ -198,6 +210,18 @@ namespace DshZhuangFangyiPet
         internal double DiagPaddingLeft { get { return _border == null ? 0 : _border.Padding.Left; } }
         /// <summary>自检诊断用：图片上限高度（缩放断言用）。</summary>
         internal double DiagImageMaxH { get { return _image == null ? 0 : _image.MaxHeight; } }
+
+        /// <summary>自检用：动图是否在推进（静态气泡恒 false）。</summary>
+        internal bool DiagAnimRunning { get { return _animTimer != null && _animTimer.IsEnabled; } }
+
+        /// <summary>自检用：当前帧号。</summary>
+        internal int DiagAnimFrame { get { return _animIndex; } }
+
+        /// <summary>自检用：本次装载的帧数（静态气泡为 0）。</summary>
+        internal int DiagAnimFrameCount { get { return _animFrames == null ? 0 : _animFrames.Length; } }
+
+        /// <summary>自检用：Tick 实际触发次数（区分"没启动"与"启动了但没跑"）。</summary>
+        internal int DiagAnimTicks { get { return _animTicks; } }
         public bool Showing { get; private set; }
 
         /// <summary>
@@ -368,6 +392,10 @@ namespace DshZhuangFangyiPet
             _hideTimer = new DispatcherTimer(DispatcherPriority.Normal);
             _hideTimer.Tick += OnHideTick;
 
+            // 动图帧推进：优先级 Render，与精灵动画一致（跟得上就不必抢更高）。
+            _animTimer = new DispatcherTimer(DispatcherPriority.Render);
+            _animTimer.Tick += OnAnimTick;
+
             // task-8：脉动 —— 只调描边/投影亮度（_pulseOn 翻转两档），不做位移/缩放，
             // 否则会跟 PlaceNearPet 与拖动定位打架。
             _pulseTimer = new DispatcherTimer(DispatcherPriority.Background);
@@ -437,11 +465,24 @@ namespace DshZhuangFangyiPet
         // ------------------------------------------------------------------
 
         /// <summary>
+        /// 显示一条气泡（**静态**重载，保持旧调用点不变：自检、画廊兜底、回放）。
+        /// </summary>
+        public bool Show(PetBubbleInfo b, BitmapSource img)
+        {
+            return Show(b, img, null, 0);
+        }
+
+        /// <summary>
         /// 显示一条气泡。b 的 id 单调递增：同 id 不重复弹（契约 §2）。
         /// priority 更低的、在当前气泡还在展示期内时被忽略。
         /// task-8：kind==='attention' → 恒亮（不启动 hideTimer），存续由 attention 块决定。
+        ///
+        /// @param frames 动图帧（清单声明 `frames &gt; 1` 时由渲染方解好传入）。
+        ///        传 null / 长度 ≤ 1 = 静态（**每次 Show 都会重置动画器**，
+        ///        否则上一条动图会接着播到新气泡上 —— 明显的串台 bug）。
+        /// @param frameMs 帧间隔；与精灵条带同一套约定（统一值，不读 GIF 每帧延时）。
         /// </summary>
-        public bool Show(PetBubbleInfo b, BitmapSource img)
+        public bool Show(PetBubbleInfo b, BitmapSource img, BitmapSource[] frames, int frameMs)
         {
             if (b == null) return false;
             if (b.Id == _currentId && _currentId >= 0) return false;
@@ -459,6 +500,11 @@ namespace DshZhuangFangyiPet
 
             _image.Source = hasImg ? img : null;
             _image.Visibility = hasImg ? Visibility.Visible : Visibility.Collapsed;
+
+            // 动图：帧优先于单张图（同一张图的第 0 帧，只是按显示尺寸缩过 → 更省内存）。
+            // 放在这里（而不是 Show 末尾）是因为它要改 `_image.Source`，
+            // 而后面 ApplyBubbleChrome/测量都依赖当前内容已经就位。
+            StartBubbleAnim(hasImg ? frames : null, frameMs);
             _text.Text = hasText ? b.Text : "";
             _text.Visibility = hasText ? Visibility.Visible : Visibility.Collapsed;
 
@@ -539,6 +585,39 @@ namespace DshZhuangFangyiPet
         {
             _hideTimer.Stop();
             FadeOut();
+        }
+
+        /// <summary>
+        /// 启停气泡动图。
+        ///
+        /// **每次 Show 都必须调用**（哪怕传 null）：动画状态是窗级的，
+        /// 而气泡窗是长生命周期对象 —— 不重置就会出现"上一条动图继续播在新气泡上"。
+        /// </summary>
+        private void StartBubbleAnim(BitmapSource[] frames, int frameMs)
+        {
+            _animTimer.Stop();
+            _animFrames = null;
+            _animIndex = 0;
+            _animTicks = 0;
+            if (frames == null || frames.Length <= 1) return;
+
+            _animFrames = frames;
+            int ms = frameMs < 20 ? 20 : frameMs;      // 防呆：清单给了 0/负数也不至于疯转
+            _animTimer.Interval = TimeSpan.FromMilliseconds(ms);
+            _image.Source = frames[0];
+            _animTimer.Start();
+        }
+
+        private void OnAnimTick(object sender, EventArgs e)
+        {
+            _animTicks++;
+            if (_animFrames == null || _animFrames.Length <= 1)
+            {
+                _animTimer.Stop();
+                return;
+            }
+            _animIndex = (_animIndex + 1) % _animFrames.Length;
+            _image.Source = _animFrames[_animIndex];
         }
 
         /// <summary>
@@ -851,6 +930,11 @@ namespace DshZhuangFangyiPet
         public void HideNow()
         {
             _hideTimer.Stop();
+            // 收起必须停帧推进：气泡窗不销毁，动画不停会在后台空转（白烧 CPU），
+            // 而且下次 Show 之前 `_image` 已经不可见了 —— 停掉语义更干净。
+            _animTimer.Stop();
+            _animFrames = null;
+            _animIndex = 0;
             Showing = false;
             _currentId = -1;
             _currentPriority = int.MinValue;

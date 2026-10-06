@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Windows;
@@ -183,6 +183,21 @@ namespace DshZhuangFangyiPet
         private readonly Dictionary<string, SpriteSheet> _sheets = new Dictionary<string, SpriteSheet>(StringComparer.Ordinal);
         private readonly Dictionary<string, int> _variantCursor = new Dictionary<string, int>(StringComparer.Ordinal);
         private readonly Dictionary<string, BitmapSource> _bubbleCache = new Dictionary<string, BitmapSource>(StringComparer.Ordinal);
+
+        /// <summary>
+        /// 气泡**动图**帧缓存（静态气泡不进这里，见 `GetBubbleFrames`）。
+        /// </summary>
+        private readonly Dictionary<string, BitmapSource[]> _bubbleFrames = new Dictionary<string, BitmapSource[]>(StringComparer.Ordinal);
+
+        /// <summary>
+        /// 动图帧缓存的**条数上限**。
+        ///
+        /// 静态气泡一张只有一张位图，不设限也还好；动图完全不同：`05_星空公式` 有 33 帧，
+        /// 即使缩到 256 也约 8MB/张。表情池里多几张动图，无上限缓存就会悄悄吃几百 MB
+        /// —— 这与"常驻 torch 服务吃 2.7GB"是同一类问题：**长期驻留的东西必须设上限**。
+        /// 超限整表清空：简单可预期，动图本来就少，重建代价可接受。
+        /// </summary>
+        private const int MaxAnimatedBubbles = 12;
         private readonly Dictionary<string, byte[]> _remoteCache = new Dictionary<string, byte[]>(StringComparer.Ordinal);
         private readonly Dictionary<string, DateTime> _negativeCache = new Dictionary<string, DateTime>(StringComparer.Ordinal);
         private const int NegativeCacheSeconds = 30;
@@ -211,6 +226,7 @@ namespace DshZhuangFangyiPet
             {
                 _sheets.Clear();
                 _bubbleCache.Clear();
+                _bubbleFrames.Clear();
                 _remoteCache.Clear();
                 _negativeCache.Clear();
                 _badVariants.Clear();
@@ -677,8 +693,110 @@ namespace DshZhuangFangyiPet
             return img;
         }
 
+        /// <summary>
+        /// 气泡的**动图帧**。静态图只有 1 帧（调用方据此决定要不要做动画）。
+        ///
+        /// 与精灵条带的分工：条带是"一张 PNG 拼多帧 + 清单给 frames/frameWidth"；
+        /// 气泡动图是"一个 GIF 文件 + 清单给 frames/frameMs" —— 后者不用拼图，
+        /// WPF 的 `GifBitmapDecoder` 本来就会把每帧都解出来（旧的 `Decode` 只取
+        /// `Frames[0]`，所以动图一直被冻在首帧）。
+        ///
+        /// ⚠️ **延时用清单里的统一 `frameMs`**，不查 GIF 每帧自己的延时：
+        /// 与精灵条带同一套约定（`SpriteSheet.FrameMs` 也是统一值），
+        /// 少一处"元数据查询可能返回 null"的不确定性。
+        ///
+        /// @param maxSide 显示尺寸提示（0 = 不缩放）。按它缩放能省大量内存：
+        ///        500×500×33 帧不缩放约 33MB，缩到 256 约 8MB。
+        ///        气泡的 `_image` 本来就有 MaxWidth/MaxHeight + Uniform，
+        ///        所以缩帧**不改变布局**，只是省内存。
+        /// </summary>
+        public BitmapSource[] GetBubbleFrames(string rel, int maxSide)
+        {
+            if (string.IsNullOrEmpty(rel)) return null;
+            string key = maxSide > 0 ? rel + "@" + maxSide : rel;
+            lock (_gate)
+            {
+                BitmapSource[] hit;
+                if (_bubbleFrames.TryGetValue(key, out hit)) return hit;
+            }
+            byte[] data = FetchBytes(rel);
+            if (data == null) return null;
+            BitmapSource[] frames = DecodeAll(data, rel, maxSide);
+            if (frames == null || frames.Length == 0) return null;
+            lock (_gate)
+            {
+                if (_bubbleFrames.Count >= MaxAnimatedBubbles) _bubbleFrames.Clear();
+                _bubbleFrames[key] = frames;
+            }
+            return frames;
+        }
+
+        /// <summary>
+        /// 解出**全部帧**。`Decode`（只取首帧）语义保持不变 —— 画廊缩略图、
+        /// 自检、静态气泡都还在用它。
+        /// </summary>
+        private BitmapSource[] DecodeAll(byte[] data, string what, int maxSide)
+        {
+            try
+            {
+                using (MemoryStream ms = new MemoryStream(data, false))
+                {
+                    BitmapDecoder dec = BitmapDecoder.Create(
+                        ms, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
+                    int n = dec.Frames.Count;
+                    if (n == 0) return null;
+                    BitmapSource[] outp = new BitmapSource[n];
+                    for (int i = 0; i < n; i++)
+                    {
+                        BitmapSource src = EnsureBgra32(dec.Frames[i]);
+                        if (src == null) return null;
+                        if (maxSide > 0)
+                        {
+                            int side = Math.Max(src.PixelWidth, src.PixelHeight);
+                            if (side > maxSide)
+                            {
+                                double s = (double)maxSide / side;
+                                TransformedBitmap tb = new TransformedBitmap(src, new ScaleTransform(s, s));
+                                tb.Freeze();
+                                src = tb;
+                            }
+                        }
+                        if (!src.IsFrozen) src.Freeze();
+                        outp[i] = src;
+                    }
+                    return outp;
+                }
+            }
+            catch (Exception ex)
+            {
+                PetLog.Warn("解码动图 " + what + " 失败: " + PetLog.Describe(ex));
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// 按相对路径回查**清单里**的气泡条目（拿 `frames`/`frameMs`/`w`/`h`）。
+        ///
+        /// 为什么不从快照取：契约 §2 的 `bubble` 块（`PetBubbleInfo`）只有渲染必需的
+        /// 字段，**没有** frames/frameMs —— 那属于素材清单（§4）。所以按路径回查 atlas。
+        /// </summary>
+        public PetJson.BubbleEntry GetBubbleEntry(string rel)
+        {
+            if (string.IsNullOrEmpty(rel)) return null;
+            PetJson.Atlas a;
+            lock (_gate) { a = _atlas; }
+            if (a == null || a.Bubble == null) return null;
+            for (int i = 0; i < a.Bubble.Count; i++)
+            {
+                PetJson.BubbleEntry e = a.Bubble[i];
+                if (e != null && string.Equals(e.File, rel, StringComparison.Ordinal)) return e;
+            }
+            return null;
+        }
+
         /// <summary>按清单里的 bubble 池随机取一张（供无 text 的气泡兜底）。</summary>
         public string RandomBubbleFile()
+
         {
             PetJson.Atlas a;
             lock (_gate) { a = _atlas; }

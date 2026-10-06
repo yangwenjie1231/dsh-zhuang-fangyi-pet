@@ -309,6 +309,20 @@ namespace DshZhuangFangyiPet
             public string File;
             public int W;
             public int H;
+
+            /// <summary>
+            /// 契约 §4 v-next：气泡**动图**的帧数。缺省 1 = 静态（旧清单零改动）。
+            /// 帧由渲染方从 GIF 文件里解（`PetSpriteStore.GetBubbleFrames`）——
+            /// 这里只声明"应该有几帧"，用来决定要不要启动动画。
+            /// </summary>
+            public int Frames = 1;
+
+            /// <summary>
+            /// 帧间隔（ms）。**统一值**，与精灵条带的 `frameMs` 同一套约定：
+            /// 不去读 GIF 每帧自己的延时（元数据查询可能返回 null，多一处不确定性；
+            /// 实际素材是 30/60ms 交错，取中位数 30ms 的视觉节奏已经对）。
+            /// </summary>
+            public int FrameMs = 100;
         }
 
         /// <summary>
@@ -523,6 +537,13 @@ namespace DshZhuangFangyiPet
                     if (string.IsNullOrEmpty(e.File)) continue;
                     e.W = b.Int("w", 0);
                     e.H = b.Int("h", 0);
+                    // 动图字段（契约 §4 v-next）：缺省即静态，兼容旧清单。
+                    e.Frames = b.Int("frames", 1);
+                    if (e.Frames < 1) e.Frames = 1;
+                    if (e.Frames > 512) e.Frames = 512;
+                    e.FrameMs = b.Int("frameMs", 100);
+                    if (e.FrameMs < 20) e.FrameMs = 20;
+                    if (e.FrameMs > 5000) e.FrameMs = 5000;
                     a.Bubble.Add(e);
                 }
             }
