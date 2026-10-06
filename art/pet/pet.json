@@ -162,6 +162,186 @@
       "frames": 18,
       "h": 256,
       "hasText": false,
+      "opaque": true,
+      "w": 256
+    },
+    {
+      "file": "bubble/stunned.gif",
+      "frameMs": 40,
+      "frames": 25,
+      "h": 256,
+      "hasText": false,
+      "opaque": false,
+      "w": 256
+    },
+    {
+      "file": "bubble/muscle.gif",
+      "frameMs": 40,
+      "frames": 25,
+      "h": 256,
+      "hasText": false,
+      "opaque": true,
+      "w": 256
+    },
+    {
+      "file": "bubble/content.gif",
+      "frameMs": 40,
+      "frames": 25,
+      "h": 256,
+      "hasText": false,
+      "opaque": false,
+      "w": 256
+    },
+    {
+      "file": "bubble/sunglasses.gif",
+      "frameMs": 40,
+      "frames": 25,
+      "h": 256,
+      "hasText": false,
+      "opaque": false,
+      "w": 256
+    },
+    {
+      "file": "bubble/cat-paws.gif",
+      "frameMs": 40,
+      "frames": 25,
+      "h": 256,
+      "hasText": false,
+      "opaque": false,
+      "w": 256
+    },
+    {
+      "file": "bubble/listless.gif",
+      "frameMs": 40,
+      "frames": 25,
+      "h": 256,
+      "hasText": false,
+      "opaque": false,
+      "w": 256
+    },
+    {
+      "file": "bubble/cheerful.gif",
+      "frameMs": 40,
+      "frames": 25,
+      "h": 256,
+      "hasText": false,
+      "opaque": false,
+      "w": 256
+    },
+    {
+      "file": "bubble/watermelon.gif",
+      "frameMs": 40,
+      "frames": 25,
+      "h": 256,
+      "hasText": false,
+      "opaque": false,
+      "w": 256
+    },
+    {
+      "file": "bubble/sleepy-zzz.gif",
+      "frameMs": 40,
+      "frames": 25,
+      "h": 256,
+      "hasText": false,
+      "opaque": false,
+      "w": 256
+    },
+    {
+      "file": "bubble/star-eyes.gif",
+      "frameMs": 40,
+      "frames": 25,
+      "h": 256,
+      "hasText": false,
+      "opaque": false,
+      "w": 256
+    },
+    {
+      "file": "bubble/smile-soft.gif",
+      "frameMs": 40,
+      "frames": 25,
+      "h": 256,
+      "hasText": false,
+      "opaque": false,
+      "w": 256
+    },
+    {
+      "file": "bubble/knife.gif",
+      "frameMs": 40,
+      "frames": 25,
+      "h": 256,
+      "hasText": false,
+      "opaque": false,
+      "w": 256
+    },
+    {
+      "file": "bubble/please.gif",
+      "frameMs": 40,
+      "frames": 25,
+      "h": 256,
+      "hasText": false,
+      "opaque": false,
+      "w": 256
+    },
+    {
+      "file": "bubble/dizzy.gif",
+      "frameMs": 40,
+      "frames": 25,
+      "h": 256,
+      "hasText": false,
+      "opaque": false,
+      "w": 256
+    },
+    {
+      "file": "bubble/follow-me.gif",
+      "frameMs": 40,
+      "frames": 25,
+      "h": 256,
+      "hasText": true,
+      "opaque": false,
+      "w": 256
+    },
+    {
+      "file": "bubble/hungry.gif",
+      "frameMs": 40,
+      "frames": 25,
+      "h": 256,
+      "hasText": false,
+      "opaque": false,
+      "w": 256
+    },
+    {
+      "file": "bubble/megaphone.gif",
+      "frameMs": 40,
+      "frames": 25,
+      "h": 256,
+      "hasText": false,
+      "opaque": false,
+      "w": 256
+    },
+    {
+      "file": "bubble/road-rage.gif",
+      "frameMs": 40,
+      "frames": 25,
+      "h": 256,
+      "hasText": false,
+      "opaque": false,
+      "w": 256
+    },
+    {
+      "file": "bubble/excited.gif",
+      "frameMs": 40,
+      "frames": 25,
+      "h": 256,
+      "hasText": false,
+      "opaque": false,
+      "w": 256
+    },
+    {
+      "file": "bubble/all-ok.gif",
+      "frameMs": 40,
+      "frames": 25,
+      "h": 256,
+      "hasText": false,
       "opaque": false,
       "w": 256
     },

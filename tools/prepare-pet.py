@@ -23,7 +23,15 @@
   | **F2** 鲨鱼睡衣贴纸 · **中文印在图上** | 用户抠的 16 张（`08`~`23`） | **表情包**（`bubble`） | `true` |
   | **F3** 简笔场景 · 无文字 · 风格自成一派 | `gif 24/26/28/29` + 用户抠的 `25_看书` | **表情包**（`bubble`） | `false` |
   | **F3b** 有实心帧的动画 · **整段保留为动态气泡** | `gif 05_星空公式` / `27_生气指人` | **表情包**（`bubble`） | `false` |
+  | **F5** 新收的一整批 Q 版动态表情（20 张，另一画风） | `QQ表情\表情包_30..49_*.gif` | **表情包**（`bubble`） | 见下 |
   | **F4** 黑白线稿贴纸 · **白底铺满整图** · 中文大字 | `fromQQ/新表情包/庄方宜(未扣背景)/*.png` 20 张 | **表情包**（`bubble`） | `true` |
+
+  F5 是 2026-10 晚新收的一整批（文件名是 QQ 的 base64 混淆串，语义只能看图定）。
+  它和 F1（现主体）**不是同一个画风**：F5 是白绿作战服 + 粗描边 + 平涂 + Q 版胸像，
+  F1 是细笔触 + 深色作战服 + 半身像。所以按上面那条纪律（F2/F3 不得进 `states`），
+  **F5 全部进气泡池、不进主体** —— 主体是连续播放的，混画风会让人物在桌面上
+  "变装跳帧"。用户要求这批都要用上，进气泡池即满足（气泡是一张张独立贴纸，
+  风格自成一派没问题）。
 
   F3b 是「判据拒了、但**根本不用手工抠图**」的那一类（2026-10 补，原先挂在 `missing`
   里等人工抠图）。关键要把两件事分开：
@@ -211,16 +219,74 @@ CUTOUT_EXTRA = (
 #
 # 所以这两张**整段保留为动画**，不做任何抠图、也不取单帧。
 BUBBLE_ANIM = (
-    # (语义名, 源文件名, hasText, opaque)
-    ('starry-formula', '表情包_05_星空公式.gif', False, True),   # 满屏公式=画面内容 → 不套气泡底
-    ('angry-charge',   '表情包_27_生气指人.gif', False, False),  # 透明抠图 → 照常套气泡底
+    # (语义名, 源文件名, hasText)   —— `opaque` 由指标自动判定，见 OPAQUE_MIN
+    ('starry-formula', '表情包_05_星空公式.gif', False),   # 33/33 帧铺满 → 自动判为 opaque
+    ('angry-charge',   '表情包_27_生气指人.gif', False),  # 半数帧透明 → 自动判为不 opaque
 )
 
-# 源文件名 → 语义名/是否不透明（`scan_sources` 用它把「被判据拒掉」换成「登记为动态气泡」）。
+# 源文件名 → 语义名（`scan_sources` 用它把「被判据拒掉」换成「登记为动态气泡」）。
 ANIM_BY_FILE = {
-    fname: {'semantic': semantic, 'opaque': opaque}
-    for semantic, fname, _has_text, opaque in BUBBLE_ANIM
+    fname: {'semantic': semantic}
+    for semantic, fname, _has_text in BUBBLE_ANIM
 }
+
+# ── F5：新收的一整批 Q 版动态表情（20 张 GIF，2026-10 晚）────────────────────
+#
+# ⚠️ 素材来源有个坑值得记一笔：`fromQQ\表情包\庄方宜表情包\` 里那 49 个文件
+# 用的是 QQ 的 base64 **混淆名**（`NR8AVjViQ2dBeE1EQTVOekF3...gif`），
+# 而**同一批字节**在 `庄方宜素材\10-表情包\QQ表情\` 里已有可读名
+# （实测 49/49 内容完全相同，sha256 逐一比对）。所以这里引用**可读名那份**：
+# 名字能读、能 diff、出问题能一眼看出是哪张 —— 混淆名除了能对上号以外毫无价值。
+#
+# 与 F3b 同一个机制（`ANIM_BY_FILE`），单独一张表只是为了**看得清来源与批次**。
+#
+# ⚠️ 关于"要不要放进 `states`（人物主体）"：**不放**。这批是**另一个画风家族**
+# —— 白绿作战服、粗描边、平涂、Q 版胸像；而 F1（现主体）是细笔触、深色作战服、
+# 半身像。本文件上方那条"F2/F3 不得进 states（风格会跳）"的纪律就是为这个写的：
+# 主体是**连续播放**的，混画风会让人物在桌面上"变装跳帧"。
+# 用户明确表示这批都要用上 → 全部进**气泡池**（气泡本来就是一张张独立贴纸，
+# 风格自成一派没问题，F3/F4 早有先例）。
+#
+# `opaque` 不写死 —— 由 `median_opaque_ratio` 按指标判定（见 `OPAQUE_MIN`）。
+BUBBLE_F5 = (
+    # (语义名, 源文件名, hasText)
+    ('stunned',      '表情包_30_圆睁大眼嘴巴张成小小.gif', False),   # 惊呆、冷汗
+    ('muscle',       '表情包_31_明黄背景眯眼咧嘴吐舌.gif', False),   # 秀肌肉（明黄底 → 自动判 opaque）
+    ('content',      '表情包_32_闭眼弯月笑脸颊泛红双.gif', False),   # 满足、乖巧
+    ('sunglasses',   '表情包_33_戴黑色墨镜单手推镜敬.gif', False),   # 墨镜流泪（强颜欢笑）
+    ('cat-paws',     '表情包_34_头顶冒出粉色猫耳脸颊.gif', False),   # 猫耳猫爪、卖萌
+    ('listless',     '表情包_35_双眼半睁无精打采嘴巴.gif', False),   # 无精打采、咸鱼
+    ('cheerful',     '表情包_36_微笑着张嘴脸颊泛红四.gif', False),   # 开心、招手
+    ('watermelon',   '表情包_37_双手抱着一大块西瓜眯.gif', False),   # 吃瓜、围观
+    ('sleepy-zzz',   '表情包_38_躺床上盖粉色被子闭眼.gif', False),   # 盖被睡觉（Zzz 是装饰，按既有先例不算 hasText）
+    ('star-eyes',    '表情包_39_变成金色星星眼脸红张.gif', False),   # 星星眼、崇拜
+    ('smile-soft',   '表情包_40_空白背景中人物歪头冒.gif', False),   # 歪头温柔微笑
+    ('knife',        '表情包_41_举着一把小刀挡在脸前.gif', False),   # 持刀威胁、杀气
+    ('please',       '表情包_42_闭眼低头脸颊通红双手.gif', False),   # 双手合十拜托
+    ('dizzy',        '表情包_43_双眼变成绿色蚊香漩涡.gif', False),   # 晕头转向
+    ('follow-me',    '表情包_44_双手高举一块白牌牌上.gif', True),    # 举牌「求关注！」→ 文字 baked-in
+    ('hungry',       '表情包_45_双手端着一只白碗闭眼.gif', False),   # 端碗、求投喂
+    ('megaphone',    '表情包_46_举着蓝白扩音喇叭用力.gif', False),   # 拿喇叭喊话
+    ('road-rage',    '表情包_47_驾浅蓝小车从远处一路.gif', False),   # 开车路怒、赶路
+    ('excited',      '表情包_48_先睁着大眼微笑后半段.gif', False),   # 惊喜、期待
+    ('all-ok',       '表情包_49_闭眼开心地笑脸颊泛红.gif', False),   # 双手 OK、搞定
+)
+
+# 与 F3b 合流：`scan_sources` 只认一张「文件名 → 语义名」的表。
+F5_BY_FILE = {
+    fname: {'semantic': semantic}
+    for semantic, fname, _has_text in BUBBLE_F5
+}
+BUBBLE_ANIM = BUBBLE_ANIM + BUBBLE_F5
+ANIM_BY_FILE.update(F5_BY_FILE)
+
+# `opaque`（要不要套气泡底）**由指标判定，不手写**。
+#
+# 为什么：一开始我按"看图印象"手写了 20 个标志位，然后量了一遍 —— 猜错了 3 个
+# （26/28/37 我以为满幅，实际中位不透明占比 0.90/0.78/0.89，大部分帧是透明的）。
+# 这种事不该靠印象：**"满幅"是个可以量的属性**（不透明像素占比），
+# 判据用**中位数**（取中位而非最大值：个别特效帧满幅不算"整张都是背景板"）。
+OPAQUE_MIN = 0.95
 
 # ── F4：黑白线稿贴纸（20 张，**不透明满幅**，带深色变体）────────────────────
 # 语义名**逐张看图**取自图上 baked-in 的中文大字（不是照抄 `1 (1).png` 这类文件名）。
@@ -337,6 +403,36 @@ def min_transparent_ratio(frames):
     return worst
 
 
+def median_transparent_ratio(frames):
+    """全部帧「alpha==0 像素占比」的**中位数**。
+
+    与 `min_transparent_ratio`（取最小）分工不同，别混用：
+      · **min** 回答"能不能当主体动画播" —— 只要有一帧铺满就不能（那帧会露出矩形块）；
+      · **中位** 回答"这张图整体是不是满幅背景板" —— 个别特效帧满幅不算数，
+        要看**多数帧**。`opaque`（要不要套气泡底）该用后者。
+    """
+    vals = []
+    for f in frames:
+        zeros = f.getchannel('A').histogram()[0]
+        vals.append(zeros / float(f.width * f.height))
+    vals.sort()
+    if not vals:
+        return 1.0
+    return vals[len(vals) // 2]
+
+
+def median_opaque_ratio(frames):
+    """全部帧「不透明像素（alpha>248）占比」的中位数 —— `opaque` 判据。"""
+    vals = []
+    for f in frames:
+        a = f.getchannel('A').histogram()
+        vals.append(sum(a[248:]) / float(f.width * f.height))
+    vals.sort()
+    if not vals:
+        return 0.0
+    return vals[len(vals) // 2]
+
+
 def median_ms(durations, fallback=60):
     """取帧时长中位数作为 `frameMs`。
 
@@ -446,13 +542,13 @@ def resolve_bubble_pool(by_semantic):
         else:
             miss.append({'name': fname, 'reason': 'needsCutout',
                          'detail': 'F3 用户手动抠图（简笔、无文字）'})
-    for semantic, fname, has_text, _opaque in BUBBLE_ANIM:
+    for semantic, fname, has_text in BUBBLE_ANIM:
         it = by_semantic.get(semantic)
         if it is not None:
             pool.append((it, has_text))
         else:
             miss.append({'name': fname, 'reason': 'missing',
-                         'detail': 'F3b 动态气泡的源 GIF 不存在（%s）' % ASSETS_QQ})
+                         'detail': 'F3b/F5 动态气泡的源 GIF 不存在'})
     for nn, semantic, fname, text in BUBBLE_F4:
         p = f4_source(fname)
         if p is None:
@@ -477,7 +573,7 @@ def has_text_of(semantic):
     for s, _, ht in CUTOUT_EXTRA:
         if s == semantic:
             return ht
-    for s, _f, ht, _o in BUBBLE_ANIM:
+    for s, _f, ht in BUBBLE_ANIM:
         if s == semantic:
             return ht
     for _nn, s, _f, _t in BUBBLE_F4:
@@ -519,12 +615,16 @@ def discover():
         mt = min_transparent_ratio(frames)
         still = ANIM_BY_FILE.get(base)
         if still is not None:
-            # F3b：这张登记为**动态气泡** → 跳过「当状态动画」的判据。
+            # F3b / F5：这张登记为**动态气泡** → 跳过「当状态动画」的判据。
             # 不是放水：它不进 `states`（不在 STATE_PLAN 里），只作为**气泡**出现；
             # 而气泡本来就允许满幅不透明（F4 那批全是）。
+            #
+            # `opaque` 在这里**按指标算**（不写死）：多数帧都铺满 → 不套气泡底。
+            # 手写过一版，20 张里猜错 3 张 —— 能量的属性就别靠印象。
             usable.append({'kind': 'anim', 'semantic': still['semantic'], 'name': base,
                            'path': p, 'minT': mt, 'frames': len(frames),
-                           'frameMs': median_ms(durations), 'opaque': still['opaque']})
+                           'frameMs': median_ms(durations),
+                           'opaque': median_opaque_ratio(frames) >= OPAQUE_MIN})
             continue
         if mt < SOLID_EPS:
             solid = sum(1 for f in frames
@@ -536,6 +636,15 @@ def discover():
             continue
         usable.append({'kind': 'gif', 'semantic': 'gif:' + idx, 'name': base,
                        'path': p, 'minT': mt, 'frames': len(frames)})
+
+    # ── F5 的 20 张**不在这里单独扫** ──
+    #
+    # 它们在 `ASSETS_QQ` 里（可读名那份），上面那个 glob 已经会遍历到，
+    # 且因为已登记进 `ANIM_BY_FILE`，会走"登记为动态气泡"那条分支。
+    # 第一版在这里又按表扫了一遍 → 同一批被加进 `usable` 两次
+    # （`src/gif/` 暂存数从 32 变成 52 才发现）。
+    # 去重虽然由 `by_semantic` 兜住了（按语义名建索引），但重复本身没有意义，
+    # 而且会让"暂存了几个文件"这种计数失真 —— 所以只留 glob 一条路。
 
     # ── 根目录 6 张单帧 GIF：与 wx PNG 重复，弃用 ──
     for p in sorted(glob.glob(os.path.join(ASSETS, '*.gif'))):
@@ -1079,9 +1188,9 @@ def main():
     n_text = sum(1 for b in bubbles if b['hasText'])
     n_opaque = sum(1 for b in bubbles if b.get('opaque'))
     n_dark = sum(1 for b in bubbles if b.get('fileDark'))
-    print('气泡池（表情包，F2+F3+F3b+F4）：%d 张；其中 hasText=true %d 张、false %d 张'
+    print('气泡池（表情包，F2+F3+F3b+F4+F5）：%d 张；其中 hasText=true %d 张、false %d 张'
           % (len(bubbles), n_text, len(bubbles) - n_text))
-    print('  不透明满幅贴纸（F4 + F3b）：opaque=true %d 张' % n_opaque)
+    print('  不透明满幅贴纸（F4 + F3b/F5 里判为满幅的）：opaque=true %d 张' % n_opaque)
     # 深色变体已废弃：这里断言"清单里一个都没有"，防止将来又有人加回来。
     if n_dark != 0:
         print('  ★★ 意外：仍有 %d 张带 fileDark —— 深色模式应直接用原图（v2 决定）' % n_dark)
