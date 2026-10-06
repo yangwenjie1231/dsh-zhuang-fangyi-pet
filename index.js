@@ -63,7 +63,7 @@ import {
   readMemoryFile, writeMemoryFile, ensureMemoryFile, MEMORY_CAP_BYTES
 } from './src/pet/memory.js'
 import {
-  createTtsClient, wavDurationMs, DEFAULT_TTS_URL, DEFAULT_MAX_SPEECH_CHARS
+  createTtsClient, wavDurationMs, speechCacheKey, DEFAULT_TTS_URL, DEFAULT_MAX_SPEECH_CHARS
 } from './src/pet/tts.js'
 import {
   createTtsSupervisor, buildServeCommand, HEALTH_POLL_MS as TTS_HEALTH_POLL_MS
@@ -935,6 +935,23 @@ export function apply (ctx, config) {
       logger.warn?.(`zhuang-fangyi-pet: 语音缓存目录创建失败：${error?.message ?? error}`)
       return false
     }
+  }
+
+  /**
+   * 语音缓存里有几条（WAV 计数）。
+   *
+   * ⚠️ **数盘，不要猜**。这里踩过一个坑：`probe` 的返回值原先写的是
+   * `status.cached + 1` —— 假设"这次探测必然新增一条缓存"。但探测用的
+   * 是固定句子，缓存键（文本哈希）也一样，所以第二次探测是**覆盖同名
+   * 文件**，磁盘上还是 1 条，报告里却写 2 条。实测：`/pet/diag` 说 1、
+   * 探测应答说 2，而 `speech/` 目录里只有 1 个文件。
+   *
+   * 计数类字段一旦开始"推算"，就会和真相脱节 —— 所以这里统一走数盘。
+   */
+  const speechCacheCount = () => {
+    try {
+      return fs.readdirSync(SPEECH_DIR).filter(f => f.endsWith('.wav')).length
+    } catch { return 0 }
   }
 
   /** 惰性创建 TTS 客户端（设置改了要能换 URL）。 */
@@ -2353,15 +2370,11 @@ export function apply (ctx, config) {
       },
       /** 给设置页/诊断用：当前状态（开没开、服务地址、已缓存几条）。 */
       status: () => {
-        let cached = 0
-        try {
-          cached = fs.readdirSync(path.join(dataDir, 'speech')).filter(f => f.endsWith('.wav')).length
-        } catch { cached = 0 }
         return {
           enabled: settings.get().speakReplies === true,
           url: String(settings.get().ttsUrl ?? '') || DEFAULT_TTS_URL,
           maxChars: speechMaxChars(),
-          cached,
+          cached: speechCacheCount(),
           latest: speechLatest === null
             ? null
             : { name: speechLatest.name, durationMs: speechLatest.durationMs, text: speechLatest.text },
@@ -2380,8 +2393,21 @@ export function apply (ctx, config) {
             }
             return { mode: 'http', ...supervisor.status() }
           })(),
-          /** 解析出来的启动命令（诊断用：用户能看到桌宠到底会执行什么）。 */
+          /**
+           * 启动命令（诊断用：用户要能看到**到底会执行什么**）。
+           *
+           * 插件模式下显示**插件的**那份 —— 桌宠自己那份没带 gsvRoot/modelDir，
+           * 显示出来会误导（实测：设置页显示 `python -m zfh_voice serve …`，
+           * 而插件实际执行的是带 `--backend torch --gsv-root …` 的完整命令）。
+           */
           launch: (() => {
+            const svc = voiceService()
+            if (svc !== null && typeof svc.status === 'function') {
+              try {
+                const st = svc.status()
+                if (st?.launch) return st.launch
+              } catch { /* 退回自己解析 */ }
+            }
             const l = resolveLaunch()
             return l === null ? null : { argv: l.argv, cwd: l.cwd }
           })()
@@ -2394,47 +2420,82 @@ export function apply (ctx, config) {
        *（连不上 / 超时 / 返回非 WAV）直接带回设置页，而不是让用户猜。
        */
       probe: async () => {
-        const client = tts()
         const started = Date.now()
-        const h = await client.health()
+        const svc = voiceService()
+        // 插件模式下用插件自己的 url/缓存键（缓存键含服务身份，两边算出来不同）
+        const client = svc === null ? tts() : null
         const status = {
           enabled: settings.get().speakReplies === true,
-          url: client.baseUrl,
+          url: client === null ? (String(settings.get().ttsUrl ?? '') || DEFAULT_TTS_URL) : client.baseUrl,
           maxChars: speechMaxChars(),
-          cached: (() => {
-            try {
-              return fs.readdirSync(path.join(dataDir, 'speech')).filter(f => f.endsWith('.wav')).length
-            } catch { return 0 }
-          })()
+          mode: svc === null ? 'http' : 'plugin',
+          cached: speechCacheCount()
         }
-        if (h === null) {
-          return {
-            ok: false,
-            reason: `连不上合成服务（${client.baseUrl}）—— 子插件起了吗？`,
-            elapsedMs: Date.now() - started,
-            status
-          }
-        }
-        // 真合成一句固定的短句（不占用用户回复的缓存键）。
+
+        // ⭐ 两种模式的分工：
+        //   · **插件模式** —— 直接调 `synthesize`：它会**先把服务拉起来**
+        //     并等模型加载完（首次约 20 秒）。这里踩过一个真实的坑：
+        //     原先不管哪种模式都只做 HTTP 健康检查，
+        //     于是插件模式下服务没起时立刻报"连不上"—— 明明只要让它启动就行。
+        //   · **HTTP 模式** —— 桌宠自己管进程，先健康检查再合成。
         const probeText = '嗯，我在呢。'
-        const r = await client.synthesize(probeText)
-        if (r === null) {
-          return {
-            ok: false,
-            backend: h.backend,
-            reason: '服务在跑，但合成失败（看子插件日志）',
-            elapsedMs: Date.now() - started,
-            status
+        let backend = null
+        let bytes = null
+        let durationMs = 0
+        let cacheKey = null
+        if (svc !== null) {
+          const r = await svc.synthesize(probeText)
+          if (r === null) {
+            const st = (() => {
+              try { return svc.status() } catch { return {} }
+            })()
+            return {
+              ok: false,
+              reason: st.lastError ?? '插件没能启动或合成（看宿主日志里的「庄方宜语音」）',
+              backend: st.backend ?? null,
+              elapsedMs: Date.now() - started,
+              status: { ...status, service: st }
+            }
           }
+          bytes = r.bytes
+          durationMs = r.durationMs
+          backend = r.backend ?? null
+        } else {
+          const h = await client.health()
+          if (h === null) {
+            return {
+              ok: false,
+              reason: `连不上合成服务（${client.baseUrl}）—— 子插件起了吗？`,
+              elapsedMs: Date.now() - started,
+              status
+            }
+          }
+          const r = await client.synthesize(probeText)
+          if (r === null) {
+            return {
+              ok: false,
+              backend: h.backend,
+              reason: '服务在跑，但合成失败（看子插件日志）',
+              elapsedMs: Date.now() - started,
+              status
+            }
+          }
+          bytes = r.bytes
+          durationMs = r.durationMs
+          backend = h.backend
+          cacheKey = client.cacheKey(probeText)
         }
+
         // 存进缓存并交付给 exe 播一次（用户点"试一句"就该听到声音）。
         let played = false
         try {
           if (ensureSpeechDir()) {
-            const key = client.cacheKey(probeText)
-            fs.writeFileSync(path.join(SPEECH_DIR, `${key}.wav`), r.bytes)
+            // 插件模式：我们的缓存键只用于**本地文件命名**，与插件内部缓存无关 ——
+            // 用同样的算法（文本 + 服务身份）会拿不到身份，所以这里用文本哈希。
+            const key = cacheKey ?? speechCacheKey(probeText, `probe:${backend ?? ''}`)
+            fs.writeFileSync(path.join(SPEECH_DIR, `${key}.wav`), bytes)
             speechSeq += 1
-            speechLatest = { seq: speechSeq, name: key, durationMs: r.durationMs, text: probeText }
+            speechLatest = { seq: speechSeq, name: key, durationMs, text: probeText }
             hub.broadcast(withSettings(machine.snapshot()))
             played = true
             boot('动态语音探测成功，已交付播放')
@@ -2444,11 +2505,13 @@ export function apply (ctx, config) {
         }
         return {
           ok: true,
-          backend: h.backend,
+          backend,
+          mode: status.mode,
           elapsedMs: Date.now() - started,
-          durationMs: r.durationMs,
+          durationMs,
           played,
-          status: { ...status, cached: status.cached + (played ? 1 : 0) }
+          // 写完**重新数盘**（不是 `+1`）：覆盖同名缓存时条数不变，见 speechCacheCount。
+          status: { ...status, cached: speechCacheCount() }
         }
       }
     },

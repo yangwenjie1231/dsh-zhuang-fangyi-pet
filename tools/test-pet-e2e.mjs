@@ -1321,7 +1321,8 @@ await ok('⭐⭐ 装了语音 DSH 插件 → 委派给它（`zfhVoice` 服务，
     status () {
       return {
         ready: true, ours: true, pid: 777, backend: 'torch', resident: true,
-        idleMs: 0, idleStopSec: 300, lastError: null, launchable: true
+        idleMs: 0, idleStopSec: 300, lastError: null, launchable: true,
+        launch: { argv: ['python', '-m', 'zfh_voice', '--backend', 'torch', 'serve'], cwd: 'D:/vf' }
       }
     },
     start () { calls.start += 1; return true },
@@ -1412,6 +1413,38 @@ await ok('⭐⭐ 装了语音 DSH 插件 → 委派给它（`zfhVoice` 服务，
   })).json()
   assert.equal(ctl.mode, 'plugin', '控制也应走插件')
   assert.equal(calls.stop, 1, '应真的调了插件的 stop')
+  // ⭐⭐ 插件模式下「试一句」必须**让插件去启动服务**，而不是先做 HTTP 健康检查
+  //（实测踩过：服务没起时立刻报"连不上"，明明只要让它启动就行）。
+  const probe = await (await fetch(`${base}/api/zhuang-fangyi/pet/speech/probe`, { method: 'POST' })).json()
+  assert.equal(probe.ok, true, `插件模式下试一句应成功，实际 ${JSON.stringify(probe.reason)}`)
+  assert.equal(probe.mode, 'plugin', 'probe 应报 plugin 模式')
+  assert.equal(probe.played, true, '应交付给 exe 播放')
+  assert.equal(calls.synth.length, 2, '第二次合成也应走插件（第 1 次是回复，第 2 次是试一句）')
+  // ⭐⭐ 应答里的 `cached` 必须**数盘**，不能推算
+  //
+  // 实测踩过：原来写的是 `status.cached + 1`（假设"这次探测必然新增一条缓存"）。
+  // 但探测用的是固定句子 → 缓存键固定 → 第二次探测是**覆盖同名文件**：磁盘上
+  // 还是 1 条，报告里却写 2 条。真实宿主上就是这么露的 —— `/pet/diag` 说 1、
+  // 探测应答说 2，而 `speech/` 里只有 1 个文件。
+  const speechDir = path.join(tmpHome, 'zhuang-fangyi-pet', 'speech')
+  const onDisk = () => fs.readdirSync(speechDir).filter(f => f.endsWith('.wav')).length
+  assert.equal(probe.status.cached, onDisk(),
+    `试一句应答的 cached 应等于磁盘实际条数，实际报 ${probe.status.cached} / 盘上 ${onDisk()}`)
+  const probe2 = await (await fetch(`${base}/api/zhuang-fangyi/pet/speech/probe`, { method: 'POST' })).json()
+  assert.equal(probe2.ok, true, '第二次试一句也应成功')
+  assert.equal(probe2.status.cached, onDisk(),
+    `同名覆盖后 cached 不该 +1：盘上 ${onDisk()} 条，实际报 ${probe2.status.cached}`)
+  assert.equal(probe2.status.cached, probe.status.cached,
+    `同一句话探两次，缓存条数应不变（同名覆盖），实际 ${probe.status.cached} → ${probe2.status.cached}`)
+  const stSpeech = await (await fetch(`${base}/api/zhuang-fangyi/pet/speech`)).json()
+  assert.equal(stSpeech.cached, onDisk(),
+    `状态端点的 cached 也应等于盘上条数，实际报 ${stSpeech.cached} / 盘上 ${onDisk()}`)
+  // 状态里的 launch 应是**插件的**启动命令（含 --backend），不是桌宠自己那份
+  const st2 = await (await fetch(`${base}/api/zhuang-fangyi/pet/speech`)).json()
+  assert.ok(st2.launch !== null, '应带 launch')
+  assert.ok(st2.launch.argv.join(' ').includes('--backend'),
+    `launch 应是插件的完整命令（含 --backend），实际 ${st2.launch.argv.join(' ')}`)
+
   await ws.close()
   for (const d of local.__effects) if (typeof d === 'function') assert.doesNotThrow(() => d())
 })
