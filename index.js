@@ -501,7 +501,9 @@ export function apply (ctx, config) {
       statusAlways: s.statusAlways,
       // 番茄钟倒计时是否常显（独立于 statusAlways：那是"状态文字"，
       // 这是用户主动开的计时器，两者可以各自开关）。
-      pomodoroCountdown: s.pomodoroCountdown
+      pomodoroCountdown: s.pomodoroCountdown,
+      // 语音总开关（默认关：桌宠突然开口是强打扰，用户主动打开才生效）。
+      voice: s.voice
     }
   }
 

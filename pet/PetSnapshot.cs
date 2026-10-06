@@ -60,6 +60,10 @@ namespace DshZhuangFangyiPet
         public bool HasHint;         public bool Hint;
         /// <summary>契约 §2 v6：状态文字常驻本体下方。旧快照缺省 = false。</summary>
         public bool HasStatusAlways; public bool StatusAlways;
+        /// <summary>契约 §2 v8：语音总开关。旧快照缺省 = false（**默认静音**）。</summary>
+        public bool HasVoice;        public bool Voice;
+        /// <summary>契约 §2 v7：番茄钟倒计时是否常显。旧快照缺省 = false。</summary>
+        public bool HasPomodoroCountdown; public bool PomodoroCountdown;
 
         /// <summary>非法/缺省值一律回落 focus-dsh（task-6 验收点）。</summary>
         public static string NormalizeDoubleClick(string v)
@@ -308,6 +312,18 @@ namespace DshZhuangFangyiPet
                 {
                     si.HasStatusAlways = true;
                     si.StatusAlways = st.Bool("statusAlways", false);
+                }
+                // 契约 §2 v8：语音开关（缺省不动现状 = 保持启动时的值，默认静音）
+                if (st.Get("voice") != null && st.Get("voice").Kind == PetJson.JVal.TBool)
+                {
+                    si.HasVoice = true;
+                    si.Voice = st.Bool("voice", false);
+                }
+                // 契约 §2 v7：番茄钟倒计时常显
+                if (st.Get("pomodoroCountdown") != null && st.Get("pomodoroCountdown").Kind == PetJson.JVal.TBool)
+                {
+                    si.HasPomodoroCountdown = true;
+                    si.PomodoroCountdown = st.Bool("pomodoroCountdown", true);
                 }
                 s.Settings = si;
             }

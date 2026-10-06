@@ -85,6 +85,7 @@ namespace DshZhuangFangyiPet
                 TestWindows(opt, artDir, cacheDir, sheet);
                 TestAttentionPresentation();
                 TestPomodoro();
+                TestVoice();
                 TestMutex();
                 TestHttp(opt);
             }
@@ -1545,6 +1546,212 @@ namespace DshZhuangFangyiPet
 
             try { pomo.ForceClose(); } catch { }
             Pump(60);
+        }
+
+        // ------------------------------------------------------------------
+        // v8：语音（只播不合成）
+        // ------------------------------------------------------------------
+        //
+        // ⚠️ 这一节**不测真实播放**（自检环境可能没有音频设备，且出声会打扰人）。
+        // 测的是三件会真出错的事：清单解析与白名单、事件轮换、播放器的
+        // 去重/节流/开关语义 —— 那些都是纯逻辑，可以确定性地验。
+        private static void TestVoice()
+        {
+            // (1) 清单缺失/坏掉 → 空清单（不抛）
+            PetVoiceManifest empty = PetVoiceManifest.Parse(null);
+            Check(empty != null && empty.Count == 0 && empty.Has("x") == false,
+                  "语音清单缺失 → 空清单（不抛，静音运行）",
+                  "Count=" + (empty == null ? -1 : empty.Count));
+
+            PetVoiceManifest bad = PetVoiceManifest.Parse("{ not json");
+            Check(bad != null && bad.Count == 0, "语音清单坏 JSON → 空清单（不抛）", "Count=" + bad.Count);
+
+            // (2) 正常解析
+            string json =
+                "{\"version\":1,\"generatedAt\":\"2026-01-01T00:00:00Z\",\"count\":3,\"lines\":[" +
+                "{\"name\":\"click-1\",\"file\":\"click-1.mp3\",\"event\":\"pet/click\",\"source\":\"real\",\"durationMs\":2480,\"bytes\":20315}," +
+                "{\"name\":\"click-2\",\"file\":\"click-2.mp3\",\"event\":\"pet/click\",\"source\":\"real\",\"durationMs\":920,\"bytes\":7985}," +
+                "{\"name\":\"done-1\",\"file\":\"done-1.mp3\",\"event\":\"turn/complete\",\"source\":\"real\",\"durationMs\":2570,\"bytes\":21150}" +
+                "]}";
+            PetVoiceManifest m = PetVoiceManifest.Parse(json);
+            bool parsed = m.Count == 3 && m.Version == 1 &&
+                          m.Has("click-1") && m.Has("done-1") && !m.Has("nope") &&
+                          m.Get("click-1").DurationMs == 2480 && m.Get("click-1").Bytes == 20315 &&
+                          m.Get("click-1").Source == "real";
+            Check(parsed, "语音清单解析：条数/时长/字节/来源都正确",
+                  "Count=" + m.Count + " click-1=" + m.Get("click-1").DurationMs + "ms");
+
+            // (3) ⭐ 按事件轮换（同名事件多条时换着播）
+            PetVoiceLine v0 = m.PickForEvent("pet/click", 0);
+            PetVoiceLine v1 = m.PickForEvent("pet/click", 1);
+            PetVoiceLine v2 = m.PickForEvent("pet/click", 2);
+            bool rotate = v0.Name == "click-1" && v1.Name == "click-2" && v2.Name == "click-1";
+            Check(rotate, "⭐ 同名事件按 seed 轮换（连点不会永远是同一句）",
+                  "seed 0/1/2 → " + v0.Name + " / " + v1.Name + " / " + v2.Name);
+
+            // (4) 没有该事件的语音 → null（不抛）
+            Check(m.PickForEvent("nope/event", 0) == null && m.PickForEvent(null, 0) == null,
+                  "没有该事件的语音 → null（不抛）", "nope/event → null");
+
+            // (5) ⭐⭐ 名字白名单（exe 侧也要挡：清单是网络来的，是跨进程信任边界）
+            bool safe = PetVoiceManifest.IsSafeVoiceName("click-1") &&
+                        PetVoiceManifest.IsSafeVoiceName("pomodoro-focus-end") &&
+                        PetVoiceManifest.IsSafeVoiceName("a.b_c-D9") &&
+                        !PetVoiceManifest.IsSafeVoiceName("../index.js") &&
+                        !PetVoiceManifest.IsSafeVoiceName("..") &&
+                        !PetVoiceManifest.IsSafeVoiceName(".") &&
+                        !PetVoiceManifest.IsSafeVoiceName("a/b") &&
+                        !PetVoiceManifest.IsSafeVoiceName("a\\b") &&
+                        !PetVoiceManifest.IsSafeVoiceName("C:\\x.mp3") &&
+                        !PetVoiceManifest.IsSafeVoiceName("a..b") &&
+                        !PetVoiceManifest.IsSafeVoiceName(".hidden") &&
+                        !PetVoiceManifest.IsSafeVoiceName("") &&
+                        !PetVoiceManifest.IsSafeVoiceName(null) &&
+                        !PetVoiceManifest.IsSafeVoiceName("a b") &&
+                        !PetVoiceManifest.IsSafeVoiceName("a;b");
+            Check(safe, "⭐⭐ 语音名白名单（穿越/盘符/分隔符/空白一律拒绝）",
+                  "合法 3 个通过；../、..、a/b、C:\\、a..b、.hidden、空、空格、分号全部拒绝");
+
+            // (6) 清单里的非法条目被丢弃（第二层防线）
+            PetVoiceManifest dirty = PetVoiceManifest.Parse(
+                "{\"lines\":[" +
+                "{\"name\":\"good\",\"file\":\"good.mp3\",\"event\":\"e\"}," +
+                "{\"name\":\"../evil\",\"file\":\"evil.mp3\",\"event\":\"e\"}," +
+                "{\"name\":\"evil2\",\"file\":\"../x.mp3\",\"event\":\"e\"}," +
+                "{\"name\":\"\",\"file\":\"x.mp3\"}," +
+                "null," +
+                "\"string\"" +
+                "]}");
+            Check(dirty.Count == 1 && dirty.Has("good") && !dirty.Has("../evil"),
+                  "清单里的非法条目被丢弃（第二层防线，不只靠 Host）",
+                  "6 条输入 → 保留 " + dirty.Count + " 条");
+
+            // (7) ⭐⭐ 播放器：开关关掉时**不播**（默认静音）
+            string cacheDir = Path.Combine(Path.GetTempPath(), "zf-voice-selftest");
+            try { if (!Directory.Exists(cacheDir)) Directory.CreateDirectory(cacheDir); } catch { }
+            PetVoicePlayer player = new PetVoicePlayer(null, cacheDir);
+            byte[] fakeMp3 = new byte[256];
+            fakeMp3[0] = 0xFF; fakeMp3[1] = 0xFB;   // 帧同步头（内容不重要，不真解码）
+
+            player.Enabled = false;
+            bool playedWhenOff = player.Play(fakeMp3, "pet/click", 1000);
+            Check(!playedWhenOff, "⭐ 语音关掉时**不播**（默认静音，用户主动开才出声）",
+                  "Enabled=false → Play 返回 false");
+
+            // (8) ⭐ 空字节不播（不崩）—— 且**必须在改动任何状态之前**就挡下。
+            //
+            // ⚠️ 这条断言被回退验证修过一次：原先只断言"返回 false"，而把
+            // `bytes.Length == 0` 判断删掉后**仍然返回 false** —— 因为
+            // `File.WriteAllBytes(path, null)` 会抛，被 catch 兜住又返回 false。
+            // 那是**巧合式安全**（靠下游异常兜底），断言测不出差别。
+            //
+            // 真正的可观测差别：守卫路径在**碰任何状态之前**就返回，
+            // 所以既不该写文件、也不该记节流时间戳。这里用**独立的 eventKey**
+            // 断言"节流表里没有它"，从而把"提前挡下"与"事后兜底"区分开。
+            player.Enabled = true;
+            const string emptyEvt = "selftest/empty";
+            bool playedNull = player.Play(null, emptyEvt, 1000);
+            bool playedEmptyArr = player.Play(new byte[0], emptyEvt, 1000);
+            bool noSideEffect = player.DiagLastFired(emptyEvt) == 0;
+            Check(!playedNull && !playedEmptyArr && noSideEffect,
+                  "空字节在改动任何状态之前就被挡下（不写文件、不记节流表）",
+                  "null/空数组 → false；节流表无记录=" + noSideEffect);
+
+            // (9) ⭐ 播放中再请求 → 丢弃（不排队：排队会让语音滞后于事件）
+            player.DiagSetPlayingUntil(unchecked(Environment.TickCount + 5000));
+            int before = player.DroppedCount;
+            bool playedWhileBusy = player.Play(fakeMp3, "pet/wake", 1000);
+            Check(!playedWhileBusy && player.DroppedCount > before,
+                  "⭐ 上一句没播完就丢弃新的（不排队 —— 排队会让语音滞后于事件）",
+                  "播放中 → Play 返回 false，Dropped " + before + " → " + player.DroppedCount);
+
+            // (10) ⭐ 高频道事件节流（连点十下不叠十条）
+            //
+            // ⚠️ 这条也被回退验证修过：原先两次 Play 之间**没有清掉"正在播"**，
+            // 于是第二次被"播放中"守卫挡下（而不是被节流挡下）——
+            // 把节流判断整个删掉，断言照样通过。
+            // 修法：每次 Play 前显式 `DiagSetPlayingUntil(0)`，让"正在播"这条
+            // 不可能成为原因，从而**只有节流**能解释第二次的失败。
+            player.DiagSetPlayingUntil(0);
+            player.Play(fakeMp3, "pet/click", 10);
+            player.DiagSetPlayingUntil(0);   // 关键：排除"播放中"这个混淆因素
+            int after1 = player.DroppedCount;
+            bool second = player.Play(fakeMp3, "pet/click", 10);   // 立刻再来一次
+            Check(!second && player.DroppedCount > after1,
+                  "⭐ 高频道事件节流：同事件最小间隔内重复触发被丢弃（已排除'播放中'干扰）",
+                  "间隔 <" + PetVoicePlayer.MinRepeatMs + "ms → 第二次返回 false");
+
+            // (11) 不同事件互不影响节流（点完立刻完成，完成该响）
+            player.DiagSetPlayingUntil(0);
+            bool otherEvent = player.Play(fakeMp3, "turn/complete", 10);
+            Check(otherEvent, "节流是按事件的：点完立刻完成，完成提醒照样响",
+                  "pet/click 节流中 → turn/complete 仍可播");
+
+            // (12) 事件名为 null 时不节流（诊断/测试路径）
+            player.DiagSetPlayingUntil(0);
+            player.Play(fakeMp3, null, 10);
+            player.DiagSetPlayingUntil(0);
+            bool noKey = player.Play(fakeMp3, null, 10);
+            Check(noKey, "事件名为 null 时不做节流（内部/诊断路径）", "null 事件名 → 可连续播");
+
+            // (13) IsPlaying 的时间判定（不依赖真实播放）
+            player.DiagSetPlayingUntil(0);
+            bool idleNotPlaying = !player.IsPlaying;
+            player.DiagSetPlayingUntil(unchecked(Environment.TickCount + 3000));
+            bool busyPlaying = player.IsPlaying;
+            player.DiagSetPlayingUntil(unchecked(Environment.TickCount - 3000));
+            bool expiredNotPlaying = !player.IsPlaying;
+            Check(idleNotPlaying && busyPlaying && expiredNotPlaying,
+                  "IsPlaying 三态：空闲/播放中/已过期（TickCount 回绕安全）",
+                  "0→false；now+3s→true；now-3s→false");
+
+            try { player.Dispose(); } catch { }
+
+            // (14) 真实清单（若已构建）—— 解析器能吃下真实产物
+            //
+            // 路径从 **exe 所在目录**往上找（exe 在 `bin/`，产物在 `art/voice/`）。
+            // 找不到就跳过：语音包是可选的，自检不该因此失败。
+            string realManifest = null;
+            try
+            {
+                string exeDir = Path.GetDirectoryName(
+                    System.Reflection.Assembly.GetExecutingAssembly().Location);
+                string[] candidates = new string[]
+                {
+                    Path.Combine(exeDir, "art", "voice", "voice.json"),
+                    Path.Combine(exeDir, "..", "art", "voice", "voice.json"),
+                    Path.Combine(exeDir, "..", "..", "art", "voice", "voice.json")
+                };
+                for (int i = 0; i < candidates.Length; i++)
+                {
+                    if (File.Exists(candidates[i])) { realManifest = candidates[i]; break; }
+                }
+            }
+            catch { }
+
+            if (realManifest != null)
+            {
+                PetVoiceManifest real = PetVoiceManifest.Parse(File.ReadAllText(realManifest, Encoding.UTF8));
+                bool realOk = real.Count > 0 &&
+                              real.PickForEvent("pomodoro/focus-end", 0) != null &&
+                              real.PickForEvent("pet/click", 0) != null &&
+                              real.PickForEvent("turn/complete", 0) != null;
+                // 关键事件都该有语音（缺了就是功能残废，不是"少一句台词"）
+                Check(realOk, "⭐ 真实语音清单：解析成功且关键事件都有语音",
+                      "Count=" + real.Count + "；focus-end/click/complete 均有");
+                // 每条时长都该 > 0（exe 靠它做播放去重）
+                bool allDur = true;
+                for (int i = 0; i < real.Lines.Count; i++)
+                {
+                    if (real.Lines[i].DurationMs <= 0) { allDur = false; break; }
+                }
+                Check(allDur, "真实清单每条都有非零时长（播放去重的依据）",
+                      real.Count + " 条全部 durationMs > 0");
+            }
+            else
+            {
+                Check(true, "真实语音清单不存在（未构建）→ 跳过", realManifest);
+            }
         }
 
         private static void TestClamp()

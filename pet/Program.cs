@@ -192,6 +192,17 @@ namespace DshZhuangFangyiPet
         private PetStatusLabel _status;
         /// <summary>番茄钟倒计时窗（独立窗口，纯展示恒穿透）。见 `PetPomodoro` 的类注释。</summary>
         private PetPomodoro _pomo;
+
+        // v8：语音（只播不合成 —— 见 PetVoicePlayer 的类注释）
+        /// <summary>语音清单（从 Host 拉；null/空 = 没有语音可用，一切照常）。</summary>
+        private PetVoiceManifest _voices;
+        private PetVoicePlayer _voicePlayer;
+        /// <summary>语音总开关（设置项；默认关 —— 见 `--voice` 的说明）。</summary>
+        private bool _voiceOn;
+        /// <summary>上一帧的 petState / attention，用于"状态变化时才出声"。</summary>
+        private string _lastVoiceState;
+        /// <summary>上一帧的番茄钟阶段（用于阶段切换出声）。</summary>
+        private string _lastPomoPhase;
         /// <summary>本体当前是否被悬停（`hint` 用它决定状态文字显隐）。</summary>
         private bool _hovering;
         private PetTray _tray;
@@ -326,6 +337,11 @@ namespace DshZhuangFangyiPet
             // 但**显隐规则不同**：只要在跑就必须看得见，且穿透时照显示 —— 见 PetPomodoro。
             _pomo = new PetPomodoro();
 
+            // 语音（v8）：**只播不合成**。清单从 Host 拉（拉不到就静音运行）。
+            _voiceOn = _opt.VoiceEnabled;
+            _voicePlayer = new PetVoicePlayer(_ui, Path.Combine(_cacheDir, "voice"));
+            _voicePlayer.Enabled = _voiceOn;
+
             // 气泡大小按"桌宠显示宽度 × 70%"算，所以要把帧尺寸与 DPI 喂给气泡。
             // 高 DPI 下写死绝对像素会让气泡反超桌宠（用户反馈过）。
             PushPetMetricsToBubble();
@@ -449,6 +465,13 @@ namespace DshZhuangFangyiPet
             {
                 if (_http != null) _http.PostSettingsPomodoro(null, on);
             };
+            // 语音开关：本地立即生效 + 回报宿主持久化（与主题/状态显示同一条链路）。
+            _tray.GetVoiceEnabled = delegate { return _voiceOn; };
+            _tray.SetVoiceEnabled = delegate(bool on)
+            {
+                SetVoiceEnabled(on);   // 本地立即生效（关掉时还会停掉正在播的）
+                try { _http.PostSettingsVoice(on); } catch (Exception ex) { PetLog.Warn("语音回报失败: " + PetLog.Describe(ex)); }
+            };
 
             _win.Show();
             _tray.Install();
@@ -481,6 +504,10 @@ namespace DshZhuangFangyiPet
             _pomoTimer.Start();
 
             if (_http != null) _http.Start();
+
+            // 语音清单：**在 http 启动后拉一次**（拉不到就静音运行，不重试刷屏）。
+            // 放在这里而不是更早：GetVoiceManifest 是同步 HTTP，早期调用会拖慢首帧。
+            LoadVoiceManifest();
 
             PetLog.Startup("进入消息循环（窗口已显示，托盘已就绪）");
 
@@ -621,6 +648,9 @@ namespace DshZhuangFangyiPet
             // v7：番茄钟 diff（块变化才动；null → 收起倒计时窗）
             ApplyPomodoro(snap);
 
+            // v8：语音（只在**变化**时出声 —— 见 SpeakForSnapshot 的说明）
+            SpeakForSnapshot(snap);
+
             // 状态文字：快照的 label 是**已本地化**的状态词（待机中/正在思考…）。
             // 先存进本体窗，再刷新标签（标签通过 VisibleLabel() 读它，单一真相）。
             _win.SetVisibleLabel(snap.Label);
@@ -717,6 +747,12 @@ namespace DshZhuangFangyiPet
                             " statusAlways=" + (_statusAlways ? "1" : "0"));
                 RefreshStatusLabel();
             }
+            // 契约 §2 v8：语音开关
+            if (st.HasVoice && st.Voice != _voiceOn)
+            {
+                SetVoiceEnabled(st.Voice);
+                changed = true;
+            }
 
             if (st.HasTheme && st.Theme != _settingsTheme)
             {
@@ -770,6 +806,142 @@ namespace DshZhuangFangyiPet
         private void WireAttentionButton()
         {
             _bubble.GoAction = delegate { OnFocusDsh(); };
+        }
+
+        // ── 语音（v8）───────────────────────────────────────────────────────
+        //
+        // 设计要点（每条都有代价）：
+        //   · **只播不合成**：运行时合成要 5~30 秒，等于按了没反应。见 PetVoicePlayer。
+        //   · **事件驱动，不是"每帧都响"**：只在 `petState` **真的变化**时出声，
+        //     否则状态机每 tick 一次就叫一声。
+        //   · **拉不到清单就静音**：语音是可选的，缺了不该影响任何功能。
+        //   · **高频道事件节流**：连点十下不叠十条（在 player 里做）。
+
+        /// <summary>拉语音清单（启动时一次；失败就静音运行，不重试刷屏）。</summary>
+        private void LoadVoiceManifest()
+        {
+            if (_http == null) return;
+            try
+            {
+                PetVoiceManifest m = _http.GetVoiceManifest(8000);
+                if (m == null || m.Count == 0)
+                {
+                    PetLog.Info("语音：清单为空（未构建语音包或 Host 未接线）→ 静音运行");
+                    _voices = null;
+                    return;
+                }
+                _voices = m;
+                PetLog.Info("语音：清单 " + m.Describe());
+            }
+            catch (Exception ex)
+            {
+                PetLog.Warn("语音清单拉取失败（静音运行）: " + PetLog.Describe(ex));
+                _voices = null;
+            }
+        }
+
+        /// <summary>
+        /// 按事件播一条语音。**失败一律静默**（没有声音不是错误）。
+        ///
+        /// @param eventKey 清单里的事件名（如 `pet/click`）
+        /// @returns 是否真的开始播放
+        /// </summary>
+        private bool Speak(string eventKey)
+        {
+            if (!_voiceOn || _voices == null || _voicePlayer == null) return false;
+            try
+            {
+                PetVoiceLine line = _voices.PickForEvent(eventKey, _voiceSeed++);
+                if (line == null) return false;   // 该事件没有语音 —— 正常，不是错误
+                byte[] bytes = _http == null ? null : _http.GetVoiceBytes(line.Name);
+                if (bytes == null || bytes.Length == 0) return false;
+                return _voicePlayer.Play(bytes, eventKey, line.DurationMs);
+            }
+            catch (Exception ex)
+            {
+                PetLog.Warn("语音播放异常（已忽略）: " + PetLog.Describe(ex));
+                return false;
+            }
+        }
+
+        /// <summary>轮换种子（同名事件多条时换着播，避免每次点击都一样）。</summary>
+        private int _voiceSeed;
+
+        /// <summary>
+        /// 状态/事件变化 → 出声。
+        ///
+        /// ⚠️ 只在**变化**时触发：`ApplySnapshot` 每帧都跑，无条件出声会让
+        /// 桌宠变成复读机。所以这里比对上一帧的值。
+        /// </summary>
+        private void SpeakForSnapshot(PetSnapshot snap)
+        {
+            if (!_voiceOn || _voices == null) return;
+            try
+            {
+                // ① attention（等你审批）优先级最高：它最需要被注意到。
+                if (snap.Attention != null && _lastVoiceState != "attention")
+                {
+                    _lastVoiceState = "attention";
+                    Speak("attention/approval");
+                    return;
+                }
+
+                // ② 番茄钟阶段切换（专注结束该休息了 —— 用户点名的功能）。
+                PetPomodoroInfo p = snap.Pomodoro;
+                if (p != null && p.Enabled && p.Show)
+                {
+                    string phaseKey = p.Running ? p.Phase : (p.Phase + ":paused");
+                    if (_lastPomoPhase != null && _lastPomoPhase != phaseKey)
+                    {
+                        string evt = null;
+                        if (p.Phase == "break" || p.Phase == "long-break")
+                        {
+                            // 专注刚结束 → 进休息
+                            evt = "pomodoro/focus-end";
+                        }
+                        else if (p.Phase == "focus" && _lastPomoPhase != "focus:paused")
+                        {
+                            // 休息结束 → 回专注（区分长短休）
+                            evt = _lastPomoPhase == "long-break"
+                                ? "pomodoro/long-end"
+                                : "pomodoro/break-end";
+                        }
+                        _lastPomoPhase = phaseKey;
+                        if (evt != null) { Speak(evt); return; }
+                    }
+                    else
+                    {
+                        _lastPomoPhase = phaseKey;
+                    }
+                }
+
+                // ③ 普通状态变化（working / happy / error 等）。
+                string st = snap.EffectiveState();
+                if (st != _lastVoiceState)
+                {
+                    string prev = _lastVoiceState;
+                    _lastVoiceState = st;
+                    // 只对**有意义**的几种出声：working 开始、完成、出错。
+                    // idle/thinking/waking 太频繁，出声会吵。
+                    if (st == "error") { Speak("agent/error"); return; }
+                    if (st == "happy" && prev != "happy") { Speak("turn/complete"); return; }
+                    if (st == "working" && (prev == "thinking" || prev == "idle")) { Speak("agent/working"); return; }
+                }
+            }
+            catch (Exception ex)
+            {
+                PetLog.Warn("语音触发失败（已忽略）: " + PetLog.Describe(ex));
+            }
+        }
+
+        /// <summary>语音开关（设置页/托盘）。关掉时立刻停掉正在播的。</summary>
+        private void SetVoiceEnabled(bool on)
+        {
+            if (on == _voiceOn) return;
+            _voiceOn = on;
+            if (_voicePlayer != null) _voicePlayer.Enabled = on;
+            if (!on && _voicePlayer != null) _voicePlayer.Stop();
+            PetLog.Info("语音 → " + (on ? "开" : "关"));
         }
 
         // ------------------------------------------------------------------
@@ -1418,6 +1590,7 @@ namespace DshZhuangFangyiPet
             // 不 ForceClose 会留下一个孤儿窗口（退出后仍浮在屏幕上）。
             try { if (_status != null) _status.ForceClose(); } catch { }
             try { if (_pomo != null) _pomo.ForceClose(); } catch { }
+            try { if (_voicePlayer != null) _voicePlayer.Dispose(); } catch { }
             try { if (_win != null) _win.ForceClose(); } catch { }
             try { if (_store != null) _store.Dispose(); } catch { }
         }

@@ -42,6 +42,15 @@ namespace DshZhuangFangyiPet
         /// 实际生效值由 snapshot.settings.doubleClick 实时覆盖，本字段只是初始值。</summary>
         public string DoubleClick = "focus-dsh";
 
+        /// <summary>
+        /// 语音总开关（v8）：`--voice 0|1`。默认 **0（关）**。
+        ///
+        /// 为什么默认关：桌宠突然开口说话是**强打扰**，而用户点的是"加语音"
+        /// 不是"一装就出声"。默认关 = 用户主动打开才生效，且设置页与托盘都能开。
+        /// 实际生效值由 `snapshot.settings.voice` 实时覆盖，本字段只是初始值。
+        /// </summary>
+        public bool VoiceEnabled;
+
         // task-6：缩放范围统一 0.3~3.0（Host 侧 clamp 由 Lead 同步改）。
         public const double ScaleMin = 0.3;
         public const double ScaleMax = 3.0;
@@ -81,7 +90,7 @@ namespace DshZhuangFangyiPet
             sb.AppendLine("dsh-zhuang-fangyi-pet — 庄方宜桌宠原生窗口");
             sb.AppendLine("用法: dsh-zhuang-fangyi-pet.exe [--url <base>] [--token <hex>] [--state <name>]");
             sb.AppendLine("        [--scale <0.3~3.0>] [--opacity <0.3~1.0>] [--x <int>] [--y <int>]");
-            sb.AppendLine("        [--topmost 0|1] [--click-through 0|1] [--bubble 0|1] [--dark auto|0|1]");
+            sb.AppendLine("        [--topmost 0|1] [--click-through 0|1] [--bubble 0|1] [--voice 0|1] [--dark auto|0|1]");
             sb.AppendLine("        [--art-dir <dir>] [--art-url <url>] [--selftest] [--verbose]");
             return sb.ToString();
         }
@@ -157,6 +166,9 @@ namespace DshZhuangFangyiPet
                         break;
                     case "--bubble":
                         if (!TryBool(val, out o.BubbleEnabled)) { err = "--bubble 只能是 0/1: " + val; return null; }
+                        break;
+                    case "--voice":
+                        if (!TryBool(val, out o.VoiceEnabled)) { err = "--voice 只能是 0/1: " + val; return null; }
                         break;
                     case "--dark":
                         if (!TryDark(val, out o.DarkOverride)) { err = "--dark 只能是 auto/0/1: " + val; return null; }

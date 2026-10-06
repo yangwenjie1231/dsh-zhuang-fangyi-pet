@@ -452,6 +452,48 @@ namespace DshZhuangFangyiPet
         }
 
         /// <summary>
+        /// 取一条语音的 mp3 字节（`GET /pet/voice/<name>`）。
+        ///
+        /// ⚠️ **名字必须已在 exe 侧白名单里**（见 `IsKnownVoiceName`）：这里只做
+        /// 转义拼接，不做校验 —— 校验放在调用方，因为"哪些名字合法"是
+        /// **从 Host 拉的清单**决定的，不是硬编码在 exe 里。
+        /// 宿主侧也有白名单（两层），所以即使这里被绕过也拿不到清单外的文件。
+        ///
+        /// 失败返回 null 且**不抛**：没有声音不该影响桌宠其它任何功能。
+        /// </summary>
+        public byte[] GetVoiceBytes(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return null;
+            try
+            {
+                byte[] b;
+                int code = GetRaw("/api/zhuang-fangyi/pet/voice/" + Uri.EscapeDataString(name), 15000, out b);
+                if (code != 200 || b == null || b.Length == 0) return null;
+                return b;
+            }
+            catch { return null; }
+        }
+
+        /// <summary>
+        /// 拉语音清单（`GET /pet/voices`）。失败返回 null（= 没有语音可用）。
+        ///
+        /// exe 用它知道"有哪些台词、多长、对应什么事件"，从而：
+        ///   · 只对清单里存在的名字发请求（不猜、不硬编码）；
+        ///   · 用真实时长做"上一句没播完就别播下一句"的去重。
+        /// </summary>
+        public PetVoiceManifest GetVoiceManifest(int timeoutMs)
+        {
+            string json = GetString("/api/zhuang-fangyi/pet/voices", timeoutMs);
+            if (string.IsNullOrEmpty(json)) return null;
+            try { return PetVoiceManifest.Parse(json); }
+            catch (Exception ex)
+            {
+                PetLog.Warn("语音清单解析失败: " + PetLog.Describe(ex));
+                return null;
+            }
+        }
+
+        /// <summary>
         /// 拉表情清单（GET /pet/gallery）→ 回调（线程池线程上被调，UI 侧要自己切回来）。
         ///
         /// 失败时 items=null 且 error 给出原因 —— 画廊要能显示"为什么是空的"，
@@ -683,6 +725,17 @@ namespace DshZhuangFangyiPet
             // 不会误改任何设置。但发一个空请求没意义，直接跳过。
             if (body == "{}") return;
             PostJson("/api/zhuang-fangyi/pet/settings", body);
+        }
+
+        /// <summary>
+        /// 语音开关（v8）→ POST /pet/settings，只带 `voice` 一个字段。
+        ///
+        /// 合并语义：宿主侧 `/pet/settings` 是合并补丁，只带一个字段不会抹掉其它设置。
+        /// </summary>
+        public void PostSettingsVoice(bool on)
+        {
+            PostJson("/api/zhuang-fangyi/pet/settings",
+                     "{\"voice\":" + (on ? "true" : "false") + "}");
         }
 
         /// <summary>

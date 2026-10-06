@@ -175,7 +175,17 @@ export function defaultSettings () {
      * 独立于 `statusAlways`（那个是"状态文字"）：用户可能不想要状态文字，
      * 但番茄钟的倒计时是他主动开的，得看得见。
      */
-    pomodoroCountdown: true
+    pomodoroCountdown: true,
+
+    // ── 语音（用户点名："claude目录下有一个庄方宜专属的语音合成skill"）────────
+    //
+    // ⚠️ **默认关闭**。桌宠突然开口说话是**强打扰** —— 用户点的是"加语音"，
+    // 不是"一装就出声"。默认关 = 他主动打开才生效。
+    //
+    // 运行时**绝不合成**（实测 GPT-SoVITS 冷启动 30.6 秒、热态 5 秒/句，
+    // 而桌宠要在一秒内回应点击）。台词是封闭集合，构建期已压成 mp3，
+    // 运行时只播放 —— 见 `src/pet/voice.js` 与 `tools/build-voice.ps1`。
+    voice: false
   }
 }
 
@@ -215,7 +225,8 @@ export function normalizeSettings (input) {
 
   for (const key of ['clickThrough', 'topmost', 'bubble', 'bubbleImages',
     'hint', 'statusAlways', 'notifyComplete', 'attentionReminder',
-    'pomodoro', 'pomodoroAutoNext', 'pomodoroNotify', 'pomodoroCountdown']) {
+    'pomodoro', 'pomodoroAutoNext', 'pomodoroNotify', 'pomodoroCountdown',
+    'voice']) {
     if (typeof input[key] === 'boolean') out[key] = input[key]
   }
 

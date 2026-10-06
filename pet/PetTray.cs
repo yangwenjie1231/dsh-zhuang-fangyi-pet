@@ -72,6 +72,15 @@ namespace DshZhuangFangyiPet
         private ToolStripMenuItem _miPomodoroEnabled;
         private ToolStripMenuItem _miPomodoroCountdown;
 
+        // ── 语音（v8）─────────────────────────────────────────────────────────
+        //
+        // 为什么语音开关也放托盘：设置页在 DSH 窗口里，而"想让她说句话"
+        // 往往是临时起意 —— 切到 DSH 里找开关这个动作本身就打断了那个念头。
+        /// <summary>语音开关（持久化到设置）。</summary>
+        public Action<bool> SetVoiceEnabled = delegate { };
+        public Func<bool> GetVoiceEnabled = delegate { return false; };
+        private ToolStripMenuItem _miVoice;
+
         public bool BubbleToggleEnabled = true;
         public Action<bool> SetBubble = delegate { };
         public Func<bool> GetBubble = delegate { return true; };
@@ -207,6 +216,11 @@ namespace DshZhuangFangyiPet
 
             _menu.Items.Add(_miPomodoro);
 
+            // 语音开关（默认关 —— 桌宠突然开口是强打扰，用户主动打开才生效）。
+            _miVoice = new ToolStripMenuItem("语音(&V)");
+            _miVoice.Click += delegate { SetVoiceEnabled(!GetVoiceEnabled()); Refresh(); };
+            _menu.Items.Add(_miVoice);
+
             ToolStripMenuItem focus = new ToolStripMenuItem("打开 DSH 窗口(&D)");
             focus.Click += delegate { FocusDsh(); };
             _menu.Items.Add(focus);
@@ -293,6 +307,7 @@ namespace DshZhuangFangyiPet
                         _miPomodoroCountdown.Enabled = enabled;
                     }
                 }
+                if (_miVoice != null) _miVoice.Checked = GetVoiceEnabled();
             }
             catch { }
         }
