@@ -78,6 +78,25 @@ export const THEME_MODES = ['auto', 'light', 'dark']
  */
 export const ACTIVITY_MODES = ['quiet', 'normal', 'playful']
 
+/**
+ * 番茄钟阶段名（与 `src/pet/pomodoro.js` 的 `POMODORO_PHASES` 同值域）。
+ *
+ * **故意在这里重复一份**而不是 import：`settings.js` 是 Host/Client/测试
+ * 三方共用的稳定契约，不该依赖番茄钟实现。两边不一致时由单测的
+ * 契约断言兜住（见 `test-pet-pomodoro.mjs` 的"契约同值域"一节）。
+ */
+export const POMODORO_PHASE_NAMES = ['focus', 'break', 'long-break']
+
+/** 番茄钟时长范围（**毫秒**，与设置字段同单位）。 */
+export const POMODORO_FOCUS_MIN = 60 * 1000
+export const POMODORO_FOCUS_MAX = 240 * 60 * 1000
+export const POMODORO_BREAK_MIN = 60 * 1000
+export const POMODORO_BREAK_MAX = 60 * 60 * 1000
+export const POMODORO_LONG_BREAK_MIN = 60 * 1000
+export const POMODORO_LONG_BREAK_MAX = 120 * 60 * 1000
+export const POMODORO_ROUNDS_MIN = 2
+export const POMODORO_ROUNDS_MAX = 12
+
 /** 设置结构版本。v1 为首个版本。 */
 export const SETTINGS_VERSION = 1
 
@@ -130,7 +149,33 @@ export function defaultSettings () {
      */
     attentionReminder: true,
     /** 气泡文案语言；跟随 DSH 界面语言时可被客户端覆盖。 */
-    locale: 'zh'
+    locale: 'zh',
+
+    // ── 番茄钟（用户点名："增加番茄钟提醒我休息"）────────────────────────────
+    //
+    // ⚠️ **默认关闭**。装完插件就自己开始一个 25 分钟倒计时是**骚扰**，不是功能 ——
+    // 用户明确点的是"提醒我休息"，前提是他自己按了开始。
+    /** 总开关。关掉时倒计时与阶段提醒都不出现。 */
+    pomodoro: false,
+    /** 专注时长（ms）。默认 25 分钟。 */
+    pomodoroFocusMs: 25 * 60 * 1000,
+    /** 短休时长（ms）。默认 5 分钟。 */
+    pomodoroBreakMs: 5 * 60 * 1000,
+    /** 长休时长（ms）。默认 15 分钟 —— 用户点名"每 4 轮一次长休息（15 分）"。 */
+    pomodoroLongBreakMs: 15 * 60 * 1000,
+    /** 每几轮专注后给一次长休。用户点名 4。 */
+    pomodoroRounds: 4,
+    /** 阶段结束后自动进入下一阶段；关掉则每段结束后停下等你按开始。 */
+    pomodoroAutoNext: true,
+    /** 阶段结束时让桌宠提醒（气泡 + 表情 + 语音）。 */
+    pomodoroNotify: true,
+    /**
+     * 桌宠**下方常显倒计时**。
+     *
+     * 独立于 `statusAlways`（那个是"状态文字"）：用户可能不想要状态文字，
+     * 但番茄钟的倒计时是他主动开的，得看得见。
+     */
+    pomodoroCountdown: true
   }
 }
 
@@ -169,7 +214,8 @@ export function normalizeSettings (input) {
   out.opacity = clamp(input.opacity, OPACITY_MIN, OPACITY_MAX, base.opacity)
 
   for (const key of ['clickThrough', 'topmost', 'bubble', 'bubbleImages',
-    'hint', 'statusAlways', 'notifyComplete', 'attentionReminder']) {
+    'hint', 'statusAlways', 'notifyComplete', 'attentionReminder',
+    'pomodoro', 'pomodoroAutoNext', 'pomodoroNotify', 'pomodoroCountdown']) {
     if (typeof input[key] === 'boolean') out[key] = input[key]
   }
 
@@ -185,6 +231,18 @@ export function normalizeSettings (input) {
   if (DOUBLE_CLICK_ACTIONS.includes(input.doubleClick)) out.doubleClick = input.doubleClick
   if (THEME_MODES.includes(input.theme)) out.theme = input.theme
   if (ACTIVITY_MODES.includes(input.activity)) out.activity = input.activity
+
+  // 番茄钟时长：与 `src/pet/pomodoro.js` 的 POMODORO_LIMITS **同值域**。
+  // 两处都要有是因为：设置页要能挡住荒唐值（1 秒的专注没有意义），
+  // 而番茄钟模块自己也必须防（它可能被直接构造，不经设置）。
+  out.pomodoroFocusMs = clamp(input.pomodoroFocusMs,
+    POMODORO_FOCUS_MIN, POMODORO_FOCUS_MAX, base.pomodoroFocusMs)
+  out.pomodoroBreakMs = clamp(input.pomodoroBreakMs,
+    POMODORO_BREAK_MIN, POMODORO_BREAK_MAX, base.pomodoroBreakMs)
+  out.pomodoroLongBreakMs = clamp(input.pomodoroLongBreakMs,
+    POMODORO_LONG_BREAK_MIN, POMODORO_LONG_BREAK_MAX, base.pomodoroLongBreakMs)
+  out.pomodoroRounds = clamp(input.pomodoroRounds,
+    POMODORO_ROUNDS_MIN, POMODORO_ROUNDS_MAX, base.pomodoroRounds)
 
   if (input.locale === 'zh' || input.locale === 'en') out.locale = input.locale
   out.version = SETTINGS_VERSION

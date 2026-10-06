@@ -90,7 +90,16 @@ export const EVENT_TEXT = {
   'notify-complete': { zh: '完成啦！来看看～', en: 'All done — take a look!' },
   /** 常亮提醒：AI 在等你回答问题（`ask_user_question`）。 */
   'ask-user': { zh: '问了你一个问题，在等你回答…', en: 'Asked you a question — waiting…' },
-  'native/error': { zh: '桌面窗口开不起来', en: 'Desktop window unavailable' }
+  'native/error': { zh: '桌面窗口开不起来', en: 'Desktop window unavailable' },
+
+  // ── 番茄钟（用户点名："增加番茄钟提醒我休息"）────────────────────────────
+  //
+  // 文案放在这里而不是拼在 Host 里：`locale` 是状态机的配置，文案表也在
+  // 状态机里 —— 在 Host 拼字符串会让"中英切换"这件事有两个真相。
+  'pomodoro/focus-start': { zh: '开始专注啦，加油～', en: 'Focus time — go!' },
+  'pomodoro/focus-end': { zh: '专注结束，去休息一下吧', en: 'Focus done — take a break' },
+  'pomodoro/break-end': { zh: '休息结束，继续加油！', en: 'Break over — back to it!' },
+  'pomodoro/long-end': { zh: '长休息结束，回来啦～', en: 'Long break over — welcome back!' }
 }
 
 /** 进入这些状态时会弹一次气泡；`idle`/`waking`/`sleeping` 太安静，不弹。 */
@@ -341,6 +350,16 @@ export function createPetState (options = {}) {
    */
   let lastAttention = null
   let lastAttentionKey = null
+  /**
+   * 外部功能请求的一条气泡（**番茄钟提醒 / 互动反应 / 聊天回复共用**）。
+   *
+   * 为什么走"挂起 + `refresh` 消费"而不是直接调 `requestBubble`：
+   * `requestBubble` 只改 `bubble`，**不推进 `rev`、不广播** —— 直接调会得到
+   * "气泡已经设好了但客户端收不到"的诡异现象（`bubble` 变了而 rev 没变，
+   * 客户端按 rev 去重就把它丢了）。挂在这里让 `refresh` 消费，就复用了
+   * 同一条 rev/广播通道，不另开旁路。
+   */
+  let pendingNotify = null
   let nativeAvailable = false
   let nativeError = null
 
@@ -576,6 +595,30 @@ export function createPetState (options = {}) {
       }
     } else if (attentionKey === null) {
       idleEmoteArmed = false
+    }
+
+    // ⭐ 外部功能的气泡（番茄钟提醒 / 互动反应 / 聊天回复）──
+    //
+    // 放在 notify-complete 之后、idleEmote 之前：它的优先级比"AI 跑完了"低
+    // （后者是用户点名的强提醒），但比"闲着没事蹦一个"高。
+    //
+    // `pendingNotify` 由公开的 `notify()` 挂上；这里消费并清空。
+    // **只在 attention 不存续时消费**：正在等你审批时，番茄钟的"休息一下"
+    // 不该把审批提醒挤掉（那会让你漏掉真正卡住的事）。被挤掉的通知就丢弃，
+    // 而不是排队 —— 一条 30 秒后才出现的"该休息了"是误导。
+    if (pendingNotify !== null) {
+      const req = pendingNotify
+      pendingNotify = null
+      if (attentionKey === null && cfg.bubbleStates.length > 0) {
+        if (requestBubble(req.key, at, {
+          state: req.state ?? null,
+          text: req.text ?? undefined,
+          force: true,
+          priority: req.priority ?? 95,
+          durationMs: req.durationMs,
+          image: req.image
+        })) changed = true
+      }
     }
 
     // 气泡过期：清掉，让客户端收起气泡窗。
@@ -874,6 +917,31 @@ export function createPetState (options = {}) {
         }))
         .sort((a, b) => b.at - a.at)
     },
+    /**
+     * 让桌宠说一句话（**外部功能的统一入口**：番茄钟 / 互动 / 聊天）。
+     *
+     * 为什么不让调用方直接改 `bubble`：那样不推进 `rev`、不广播，
+     * 客户端按 rev 去重就永远收不到这条 —— 症状是"代码说发了，屏幕没反应"。
+     * 这里只**挂起**请求，由 `refresh` 在正确的时机消费并走正常广播通道。
+     *
+     * @param {object} request
+     * @param {string} request.key - 气泡 key（决定选图与静默期记账）
+     * @param {string} [request.text] - 覆盖文案（不给则用 key 的默认文案表）
+     * @param {string} [request.state] - 关联状态名（影响优先级与选图）
+     * @param {number} [request.priority] - 覆盖优先级
+     * @param {number} [request.durationMs] - 覆盖停留时长
+     * @param {object} [request.image] - 直接指定图（跳过选图器）
+     * @returns {boolean} 是否接受了请求（attention 存续时会被丢弃，见 `refresh`）
+     */
+    notify (request) {
+      if (request === null || typeof request !== 'object') return false
+      if (typeof request.key !== 'string' || request.key === '') return false
+      pendingNotify = request
+      // 立刻求值一次：调用方（HTTP 路由）希望"这一帧就带上"。
+      refresh(now())
+      return true
+    },
+
     /** 订阅变化；返回取消函数。监听者抛错被容纳，不影响其它监听者。 */
     on (fn) {
       if (typeof fn !== 'function') return () => {}

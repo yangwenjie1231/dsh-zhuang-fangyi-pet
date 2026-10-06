@@ -174,6 +174,8 @@ function readBody (req) {
  * @param {(text: string, sessionId?: string) => Promise<object>} [deps.onSend] - 发消息到会话
  * @param {() => {available: boolean, reason: string|null}} [deps.sendCapability] - 发消息能力位
  * @param {(command: string) => object} deps.onCommand - 命令处理
+ * @param {object} [deps.pomodoro] - 番茄钟（`{snapshot(), control(action)}`）；
+ *   缺失时 `/pet/pomodoro` 返回 503（**不许假装成功**）
  * @param {() => object} deps.getSettings - 取当前设置
  * @param {(next: object) => object} deps.setSettings - 覆盖设置（归一化后返回）
  * @param {() => object|undefined} deps.connection - 取 `connection` 服务
@@ -425,6 +427,52 @@ export function createHandler (deps) {
         }
         return
       }
+      // ── 番茄钟（契约 §3 新增）─────────────────────────────────────────
+      //
+      // 为什么单独一条路由而不是复用 `/pet/command`：命令通道是
+      // **fire-and-forget 的字符串**（`{command}` → `{result}`），没有返回值语义，
+      // 而番茄钟的每个动作都要回一个**新状态**给 exe 立刻重绘（按了开始要马上
+      // 看到倒计时在跑）。走 command 的话 exe 得再拉一次 `/pet/state`，多一跳。
+      //
+      // GET  = 取当前块（exe 首帧/轮询兜底用）
+      // POST = 动作（start/pause/toggle/skip/reset）
+      if (route === '/pomodoro') {
+        if (deps.pomodoro === undefined || deps.pomodoro === null) {
+          sendJson(res, 503, { error: 'unavailable', reason: '宿主未装配番茄钟' })
+          return
+        }
+        if (req.method === 'GET') {
+          sendJson(res, 200, { pomodoro: deps.pomodoro.snapshot() })
+          return
+        }
+        if (req.method === 'POST' || req.method === 'PUT') {
+          let parsed
+          try {
+            parsed = JSON.parse(await readBody(req))
+          } catch {
+            sendJson(res, 400, { error: 'invalid json' })
+            return
+          }
+          const action = String(parsed?.action ?? '')
+          // ⚠️ **白名单**：动作名直接映射到番茄钟方法，绝不能把用户串
+          // 透传到内部（那等于给了一个任意方法调用入口）。
+          const ALLOWED = ['start', 'pause', 'toggle', 'skip', 'reset']
+          if (!ALLOWED.includes(action)) {
+            sendJson(res, 400, { error: 'bad action', allowed: ALLOWED })
+            return
+          }
+          const result = deps.pomodoro.control(action)
+          if (result === null) {
+            sendJson(res, 400, { error: 'bad action', allowed: ALLOWED })
+            return
+          }
+          sendJson(res, 200, { ok: true, action, result, pomodoro: deps.pomodoro.snapshot() })
+          return
+        }
+        sendJson(res, 405, { error: 'method not allowed' })
+        return
+      }
+
       // ── 命令 ────────────────────────────────────────────────────────────
       if (route === '/command' && (req.method === 'POST' || req.method === 'PUT')) {
         let parsed

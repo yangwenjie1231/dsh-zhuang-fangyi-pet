@@ -32,6 +32,7 @@ import {
   ROUTE_PREFIX
 } from '../src/pet/routes.js'
 import { createHub } from '../src/pet/hub.js'
+import { createPomodoro } from '../src/pet/pomodoro.js'
 import { normalizeAtlas, loadAtlas } from '../src/pet/atlas.js'
 import { baseUrlOf, locateExe, EXE_NAME } from '../src/pet/launcher.js'
 
@@ -733,6 +734,224 @@ await okAsync('GET /diag 暴露构建标记与素材报告', async () => {
   assert.equal(body.diag.build, 'test-build')
   assert.ok(body.atlas)
 })
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * 5b. 番茄钟路由（契约 §3 新增）
+ * ═════════════════════════════════════════════════════════════════════════ */
+section('5b. 番茄钟路由（/pet/pomodoro）')
+
+/**
+ * 给 handler 装一个**真的**番茄钟（不是桩）。
+ *
+ * 为什么不用手写桩：桩只能验证"路由把 action 转发出去了"，
+ * 而真正会出错的是"action 名与番茄钟方法对不上""白名单漏了一个动作"。
+ * 用真模块才能覆盖那条链路。这里用固定时钟，避免测试受真实时间影响。
+ */
+let pomoClock = 1_000_000
+const realPomodoro = createPomodoro({
+  now: () => pomoClock,
+  config: { enabled: true, focusMs: 60_000, breakMs: 30_000, longBreakMs: 90_000, roundsPerLongBreak: 4 }
+})
+/**
+ * 记录**每一个到达 `control` 的 action**。
+ *
+ * 为什么需要它：这条断言最初写成"非白名单动作返回 400"，但回退验证发现
+ * 把白名单整个删掉**测试照样全绿** —— 因为 `control` 对未知动作返回 `null`，
+ * 路由的第二个检查（`result === null`）把 400 补上了。于是断言测的是
+ * "control 返回 null"，**完全没测到白名单**。
+ *
+ * 真正的安全性质是：**动作串绝不允许到达内部**（白名单是那道闸，
+ * `control` 的 null 只是它的备份）。所以要直接断言"control 从没见过
+ * 非白名单动作"——这才是白名单独有的、删掉它就失败的性质。
+ */
+const controlCalls = []
+const pomoHandler = createHandler({
+  snapshot,
+  atlas: () => atlas,
+  artDir,
+  token: TOKEN,
+  hub,
+  logger: { warn () {}, debug () {}, info () {} },
+  connection: () => undefined,
+  onPosition: () => {},
+  onCommand: () => ({}),
+  getSettings: () => settingsValue,
+  setSettings: next => next,
+  pomodoro: {
+    snapshot: () => realPomodoro.snapshot(pomoClock),
+    control: action => {
+      controlCalls.push(action)
+      switch (action) {
+        case 'start': return { started: realPomodoro.start(pomoClock) }
+        case 'pause': return { paused: realPomodoro.pause() }
+        case 'toggle': return { running: realPomodoro.toggle(pomoClock) }
+        case 'skip': return realPomodoro.skip(pomoClock)
+        case 'reset': return { reset: realPomodoro.reset(pomoClock) }
+        default: return null
+      }
+    }
+  }
+})
+const pomoServer = http.createServer((req, res) => {
+  pomoHandler(req, res).catch(() => { if (!res.headersSent) res.writeHead(500); res.end() })
+})
+await new Promise(resolve => pomoServer.listen(0, '127.0.0.1', resolve))
+const POMO_BASE = `http://127.0.0.1:${pomoServer.address().port}`
+
+async function pomoCall (method, body) {
+  const res = await fetch(`${POMO_BASE}${ROUTE_PREFIX}/pomodoro`, {
+    method,
+    headers: auth(body === undefined ? {} : { 'content-type': 'application/json' }),
+    body: body === undefined ? undefined : JSON.stringify(body)
+  })
+  return { status: res.status, body: await res.text() }
+}
+
+await okAsync('GET /pomodoro 返回契约 §2 形状的块', async () => {
+  const r = await pomoCall('GET')
+  assert.equal(r.status, 200, `状态码 ${r.status}`)
+  const p = JSON.parse(r.body).pomodoro
+  for (const key of ['enabled', 'phase', 'running', 'remainingMs', 'totalMs',
+    'endsAt', 'completed', 'round', 'roundsPerLongBreak', 'autoNext', 'notify',
+    'text', 'show']) {
+    assert.ok(key in p, `块缺字段 ${key}`)
+  }
+})
+
+await okAsync('⭐⭐ 白名单之外的动作**根本到不了** control（不是靠它返回 null 兜底）', async () => {
+  // 回退验证过的区分度：把 `if (!ALLOWED.includes(action))` 删掉，这条会失败。
+  // 之前的版本测不出来 —— 它测的是"control 返回 null"，而白名单删掉后
+  // 那个兜底照样给 400，于是断言全绿而闸门其实已经没了。
+  const EVIL = ['__proto__', 'constructor', 'toString', 'hasOwnProperty',
+    'start;process.exit(1)', '', 'START', 'pause ', 'reset\n', 'skip\t',
+    'valueOf', 'isPrototypeOf', 'propertyIsEnumerable', 'toLocaleString']
+  for (const evil of EVIL) {
+    controlCalls.length = 0
+    const r = await pomoCall('POST', { action: evil })
+    assert.equal(r.status, 400, `动作 ${JSON.stringify(evil)} 应 400，实际 ${r.status}`)
+    assert.deepEqual(controlCalls, [],
+      `动作 ${JSON.stringify(evil)} **不该到达 control**，实际到达了：${JSON.stringify(controlCalls)}`)
+  }
+})
+
+await okAsync('白名单内的动作**确实**到达 control（否则上面的断言是空的）', async () => {
+  // 反向确认：没有这条，"control 从没见过非法动作"可能只是因为
+  // control 从来没被调用过（那断言毫无意义）。
+  for (const good of ['start', 'pause', 'toggle', 'skip', 'reset']) {
+    controlCalls.length = 0
+    const r = await pomoCall('POST', { action: good })
+    assert.equal(r.status, 200, `合法动作 ${good} 应 200，实际 ${r.status}`)
+    assert.deepEqual(controlCalls, [good],
+      `合法动作 ${good} 必须到达 control，实际：${JSON.stringify(controlCalls)}`)
+  }
+})
+
+await okAsync('缺 action 字段 → 400 且列出允许值（调用方能自我纠正）', async () => {
+  const r = await pomoCall('POST', {})
+  assert.equal(r.status, 400)
+  const body = JSON.parse(r.body)
+  assert.deepEqual(body.allowed, ['start', 'pause', 'toggle', 'skip', 'reset'])
+})
+
+await okAsync('非法 JSON → 400', async () => {
+  const res = await fetch(`${POMO_BASE}${ROUTE_PREFIX}/pomodoro`, {
+    method: 'POST',
+    headers: auth({ 'content-type': 'application/json' }),
+    body: '{oops'
+  })
+  assert.equal(res.status, 400)
+})
+
+await okAsync('不支持的方法 → 405', async () => {
+  const res = await fetch(`${POMO_BASE}${ROUTE_PREFIX}/pomodoro`, {
+    method: 'DELETE',
+    headers: auth()
+  })
+  assert.equal(res.status, 405)
+})
+
+await okAsync('⭐⭐ 每个允许的动作都**真的**作用到番茄钟（不是只回 ok）', async () => {
+  // 这是本节最重要的一条：如果路由只回 `{ok:true}` 而没调 `control`，
+  // 上面所有断言都会通过 —— 但按钮是死的。所以逐个动作验证**真实状态变化**。
+  realPomodoro.reset(pomoClock)
+
+  // start：真的开始跑
+  let r = await pomoCall('POST', { action: 'start' })
+  assert.equal(r.status, 200)
+  assert.equal(JSON.parse(r.body).pomodoro.running, true, 'start 后应在跑')
+  assert.equal(realPomodoro.internals.running, true, '真实对象也应在跑（不是只回了 ok）')
+
+  // pause：真的停
+  r = await pomoCall('POST', { action: 'pause' })
+  assert.equal(JSON.parse(r.body).pomodoro.running, false, 'pause 后应停')
+  assert.equal(realPomodoro.internals.running, false)
+
+  // toggle：停 → 跑
+  r = await pomoCall('POST', { action: 'toggle' })
+  assert.equal(JSON.parse(r.body).pomodoro.running, true, 'toggle 应变成跑')
+  assert.equal(realPomodoro.internals.running, true)
+
+  // skip：真的切阶段
+  const beforePhase = realPomodoro.internals.phase
+  r = await pomoCall('POST', { action: 'skip' })
+  assert.equal(r.status, 200)
+  assert.notEqual(realPomodoro.internals.phase, beforePhase, 'skip 应切换阶段')
+  assert.equal(JSON.parse(r.body).pomodoro.phase, realPomodoro.internals.phase,
+    '回执的块必须反映切换后的真实状态')
+
+  // reset：真的回到第一轮专注
+  realPomodoro.skip(pomoClock)     // 先弄脏状态
+  r = await pomoCall('POST', { action: 'reset' })
+  assert.equal(realPomodoro.internals.phase, 'focus', 'reset 应回到专注')
+  assert.equal(realPomodoro.internals.completed, 0, 'reset 应清空轮数')
+  assert.equal(JSON.parse(r.body).pomodoro.phase, 'focus')
+})
+
+await okAsync('回执里带上动作后的新块（exe 不必再拉一次 /state）', async () => {
+  realPomodoro.reset(pomoClock)
+  const r = await pomoCall('POST', { action: 'start' })
+  const body = JSON.parse(r.body)
+  assert.equal(body.ok, true)
+  assert.equal(body.action, 'start')
+  assert.ok(body.pomodoro, '回执必须带新块')
+  assert.equal(body.pomodoro.running, true)
+})
+
+await okAsync('未装配番茄钟时返回 503（不许假装成功）', async () => {
+  const bare = createHandler({
+    snapshot,
+    atlas: () => atlas,
+    artDir,
+    token: TOKEN,
+    hub,
+    logger: { warn () {}, debug () {}, info () {} },
+    connection: () => undefined,
+    onPosition: () => {},
+    onCommand: () => ({})
+    // 故意不传 pomodoro
+  })
+  const srv = http.createServer((req, res) => {
+    bare(req, res).catch(() => { if (!res.headersSent) res.writeHead(500); res.end() })
+  })
+  await new Promise(resolve => srv.listen(0, '127.0.0.1', resolve))
+  const base = `http://127.0.0.1:${srv.address().port}`
+  const res = await fetch(`${base}${ROUTE_PREFIX}/pomodoro`, { headers: auth() })
+  assert.equal(res.status, 503, '没装配就该明确说不可用')
+  const body = JSON.parse(await res.text())
+  assert.equal(body.error, 'unavailable')
+  await new Promise(resolve => srv.close(resolve))
+})
+
+await okAsync('番茄钟路由也受令牌/围栏保护（无令牌的跨站请求被拒）', async () => {
+  const res = await fetch(`${POMO_BASE}${ROUTE_PREFIX}/pomodoro`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'sec-fetch-site': 'cross-site' },
+    body: JSON.stringify({ action: 'start' })
+  })
+  assert.equal(res.status, 403, `跨站请求应 403，实际 ${res.status}`)
+})
+
+await new Promise(resolve => pomoServer.close(resolve))
 
 /* ══════════════════════════════════════════════════════════════════════════
  * 6. 端口自发现与 exe 定位

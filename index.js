@@ -46,6 +46,7 @@ import { shortIdsFor } from './src/pet/shortid.js'
 import { createHub } from './src/pet/hub.js'
 import { createHandler, newToken, ROUTE_PREFIX } from './src/pet/routes.js'
 import { createLauncher } from './src/pet/launcher.js'
+import { createPomodoro } from './src/pet/pomodoro.js'
 
 /** 插件标识（Loader 行 id、token 层 source 共用）。 */
 export const name = 'zhuang-fangyi-pet'
@@ -342,6 +343,90 @@ export function apply (ctx, config) {
     pickBubbleImage
   })
 
+  // ── 番茄钟（用户点名："增加番茄钟提醒我休息"）─────────────────────────────
+  //
+  // 它是**独立于 AI 状态**的一条时间线（见 `pomodoro.js` 文件头），
+  // 所以这里只做三件事：把设置喂给它、按 tick 推进它、阶段结束时让桌宠说句话。
+  //
+  // 状态持久化在 `pomodoro.json`：DSH 重启（升级/重载插件）后番茄钟要能接着走，
+  // 否则用户每次重启都丢进度。`adopt()` 自己处理"停机太久就作废"的边界。
+  let pomodoroStore = null
+  try {
+    pomodoroStore = new JsonStore(path.join(dataDir, 'pomodoro.json'), null, { log: null })
+  } catch (error) {
+    logger.warn?.(`zhuang-fangyi-pet: 番茄钟状态无法持久化（${error?.message ?? error}）`)
+  }
+
+  /** 设置 → 番茄钟参数（抽成函数，热更新与启动共用同一份映射）。 */
+  const pomodoroConfig = () => {
+    const s = settings.get()
+    return {
+      enabled: s.pomodoro,
+      focusMs: s.pomodoroFocusMs,
+      breakMs: s.pomodoroBreakMs,
+      longBreakMs: s.pomodoroLongBreakMs,
+      roundsPerLongBreak: s.pomodoroRounds,
+      autoNext: s.pomodoroAutoNext,
+      notify: s.pomodoroNotify
+    }
+  }
+
+  /**
+   * 阶段切换 → 桌宠说话（气泡 + 表情 + 语音）。
+   *
+   * 只在 `kind === 'end'` 时提醒：`start` 事件也发出来了（exe 的倒计时切换要用），
+   * 但"开始专注"不值得每次都弹一条 —— 用户自己按的，他知道。
+   * 例外是**休息结束**：那是"该回来干活了"，值得提醒。
+   */
+  const onPomodoroTransition = event => {
+    try {
+      if (pomodoroStore !== null) {
+        pomodoroStore.value = pomodoro.persist(Date.now())
+        pomodoroStore.schedule()
+      }
+      if (event?.kind === 'start') {
+        // 只有"休息结束、回到专注"这一种 start 值得提醒（用户可能离开过）。
+        if (event.phase === 'focus' && pomodoroConfig().notify) {
+          machine.notify({
+            key: 'pomodoro/break-end',
+            state: 'waking',
+            priority: 96,
+            durationMs: 5000
+          })
+        }
+        return
+      }
+      if (event?.kind !== 'end') return
+      if (!pomodoroConfig().notify) return
+      // 结束的三种：专注结束（该休息）、短休结束、长休结束。
+      const key = event.phase === 'focus'
+        ? 'pomodoro/focus-end'
+        : (event.phase === 'long-break' ? 'pomodoro/long-end' : 'pomodoro/break-end')
+      // 专注结束用 `waiting`（"该你动一下了"），休息结束用 `happy`（"回来啦"）。
+      machine.notify({
+        key,
+        state: event.phase === 'focus' ? 'waiting' : 'happy',
+        priority: 96,
+        durationMs: 8000
+      })
+    } catch (error) {
+      logger.warn?.(`zhuang-fangyi-pet: 番茄钟提醒失败（${error?.message ?? error}）`)
+    }
+  }
+
+  const pomodoro = createPomodoro({
+    config: pomodoroConfig(),
+    onTransition: onPomodoroTransition
+  })
+  // 恢复上次的进度（`adopt` 内部处理"停机太久 → 作废本轮且不补通知"）。
+  if (pomodoroStore !== null && pomodoroStore.get() !== null) {
+    try {
+      pomodoro.adopt(pomodoroStore.get(), Date.now())
+    } catch (error) {
+      boot(`⚠️ 番茄钟状态恢复失败（已忽略）：${error?.message ?? error}`)
+    }
+  }
+
   // 诊断信息（`/pet/diag` 暴露，用于区分"代码没生效"与"进程没重载"）。
   const diagnostics = {
     lastChangeAt: null,
@@ -400,7 +485,10 @@ export function apply (ctx, config) {
       // 原先只有 overlay 用这两个字段，exe 拿到了快照里的 label 却没人用 ——
       // 桌面版桌宠因此完全没有状态文字。
       hint: s.hint,
-      statusAlways: s.statusAlways
+      statusAlways: s.statusAlways,
+      // 番茄钟倒计时是否常显（独立于 statusAlways：那是"状态文字"，
+      // 这是用户主动开的计时器，两者可以各自开关）。
+      pomodoroCountdown: s.pomodoroCountdown
     }
   }
 
@@ -617,6 +705,9 @@ export function apply (ctx, config) {
   const withSettings = snap => ({
     ...snap,
     settings: exeSettings(),
+    // 番茄钟块：**每帧都带上**（exe 用它显示倒计时，overlay 忽略）。
+    // 与 `settings` 同一条通道，exe 断线降级轮询时拿到的也是同一份。
+    pomodoro: pomodoro.snapshot(Date.now()),
     // 会话列表：给"发送到哪个对话"的选择器用（见 `sessionChoices`）。
     sessions: sessionChoices(snap),
     // 能力位：两半边的 ✎ 入口都靠它决定显不显示（**不做没入口的错误**）。
@@ -676,6 +767,9 @@ export function apply (ctx, config) {
       // 先让状态机吃到新配置（活跃度/气泡时长/完成提醒都要**立刻**生效），
       // 再广播 —— 顺序反了的话，这一帧推的还是旧行为，用户会看到"改完没反应"。
       machine.setConfig(machineConfig())
+      // 番茄钟同理：设置页把专注从 25 分改成 30 分要立刻生效。
+      // `setConfig` 自己保证"跑着的时候不动当前阶段的剩余时间"。
+      pomodoro.setConfig(pomodoroConfig())
       hub.broadcast(withSettings(machine.snapshot()))
     } catch (error) {
       logger.warn?.(`zhuang-fangyi-pet: 设置变化广播失败（${error?.message ?? error}）`)
@@ -703,6 +797,32 @@ export function apply (ctx, config) {
   }, 15000)
   ticker.unref?.()
   ctx.effect(() => () => clearInterval(ticker), 'zhuang-fangyi-pet: idle ticker')
+
+  // ── 番茄钟推进 ──────────────────────────────────────────────────────────
+  //
+  // **1 秒一次**，比状态机的 15s 密得多。理由：番茄钟是**秒级承诺**
+  //（用户盯着倒计时看），15s 的粒度意味着"25:00 到了"最多晚 15 秒才提醒。
+  //
+  // 为什么不让 exe 自己报时、Host 只收结果：那样"该提醒了"这个判断就散在
+  // 两个进程里，DSH 重启/断线时口径必然分叉。**Host 是唯一真相**，
+  // exe 只用 `endsAt` 做**显示**用的本地插值（它不会自己触发提醒）。
+  //
+  // 广播只在**真的发生阶段切换**时发生（`tick` 返回事件时由 `machine.notify`
+  // 走正常通道）；平时每秒的 tick 只推进内部计数，不推帧 —— 否则 25 分钟里
+  // 会推 1500 帧无意义的状态更新，exe 每秒重绘一次倒计时纯属浪费。
+  const pomodoroTicker = setInterval(() => {
+    try {
+      const event = pomodoro.tick(Date.now())
+      if (event !== null && pomodoroStore !== null) {
+        pomodoroStore.value = pomodoro.persist(Date.now())
+        pomodoroStore.schedule()
+      }
+    } catch (error) {
+      logger.warn?.(`zhuang-fangyi-pet: 番茄钟 tick 失败（${error?.message ?? error}）`)
+    }
+  }, 1000)
+  pomodoroTicker.unref?.()
+  ctx.effect(() => () => clearInterval(pomodoroTicker), 'zhuang-fangyi-pet: pomodoro ticker')
 
   // ── 发消息能力：`ctx.sessionController`（GUI 发消息走的就是这条服务）────────
   //
@@ -886,7 +1006,34 @@ export function apply (ctx, config) {
       settings.flush()
       // 设置变了要让状态机跟着变（气泡开关、语言、时长、完成提醒）。
       machine.apply({ type: 'tick' })
+      // 番茄钟参数也要跟着走（设置页改时长 → 立刻生效）。
+      pomodoro.setConfig(pomodoroConfig())
+      // 番茄钟状态有变化 → 立刻广播一帧（否则改了要等下一次状态变化才看到）。
+      hub.broadcast(withSettings(machine.snapshot()))
       return applied
+    },
+    /** 番茄钟状态存取（`/pet/pomodoro` 用；见 routes.js 的说明）。 */
+    pomodoro: {
+      snapshot: () => pomodoro.snapshot(Date.now()),
+      control: action => {
+        const at = Date.now()
+        let result = null
+        switch (action) {
+          case 'start': result = { started: pomodoro.start(at) }; break
+          case 'pause': result = { paused: pomodoro.pause() }; break
+          case 'toggle': result = { running: pomodoro.toggle(at) }; break
+          case 'skip': result = pomodoro.skip(at); break
+          case 'reset': result = { reset: pomodoro.reset(at) }; break
+          default: return null
+        }
+        // 持久化 + 广播：用户按了开始，桌宠那边要立刻看到倒计时。
+        if (pomodoroStore !== null) {
+          pomodoroStore.value = pomodoro.persist(at)
+          pomodoroStore.flush()
+        }
+        hub.broadcast(withSettings(machine.snapshot()))
+        return result
+      }
     },
     onCommand: command => {
       switch (command) {
