@@ -20,6 +20,9 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
+// `emotes.js` 不 import 任何东西（纯数据 + 纯函数），所以这里不会形成循环依赖。
+// 覆盖率的**唯一真相**在 emotes 的池表里，atlas 只做报告，不再抄一份。
+import { emoteCoverage, EMOTE_EXCLUDE_FROM_RANDOM } from './emotes.js'
 
 /** 合法状态名。**故意在这里重复一份**，而不是 import `state.js`：
  *  这个模块要能在极小的依赖面下被单测，且契约是三方共用的稳定值域。 */
@@ -393,6 +396,11 @@ export function resolveBubbleFile (entry, dark) {
 export function atlasReport (atlas) {
   const covered = VALID_STATES.filter(s => atlas.states?.[s] !== undefined)
   const uncovered = VALID_STATES.filter(s => atlas.states?.[s] === undefined)
+  const bubbles = Array.isArray(atlas.bubble) ? atlas.bubble : []
+  // 覆盖率：哪些气泡图**永远不会被按状态挑中**（只能靠全池兜底或画廊看到）。
+  // 这不是错误（全池与画廊仍会展示它们），但新增素材后值得一眼看见 ——
+  // 否则"加了图却从不出现"只能靠用户反馈才发现。
+  const { used, unused } = emoteCoverage(bubbles.map(b => b.file))
   return {
     version: atlas.version ?? 0,
     generatedAt: atlas.generatedAt ?? null,
@@ -400,10 +408,18 @@ export function atlasReport (atlas) {
     files: atlas.allowed instanceof Set ? atlas.allowed.size : 0,
     /** `files` 映射的条目数（每个文件自己的几何）。 */
     fileGeometry: Object.keys(atlas.files ?? {}).length,
-    bubbleCount: Array.isArray(atlas.bubble) ? atlas.bubble.length : 0,
+    bubbleCount: bubbles.length,
     coveredStates: covered,
     uncoveredStates: uncovered,
     missingCount: Array.isArray(atlas.missing) ? atlas.missing.length : 0,
-    missing: atlas.missing ?? []
+    missing: atlas.missing ?? [],
+    /** 表情覆盖率（诊断用）：被状态池引用的 / 只能靠兜底看到的。 */
+    emotes: {
+      usedCount: used.length,
+      unusedCount: unused.length,
+      unused
+    },
+    /** 全池兜底时会被跳过的图（语义太强，见 `EMOTE_EXCLUDE_FROM_RANDOM`）。 */
+    excludedCount: EMOTE_EXCLUDE_FROM_RANDOM.length
   }
 }

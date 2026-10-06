@@ -145,6 +145,51 @@ export const EMOTE_EXCLUDE_FROM_RANDOM = [
 ]
 
 /**
+ * 从**候选文件**里挑一张，跳过「语义太强、不该随机撒」的那些。
+ *
+ * 这是 `EMOTE_EXCLUDE_FROM_RANDOM` 的**唯一消费点**。此前那个名单只导出、
+ * 只被测试引用，**运行时从没读过它** —— 于是"全池随机"这条兜底路径
+ * 仍然可能随机撒出「么么哒」或「晚安啦」，名单形同虚设。
+ *
+ * 语义：`candidates` 是**已经按某个顺序排好**的文件列表（调用方决定轮换顺序），
+ * 本函数返回其中第一个不在排除名单里的。**全部都在名单里**时返回 null ——
+ * 此时调用方应回落到原始候选（宁可撒语义强的，也不要没表情）。
+ *
+ * @param {string[]} candidates
+ * @returns {string|null}
+ */
+export function firstAllowedEmote (candidates) {
+  if (!Array.isArray(candidates)) return null
+  for (const f of candidates) {
+    if (typeof f !== 'string' || f === '') continue
+    if (!EMOTE_EXCLUDE_FROM_RANDOM.includes(f)) return f
+  }
+  return null
+}
+
+/**
+ * 从**全池**里按 seed 轮换挑一张，并跳过排除名单。
+ *
+ * 供 Host 的兜底路径使用（`pickEmoteFile` 返回 null 时）。
+ * 从 `seed` 开始往后找，找到第一个可用的；整个池都被排除时退回 `pool[seed]`
+ * ——「有表情」比「守名单」重要。
+ *
+ * @param {{file: string}[]} pool - 清单里的气泡数组
+ * @param {number} seed
+ * @returns {{file: string, [k: string]: unknown}|null}
+ */
+export function pickPoolEmote (pool, seed = 0) {
+  if (!Array.isArray(pool) || pool.length === 0) return null
+  const start = Math.abs(Math.trunc(seed)) % pool.length
+  for (let i = 0; i < pool.length; i += 1) {
+    const rec = pool[(start + i) % pool.length]
+    if (rec === null || rec === undefined) continue
+    if (!EMOTE_EXCLUDE_FROM_RANDOM.includes(rec.file)) return rec
+  }
+  return pool[start] ?? null
+}
+
+/**
  * 把状态机的 key 归一到 `EMOTE_BY_KEY` 的键。
  *
  * `idle-emote-3` 这类带序号的 key 要归到 `idle`；未知 key 返回 null

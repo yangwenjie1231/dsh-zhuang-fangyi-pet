@@ -40,8 +40,8 @@ import { defaultSettings, normalizeSettings, SETTINGS_VERSION } from './src/sett
 import { createPetState, DEFAULT_BUBBLE_STATES } from './src/pet/state.js'
 import { activityConfig } from './src/pet/activity.js'
 import { bridgeHostEvents } from './src/pet/events.js'
-import { loadAtlas, artForState, bubbleArt, bubbleArtByFile, atlasReport } from './src/pet/atlas.js'
-import { pickEmoteFile, EMOTE_BY_KEY } from './src/pet/emotes.js'
+import { loadAtlas, artForState, bubbleArtByFile, atlasReport } from './src/pet/atlas.js'
+import { pickEmoteFile, pickPoolEmote, EMOTE_BY_KEY } from './src/pet/emotes.js'
 import { shortIdsFor } from './src/pet/shortid.js'
 import { createHub } from './src/pet/hub.js'
 import { createHandler, newToken, ROUTE_PREFIX } from './src/pet/routes.js'
@@ -302,33 +302,44 @@ export function apply (ctx, config) {
   /** 上一张按状态挑出来的表情（下次尽量不重复）。 */
   let lastEmoteFile = null
 
+  /**
+   * 挑一张气泡图（状态机唯一的选图入口）。
+   *
+   * 抽成具名函数是为了**能被真正测到**：`exposed.pickBubbleImage` 指向的就是
+   * 它本身，状态机用的也是它 —— 不是手抄副本。
+   */
+  const pickBubbleImage = (key, seed) => {
+    if (!settings.get().bubble || !settings.get().bubbleImages) return null
+    // 返回**整条记录**（含 `hasText`）而不只是路径：状态机需要知道这张图
+    // 是否已经把文字画进去了，才决定要不要叠 Host 文案 ——
+    // 自带中文的贴纸再叠一句，屏幕上会出现两段互相打架的文字（契约 §4）。
+    //
+    // ⭐ 表情**结合状态**：先按 key 查语义映射（出错配生气、完成配庆祝），
+    // 映射里没有这个 key 才回落到全池轮换。
+    // 曾经这里是纯 `bubbleArt(atlas, seed)`（按索引取模、忽略 key），
+    // 于是"刚报错就弹好耶""刚完成就弹庄一直哭"——用户直接反馈过。
+    const emote = pickEmoteFile(key, seed, lastEmoteFile)
+    if (emote !== null) {
+      const rec = bubbleArtByFile(atlas, emote)
+      if (rec !== null) {
+        lastEmoteFile = rec.file
+        return rec
+      }
+      // 映射里的文件在清单里不存在（素材被换过）→ 不要静默变成"没表情"，
+      // 记一笔并回落到全池，免得整个状态哑掉。
+      logger?.debug?.(`zhuang-fangyi-pet: 映射里的表情不在清单里：${emote}`)
+    }
+    // 全池兜底：用 `pickPoolEmote` 而不是 `bubbleArt` —— 后者是纯 index 取模，
+    // **不认识排除名单**，会随机撒出「么么哒」「晚安啦」这类语义太强的图。
+    // （这个名单以前只导出、只被测试引用，运行时从没读过，等于形同虚设。）
+    const fallback = pickPoolEmote(atlas?.bubble, seed)
+    if (fallback !== null) lastEmoteFile = fallback.file
+    return fallback
+  }
+
   const machine = createPetState({
     config: machineConfig(),
-    pickBubbleImage: (key, seed) => {
-      if (!settings.get().bubble || !settings.get().bubbleImages) return null
-      // 返回**整条记录**（含 `hasText`）而不只是路径：状态机需要知道这张图
-      // 是否已经把文字画进去了，才决定要不要叠 Host 文案 ——
-      // 自带中文的贴纸再叠一句，屏幕上会出现两段互相打架的文字（契约 §4）。
-      //
-      // ⭐ 表情**结合状态**：先按 key 查语义映射（出错配生气、完成配庆祝），
-      // 映射里没有这个 key 才回落到全池轮换。
-      // 曾经这里是纯 `bubbleArt(atlas, seed)`（按索引取模、忽略 key），
-      // 于是"刚报错就弹好耶""刚完成就弹庄一直哭"——用户直接反馈过。
-      const emote = pickEmoteFile(key, seed, lastEmoteFile)
-      if (emote !== null) {
-        const rec = bubbleArtByFile(atlas, emote)
-        if (rec !== null) {
-          lastEmoteFile = rec.file
-          return rec
-        }
-        // 映射里的文件在清单里不存在（素材被换过）→ 不要静默变成"没表情"，
-        // 记一笔并回落到全池，免得整个状态哑掉。
-        logger?.debug?.(`zhuang-fangyi-pet: 映射里的表情不在清单里：${emote}`)
-      }
-      const fallback = bubbleArt(atlas, seed)
-      if (fallback !== null) lastEmoteFile = fallback.file
-      return fallback
-    }
+    pickBubbleImage
   })
 
   // 诊断信息（`/pet/diag` 暴露，用于区分"代码没生效"与"进程没重载"）。
@@ -958,6 +969,18 @@ export function apply (ctx, config) {
       atlas: () => atlasReport(atlas),
       settings: () => settings.get(),
       updateSettings: patch => settings.update(patch),
+      /**
+       * 状态机实际使用的**选图函数本身**（不是副本）。
+       *
+       * 为什么把它暴露出来：兜底路径原先用 `bubbleArt`（纯 index 取模），
+       * **不认识排除名单** —— 而这条缺陷没有任何测试能发现，因为
+       * 断言只能看到"名单存在"，看不到"运行时有没有读它"。
+       *
+       * 暴露真函数后，e2e 可以直接断言：
+       * 无论传什么 key，返回的图都**不在** `EMOTE_EXCLUDE_FROM_RANDOM` 里。
+       * 这测的是运行路径本身，不是它的手抄副本（这个教训已经吃过四次）。
+       */
+      pickBubbleImage: (key, seed) => pickBubbleImage(key, seed),
       launcher
     }
     if (typeof ctx.provide === 'function') {

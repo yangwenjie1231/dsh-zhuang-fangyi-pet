@@ -18,6 +18,12 @@
  */
 
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+/** 包根（测试要读真实 `art/pet/pet.json`）。 */
+const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 
 import {
   createPetState,
@@ -37,6 +43,7 @@ import {
   normalizeEmoteKey,
   emotePool,
   pickEmoteFile,
+  pickPoolEmote,
   emoteCoverage
 } from '../src/pet/emotes.js'
 import { shortIdsFor } from '../src/pet/shortid.js'
@@ -1155,6 +1162,82 @@ ok('排除名单里的图**不该**出现在随机回落里（语义太强）', 
   for (const f of EMOTE_EXCLUDE_FROM_RANDOM) {
     assert.ok(typeof f === 'string' && f.startsWith('bubble/'), `排除名单项格式不对：${f}`)
   }
+})
+
+/* ── ⭐ 排除名单必须**真的生效**，不能只是导出 ────────────────────────────
+ *
+ * 这一节是被一个真实缺口逼出来的：`EMOTE_EXCLUDE_FROM_RANDOM` 曾**只导出、
+ * 只被测试引用，运行时从没读过它** —— 于是"全池兜底"那条路径仍然可能随机
+ * 撒出「么么哒」「晚安啦」，名单形同虚设。而上面那条断言只检查**格式**，
+ * 恰好不能发现"没人用它"。
+ *
+ * 教训（与之前几次同源）：**断言要打在行为上，不是打在数据形状上。**
+ * ──────────────────────────────────────────────────────────────────────── */
+
+ok('⭐ pickPoolEmote 跳过排除名单里的图（真跳过，不是只在名单里列出）', () => {
+  const excluded = EMOTE_EXCLUDE_FROM_RANDOM[0]
+  // 池子构造成：某个 seed 恰好落在排除图上，紧跟其后是可用的图。
+  const pool = [{ file: excluded }, { file: 'bubble/17-yay.png' }]
+  const got = pickPoolEmote(pool, 0)
+  assert.equal(got.file, 'bubble/17-yay.png',
+    `seed=0 命中的是排除图 ${excluded}，必须顺延到下一张`)
+})
+
+ok('⭐ 排除图遍布全池时也能挑到可用的一张（不因排除而没表情）', () => {
+  const pool = [
+    ...EMOTE_EXCLUDE_FROM_RANDOM.map(f => ({ file: f })),
+    { file: 'bubble/17-yay.png' }
+  ]
+  for (let s = 0; s < pool.length + 3; s++) {
+    assert.equal(pickPoolEmote(pool, s)?.file, 'bubble/17-yay.png',
+      `seed=${s} 必须跳过全部排除图`)
+  }
+})
+
+ok('⭐ 全池都被排除时退回候选（有表情 > 守名单）', () => {
+  // 极端情形：素材只剩排除图。宁可撒语义强的，也不要"没表情"。
+  const pool = EMOTE_EXCLUDE_FROM_RANDOM.map(f => ({ file: f }))
+  const got = pickPoolEmote(pool, 0)
+  assert.ok(got !== null && EMOTE_EXCLUDE_FROM_RANDOM.includes(got.file),
+    '全部被排除时不该返回 null（那会让状态哑掉）')
+})
+
+ok('pickPoolEmote 对空/非法池安全返回 null（不抛）', () => {
+  assert.equal(pickPoolEmote([], 0), null)
+  assert.equal(pickPoolEmote(null, 0), null)
+  assert.equal(pickPoolEmote(undefined, 3), null)
+  assert.equal(pickPoolEmote([null, undefined], 0), null)
+})
+
+ok('⭐ 真实清单：每种状态池挑出来的图都不在排除名单里（端到端口径）', () => {
+  // 用**真实 pet.json** 跑一遍：按状态挑图时，排除名单不该漏出来。
+  // 这一条把"名单"和"真实素材"绑在一起 —— 素材换了也会被复查。
+  const atlas = normalizeAtlas(JSON.parse(fs.readFileSync(
+    path.join(ROOT, 'art', 'pet', 'pet.json'), 'utf8')))
+  const files = atlas.bubble.map(b => b.file)
+  for (const f of EMOTE_EXCLUDE_FROM_RANDOM) {
+    assert.ok(files.includes(f),
+      `排除名单里的 ${f} 不在真实清单里 —— 名单过期了（应随素材更新）`)
+  }
+  // 兜底路径必须永远挑得到非排除图（除非全池都是排除图，实际不是）。
+  for (let s = 0; s < 20; s++) {
+    const pick = pickPoolEmote(atlas.bubble, s)
+    assert.ok(pick !== null, `seed=${s} 兜底不该为 null`)
+    assert.ok(!EMOTE_EXCLUDE_FROM_RANDOM.includes(pick.file),
+      `seed=${s} 兜底撒出了排除图：${pick.file}`)
+  }
+})
+
+ok('⭐ atlasReport 报出表情覆盖率与排除数（诊断可见，不再只导出）', () => {
+  const atlas = normalizeAtlas(JSON.parse(fs.readFileSync(
+    path.join(ROOT, 'art', 'pet', 'pet.json'), 'utf8')))
+  const rep = atlasReport(atlas)
+  assert.ok(rep.emotes && typeof rep.emotes === 'object', 'report 应带 emotes 覆盖块')
+  assert.equal(typeof rep.emotes.usedCount, 'number')
+  assert.equal(typeof rep.emotes.unusedCount, 'number')
+  assert.ok(Array.isArray(rep.emotes.unused), 'unused 应是数组（供诊断列出）')
+  assert.equal(rep.excludedCount, EMOTE_EXCLUDE_FROM_RANDOM.length,
+    '排除数应等于名单长度')
 })
 section('13.7 会话短标识（shortid.js）—— 同名消歧')
 

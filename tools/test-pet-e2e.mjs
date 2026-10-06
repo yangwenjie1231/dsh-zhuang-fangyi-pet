@@ -22,6 +22,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { normalizeSettings } from '../src/settings.js'
+import { EMOTE_BY_KEY, EMOTE_EXCLUDE_FROM_RANDOM } from '../src/pet/emotes.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.join(HERE, '..')
@@ -631,6 +632,70 @@ await ok('素材白名单拒绝清单外的文件（目录遍历防线在真实�
     const res = await fetch(`${ROUTE}/art/${encodeURIComponent(evil)}`)
     assert.equal(res.status, 404, `${evil} 应 404，实际 ${res.status}`)
   }
+})
+
+/* ── ⭐ 选图函数必须走**运行路径**，且真的读排除名单 ──────────────────────
+ *
+ * 这一节针对一个**真实存在过**的缺口：`EMOTE_EXCLUDE_FROM_RANDOM` 导出了、
+ * 被单测引用了，但运行时的兜底路径用的是 `bubbleArt(atlas, seed)` —— 纯
+ * index 取模，**完全不认识名单**。于是"全池随机"仍会撒出「么么哒」「晚安啦」。
+ *
+ * 为什么单测发现不了：单测只能断言"名单存在且格式对"，看不到"运行时有没有读"。
+ * 所以这里**取 `exposed.pickBubbleImage`** —— 它是状态机实际使用的那个函数
+ * 本身（`index.js` 里注入给 `createPetState` 的就是它），不是手抄副本。
+ *
+ * 教训已经吃过四次：**断言要打在运行路径上**。凑一个"看起来像"的本地函数
+ * 再断言，等于自证。
+ * ──────────────────────────────────────────────────────────────────────── */
+
+await ok('⭐ exposed.pickBubbleImage 就是状态机用的那个函数（同一引用）', async () => {
+  const svc = ctx.__services?.get('zhuangFangyiPet')
+  assert.ok(svc !== undefined, '未暴露 zhuangFangyiPet 服务')
+  assert.equal(typeof svc.pickBubbleImage, 'function')
+  // 真函数应该吃 (key, seed) 并返回清单里的**整条记录**（含 hasText）。
+  const rec = svc.pickBubbleImage('happy', 0)
+  assert.ok(rec !== null && typeof rec === 'object', `应返回记录对象，实际 ${JSON.stringify(rec)}`)
+  assert.equal(typeof rec.file, 'string', '记录必须带 file')
+  assert.equal(typeof rec.hasText, 'boolean', '记录必须带 hasText（状态机据此决定叠不叠文案）')
+})
+
+await ok('⭐⭐ 运行路径的兜底**永不**撒出排除名单里的图（未知 key → 走全池）', async () => {
+  const svc = ctx.__services.get('zhuangFangyiPet')
+  // 未知 key 必然落到全池兜底分支 —— 正是原先那处漏读名单的路径。
+  // 扫遍整个池长范围，任何一次都不许命中排除图。
+  const atlas = JSON.parse((await get('/api/zhuang-fangyi/pet/atlas')).body)
+  const poolLen = atlas.bubble.length
+  const seen = new Set()
+  for (let seed = 0; seed < poolLen * 2; seed += 1) {
+    const rec = svc.pickBubbleImage('__no_such_key__', seed)
+    assert.ok(rec !== null, `seed=${seed} 兜底不该没表情（会整个状态哑掉）`)
+    assert.ok(
+      !EMOTE_EXCLUDE_FROM_RANDOM.includes(rec.file),
+      `seed=${seed} 兜底撒出了排除图：${rec.file}`
+    )
+    seen.add(rec.file)
+  }
+  // 反向确认这条测试**有区分度**：兜底确实在轮换，而不是永远返回同一张。
+  assert.ok(seen.size > 1, `兜底应轮换多张，实际只见过 ${seen.size} 张 —— 断言无区分度`)
+})
+
+await ok('⭐ 已知 key 走专属池，且池内图都在清单里（映射不悬空）', async () => {
+  const svc = ctx.__services?.get('zhuangFangyiPet')
+  assert.ok(svc !== undefined, '未暴露 zhuangFangyiPet 服务')
+  const atlas = JSON.parse((await get('/api/zhuang-fangyi/pet/atlas')).body)
+  const disk = new Set(atlas.bubble.map(b => b.file))
+  let checkedKeys = 0
+  for (const key of Object.keys(EMOTE_BY_KEY)) {
+    for (const file of EMOTE_BY_KEY[key]) {
+      assert.ok(disk.has(file),
+        `映射里的 ${file}（key=${key}）不在真实清单里 —— 素材换过而映射没跟`)
+    }
+    const rec = svc.pickBubbleImage(key, 0)
+    assert.ok(rec !== null && disk.has(rec.file),
+      `key=${key} 挑出来的图不在清单里：${JSON.stringify(rec)}`)
+    checkedKeys += 1
+  }
+  assert.ok(checkedKeys >= 9, `应覆盖全部状态池，实际只查了 ${checkedKeys} 个 key`)
 })
 
 /* ══════════════════════════════════════════════════════════════════════════
