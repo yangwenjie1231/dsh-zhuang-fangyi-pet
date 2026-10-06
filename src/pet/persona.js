@@ -178,6 +178,93 @@ export function readPersona (dir, name, logger) {
 }
 
 /**
+ * 共享背景目录（`personas/shared/`，**加法人设**的"底座"）。
+ *
+ * 用户的原话："基于通用的世界观提示词加上不同的语言风格"、"背景可以共享"。
+ * 所以目录结构是：
+ * ```
+ * personas/
+ *   shared/          ← 共享背景（世界观/身份/称呼…），按文件名顺序**全部拼接**
+ *     庄方宜-背景.md
+ *   default.md       ← 语言风格（只写"她怎么说话"，不重复世界观）
+ *   严谨.md          ← 另一种风格
+ * ```
+ * 最终人设 = shared/*.md（字典序）+ 所选风格。
+ * `shared/` 不存在 → 只用风格（旧式自包含人设**完全兼容**）。
+ */
+export const SHARED_DIR_NAME = 'shared'
+
+/**
+ * 列出共享背景文件（按文件名排序；目录不存在 → 空数组，绝不抛）。
+ *
+ * @param {string} dir - `personas/` 目录
+ * @param {object} [logger]
+ * @returns {{items: object[], dir: string}}
+ */
+export function loadShared (dir, logger) {
+  const sharedDir = path.join(dir, SHARED_DIR_NAME)
+  let entries = []
+  try {
+    entries = fs.readdirSync(sharedDir)
+  } catch (error) {
+    if (error?.code !== 'ENOENT') {
+      logger?.warn?.(`zhuang-fangyi-pet: 共享背景目录读取失败（${error?.message ?? error}）`)
+    }
+    return { items: [], dir: sharedDir }
+  }
+  const items = []
+  for (const entry of entries.sort()) {
+    if (!entry.toLowerCase().endsWith(PERSONA_EXT)) continue
+    const name = entry.slice(0, -PERSONA_EXT.length)
+    let text = ''
+    let bytes = 0
+    try {
+      text = fs.readFileSync(path.join(sharedDir, entry), 'utf8')
+      bytes = Buffer.byteLength(text, 'utf8')
+    } catch (error) {
+      logger?.warn?.(`zhuang-fangyi-pet: 共享背景读取失败（已跳过）：${entry}（${error?.message ?? error}）`)
+      continue
+    }
+    items.push({ name, file: entry, bytes, preview: firstLine(text) })
+  }
+  return { items, dir: sharedDir }
+}
+
+/** 读全部共享背景的拼接文本（按文件名序；没有 → ''）。 */
+export function readSharedText (dir, logger) {
+  const { items } = loadShared(dir, logger)
+  const parts = []
+  for (const item of items) {
+    try {
+      const text = fs.readFileSync(path.join(dir, SHARED_DIR_NAME, item.file), 'utf8')
+      if (text.trim() !== '') parts.push(text.trim())
+    } catch { /* loadShared 刚读过，理论不会 */ }
+  }
+  return parts.join('\n\n')
+}
+
+/**
+ * **加法组合**：共享背景 + 所选风格 = 最终人设。
+ *
+ * @param {string} dir - `personas/` 目录
+ * @param {string} styleName - 风格人设名（顶层 .md）
+ * @param {object} [logger]
+ * @returns {{text: string|null, sharedCount: number, style: string}}
+ *   `text` = 拼好的最终文本；风格文件不存在 → null
+ */
+export function composePersona (dir, styleName, logger) {
+  const style = readPersona(dir, styleName, logger)
+  if (style === null) return { text: null, sharedCount: 0, style: styleName }
+  const shared = readSharedText(dir, logger)
+  if (shared === '') return { text: style.trim(), sharedCount: 0, style: styleName }
+  return {
+    text: shared + '\n\n' + style.trim(),
+    sharedCount: loadShared(dir, logger).items.length,
+    style: styleName
+  }
+}
+
+/**
  * 标题：第一行 `# xxx` 里的 xxx；没有就用文件名。
  * 抽出来是为了"列表里显示的名字"与"文件里写的名字"不会两处不一致。
  */
@@ -260,7 +347,10 @@ export function applyPersona (opts) {
   if (typeof workspaceDir !== 'string' || workspaceDir === '') {
     return { ok: false, reason: 'no-workspace' }
   }
-  const body = readPersona(personaDir, name, logger)
+  // ⚠️ 写入的是**加法组合**后的文本（共享背景 + 风格）——
+  // AGENTS.md 兜底必须与 section 路看到同一个角色，否则两条路人设不一致。
+  const composed = composePersona(personaDir, name, logger)
+  const body = composed.text
   if (body === null) return { ok: false, reason: 'unknown-persona' }
 
   const file = path.join(workspaceDir, 'AGENTS.md')

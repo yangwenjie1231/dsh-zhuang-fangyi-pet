@@ -183,6 +183,7 @@ function readBody (req) {
  *   缺失时 `/pet/interact` 返回 503
  * @param {object} [deps.chat] - 聊天（`{status(), send(text)}`）；缺失时 503
  * @param {object} [deps.personas] - 人设（`{list(), select(name)}`）；缺失时 503
+ * @param {object} [deps.memory] - 记忆（`{get(), set(text)}`）；缺失时 503
  * @param {() => object} deps.getSettings - 取当前设置
  * @param {(next: object) => object} deps.setSettings - 覆盖设置（归一化后返回）
  * @param {() => object|undefined} deps.connection - 取 `connection` 服务
@@ -551,6 +552,46 @@ export function createHandler (deps) {
           if (result.ok !== true) {
             // 400 而不是 500：名字不在列表里是**调用方的错**，不是内部故障。
             sendJson(res, 400, { error: result.reason ?? 'bad persona', allowed: result.allowed ?? [] })
+            return
+          }
+          sendJson(res, 200, result)
+          return
+        }
+        sendJson(res, 405, { error: 'method not allowed' })
+        return
+      }
+
+      // ── 记忆（契约 §3 新增）───────────────────────────────────────────
+      //
+      // `GET  /pet/memory` → 记忆全文（设置页要显示/编辑它）
+      // `POST /pet/memory {text}` → 整体替换（用户手编）
+      //
+      // ⚠️ 替换是**整体**语义（不是追加）：设置页给的是一个文本框，
+      // 用户按保存就该看到自己写的那份。追加语义会让"删掉一行"变成不可能。
+      if (route === '/memory') {
+        if (deps.memory === undefined || deps.memory === null) {
+          sendJson(res, 503, { error: 'unavailable', reason: '宿主未装配记忆' })
+          return
+        }
+        if (req.method === 'GET') {
+          sendJson(res, 200, deps.memory.get())
+          return
+        }
+        if (req.method === 'POST' || req.method === 'PUT') {
+          let parsed
+          try {
+            parsed = JSON.parse(await readBody(req))
+          } catch {
+            sendJson(res, 400, { error: 'invalid json' })
+            return
+          }
+          if (typeof parsed?.text !== 'string') {
+            sendJson(res, 400, { error: 'text must be a string' })
+            return
+          }
+          const result = deps.memory.set(parsed.text)
+          if (result.ok !== true) {
+            sendJson(res, 500, { error: result.reason ?? 'write-failed' })
             return
           }
           sendJson(res, 200, result)

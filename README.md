@@ -336,11 +336,20 @@ working(90) > waiting(80) > thinking(70) > error(60)
 - **聊天**：✎ 输入条多了「聊天 / 指定对话」两种投递目标。聊天走**真实 DSH 会话**
   （专用工作区 `~/Downloads/庄方宜`），所以你能在 DSH 界面里看到这段对话、
   接着聊、翻历史 —— 而不是一个藏在桌宠里的黑盒。回复会显示在桌宠气泡里。
-- **可切换人设**：把你的提示词写成 `$DSH_HOME/zhuang-fangyi-pet/personas/<名字>.md`，
-  设置页下拉切换（或点"重新扫描目录"）。切换 = 同步进工作区的 `AGENTS.md`，
-  由 DSH 自己的 `dsh-agent-instructions` 加载 —— 不自己发明提示词注入。
+- **可切换人设（加法）**：人设 = **共享背景** + **语言风格**。
+  - `personas/shared/*.md` 是共享背景（世界观、身份、称呼、背景锚点、行为准则），
+    按文件名序**全部拼接**在每种风格前面 —— **改一次，所有风格一起变**；
+  - `personas/<风格>.md` 只写"她怎么说话"（语气、用词、句法、禁忌、口头禅、场景示例）；
+  - 设置页里能看到共享背景的文件清单、当前风格拼了几份，也能一键重新扫描；
+  - 没有 `shared/` 目录时行为完全不变（旧式自包含人设兼容）。
+  - 切换 = 把组合后的文本作为系统提示词 section 挂到聊天会话上。
   ⚠️ **绝不覆盖你手写的 `AGENTS.md`**：判据是"插件标记必须在第一行"，
   没有标记就说明那是你的文件，插件会拒绝并如实报错。
+- **跨会话共享的长期记忆**：`$DSH_HOME/zhuang-fangyi-pet/memory.md`，
+  以 `zf-pet:memory` section 注入到**每个**聊天会话 —— 换会话、重开会话都不会失忆。
+  每次回复后可用宿主默认模型**自动提炼** 0~3 条值得长期记住的事
+  （称呼、项目、约定…）追加进去；文件超 24KB 时裁掉**最旧**的行。
+  设置页里可以直接编辑这份记忆（整体替换，空串 = 清空）。
 
 ---
 
@@ -375,12 +384,13 @@ node tools/test-pet-e2e.mjs          # 真实装配端到端（47 项）
 node tools/test-pet-pomodoro.mjs     # 番茄钟（假时钟跑完整 4 轮循环）（45 项）
 node tools/test-pet-voice.mjs        # 语音白名单 + 清单/磁盘一致性（32 项）
 node tools/test-pet-interactions.mjs # 互动防刷三道闸（27 项）
-node tools/test-pet-chat.mjs         # 人设写入安全 + 回复解析（43 项）
+node tools/test-pet-chat.mjs         # 加法人设 + 写入安全 + 回复解析（50 项）
+node tools/test-pet-memory.mjs       # 长期记忆：解析/裁剪/文件 IO（21 项）
 node tools/test-pet-native-e2e.mjs   # 真起 exe、真连宿主的集成测试（12 项）
 bin\dsh-zhuang-fangyi-pet.exe --selftest --dark 0   # exe 自检（173 项）
 ```
 
-九套共 **551 项断言** + exe 自检 **173 项**，无框架依赖（纯 `node:assert`）。
+十套共 **593 项断言** + exe 自检 **173 项**，无框架依赖（纯 `node:assert`）。
 端到端那套用**真实** `apply()` + **真实** `pet.json` + 真读 SSE 帧，
 验证「宿主事件 → 状态机 → 推送」整条链路；
 `native-e2e` 那套更进一步 —— 用真实 `index.js` 起宿主、经 `ctx.subprocess`

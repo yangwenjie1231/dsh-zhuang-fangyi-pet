@@ -428,18 +428,29 @@ await ok('⭐ 有 sessionController 时：list() 的标题进快照，指定会�
 
 section('1b. 人设 → 系统提示词（会话级替换）')
 
-await ok('⭐ 首次运行播种：default.md 出现且内容是庄方宜完整人设', async () => {
-  const p = path.join(tmpHome, 'zhuang-fangyi-pet', 'personas', 'default.md')
-  assert.ok(fs.existsSync(p), `播种文件不存在：${p}`)
-  const text = fs.readFileSync(p, 'utf8')
-  assert.ok(text.includes('# 庄方宜'), '应有标题（列表显示用）')
+await ok('⭐ 首次运行播种：共享背景 + 风格两份都在（加法人设）', async () => {
+  const dir = path.join(tmpHome, 'zhuang-fangyi-pet', 'personas')
+  const styleFile = path.join(dir, 'default.md')
+  assert.ok(fs.existsSync(styleFile), `风格文件不存在：${styleFile}`)
+  // 加法人设：世界观在 shared/，风格只写"她怎么说话"
+  const sharedDir = path.join(dir, 'shared')
+  const sharedFiles = fs.existsSync(sharedDir) ? fs.readdirSync(sharedDir) : []
+  assert.ok(sharedFiles.length > 0, `共享背景没播种：${sharedDir}`)
+  const sharedText = fs.readFileSync(path.join(sharedDir, sharedFiles[0]), 'utf8')
+  const styleText = fs.readFileSync(styleFile, 'utf8')
+  assert.ok(sharedText.includes('=== 世界观 ==='), '共享背景应含世界观')
+  assert.ok(sharedText.includes('角色身份'), '共享背景应含角色身份')
+  assert.ok(styleText.includes('### 三、说话方式'), '风格文件应含说话方式')
+  assert.ok(!styleText.includes('=== 世界观 ==='),
+    '风格文件**不该**重复世界观（那是共享背景的职责 —— 否则改一次要改 N 处）')
   // 用户点名的台词必须逐字在（防止我"顺手改写"了人设内容）
+  const both = sharedText + styleText
   for (const line of ['能咬牙坚持下来，就不算输。', '人还在，那就什么都在。',
     '冬天总会过去，春天总会再来。']) {
-    assert.ok(text.includes(line), `台词缺失：${line}`)
+    assert.ok(both.includes(line), `台词缺失：${line}`)
   }
   // 给我的指令（"注意合理替换…"）绝不能进人设正文 —— 模型读到会困惑
-  assert.ok(!text.includes('仅在聊天中替换'), '元指令不该出现在人设正文里')
+  assert.ok(!both.includes('仅在聊天中替换'), '元指令不该出现在人设正文里')
 })
 
 await ok('GET /personas 列出播种的人设，标题取自 # 行', async () => {
@@ -448,7 +459,7 @@ await ok('GET /personas 列出播种的人设，标题取自 # 行', async () =>
   const body = JSON.parse(r.body)
   assert.ok(body.names.includes('default'), '应有 default')
   const d = body.items.find(i => i.name === 'default')
-  assert.equal(d.title, '庄方宜', `标题应取 # 行，实际 ${JSON.stringify(d?.title)}`)
+  assert.equal(d.title, '庄方宜（默认风格）', `标题应取 # 行，实际 ${JSON.stringify(d?.title)}`)
 })
 
 /**
@@ -518,7 +529,7 @@ await ok('⭐⭐ 聊天发送 → 人设作为 deployment:persona-prefix 注册�
   assert.equal(created.length, 1)
   assert.equal(created[0].cwd, path.join(chatHome, 'ws'))
   // ⭐ 人设 section 已注册到 agent 作用域，用的就是官方人设槽位的名字
-  assert.equal(registered.length, 1, `应注册恰好一个 section，实际 ${registered.length}`)
+  assert.equal(registered.length, 2, `应注册人设 + 记忆两个 section，实际 ${registered.length}`)
   assert.equal(registered[0].name, 'deployment:persona-prefix',
     `必须用官方人设槽位名（遮蔽部署人设），实际 ${registered[0].name}`)
   assert.equal(registered[0].interpolate, false,
@@ -526,6 +537,14 @@ await ok('⭐⭐ 聊天发送 → 人设作为 deployment:persona-prefix 注册�
   assert.ok(registered[0].text.includes('取代默认的助手人设'), '应有替换声明')
   assert.ok(registered[0].text.includes('能咬牙坚持下来，就不算输。'),
     '人设正文应逐字进入 section')
+  // ⭐ 共享背景必须**拼进**人设正文（加法人设：世界观 + 风格）
+  assert.ok(registered[0].text.includes('=== 世界观 ==='),
+    '共享背景（世界观）应拼在人设前面 —— 否则"改一次所有风格一起变"不成立')
+  // ⭐⭐ 记忆 section：跨会话共享的那份记忆也必须挂上
+  assert.equal(registered[1].name, 'zf-pet:memory',
+    `应有记忆 section，实际 ${registered[1].name}`)
+  assert.equal(registered[1].interpolate, false, '记忆也可能含 {{，必须关插值')
+  assert.ok(registered[1].text.includes('跨会话共享'), '记忆 section 应说明它是共享的')
   // ⭐ section 路成功 → **不写** AGENTS.md（否则人设文本进提示词两遍）
   assert.ok(!fs.existsSync(path.join(chatHome, 'ws', 'AGENTS.md')),
     'section 路成功时不应再写 AGENTS.md（会双重注入）')
@@ -583,17 +602,21 @@ await ok('⭐ 切换人设 → 旧 section 先 dispose 再挂新的（不撞名�
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ text: '你好' })
   })
-  assert.equal(registered.length, 1)
+  assert.equal(registered.length, 2, '首次应注册人设 + 记忆两个 section')
   const before = asm.disposeCount()
   const sw = await fetch(`${base}/api/zhuang-fangyi/pet/personas`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ name: 'strict' })
   })
   assert.equal(sw.status, 200, `切换应 200，实际 ${sw.status}`)
-  assert.equal(registered.length, 2, '切换后应注册新 section')
-  assert.equal(asm.disposeCount(), before + 1, '旧 section 必须先 dispose（否则同名注册会抛/残留）')
-  assert.ok(registered[1].text.includes('只说结论。'), '新 section 应含新人设正文')
-  assert.ok(!registered[1].text.includes('能咬牙坚持下来'), '旧人设不该残留')
+  assert.equal(registered.length, 4, '切换后应重新注册人设 + 记忆（共 4 个）')
+  // ⭐ 旧的两个 section 都必须先 dispose（同名注册两次会抛）
+  assert.equal(asm.disposeCount(), before + 2,
+    `旧的人设与记忆 section 都必须先 dispose（+2），实际 +${asm.disposeCount() - before}`)
+  assert.ok(registered[2].text.includes('只说结论。'), '新 section 应含新人设正文')
+  assert.ok(!registered[2].text.includes('大量使用省略号'), '旧风格不该残留（那条是默认风格专属）')
+  // 共享背景仍然拼在新风格前面（加法人设对每种风格都成立）
+  assert.ok(registered[2].text.includes('=== 世界观 ==='), '新风格也应拼上共享背景')
   await ws.close()
   for (const d of local.__effects) if (typeof d === 'function') assert.doesNotThrow(() => d())
   fs.rmSync(path.join(personaDir, 'strict.md'), { force: true })

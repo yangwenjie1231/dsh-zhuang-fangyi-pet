@@ -34,6 +34,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
+import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 
 import { defaultSettings, normalizeSettings, SETTINGS_VERSION } from './src/settings.js'
@@ -50,12 +51,17 @@ import { createPomodoro } from './src/pet/pomodoro.js'
 import { loadVoice, resolveVoice, voiceReport } from './src/pet/voice.js'
 import { createAffection, INTERACT_KINDS, interactText, interactLabel } from './src/pet/interactions.js'
 import {
-  loadPersonas, applyPersona, readPersona, personaReport, DEFAULT_PERSONA_NAME
+  loadPersonas, applyPersona, composePersona, loadShared,
+  personaReport, DEFAULT_PERSONA_NAME
 } from './src/pet/persona.js'
 import {
   createChatState, extractAssistantText, bubbleText, validateChatText,
   DEFAULT_WORKSPACE_NAME
 } from './src/pet/chat.js'
+import {
+  memoryExtractionPrompt, parseMemoryFacts, mergeMemory,
+  readMemoryFile, writeMemoryFile, ensureMemoryFile, MEMORY_CAP_BYTES
+} from './src/pet/memory.js'
 
 /** 插件标识（Loader 行 id、token 层 source 共用）。 */
 export const name = 'zhuang-fangyi-pet'
@@ -503,28 +509,55 @@ export function apply (ctx, config) {
    * 当前挂在聊天会话上的人设 section（`{sessionId, persona, dispose}` 或 null）。
    *
    * 同名 section 在同一作用域注册两次会抛，所以换人设/换会话前必须先
-   * dispose 旧的 —— 这个状态就是那本账。
+   * dispose 旧的 —— 这个状态就是那本账（人设 + 记忆各一个 disposer）。
    */
   let personaSection = null
 
+  /** 收掉当前挂着的全部 section（幂等）。 */
+  const disposePersonaSection = () => {
+    if (personaSection === null) return
+    for (const d of personaSection.disposers ?? []) {
+      try { d() } catch { /* 会话已经没了 */ }
+    }
+    personaSection = null
+  }
+
   /**
-   * **首次运行播种**：把包里的人设样例（用户提供的庄方宜完整人设）放进
-   * `personas/`，让 `default` 一开始就是真角色而不是空壳。
+   * **首次运行播种**：把包里的人设样例放进 `personas/`。
    *
-   * 只在**目录为空**时播种：之后用户删掉它（想换自己的）不该被复活，
-   * 用户改过它更不该被覆盖 —— 那是不可逆的数据丢失。
+   * 加法结构：`shared/` 是**共享背景**（世界观/身份/称呼…，所有风格共用），
+   * 顶层 `.md` 是**语言风格**（只写"她怎么说话"，不重复世界观）。
+   * 两者独立播种：用户删掉某个风格不该让共享背景复活，反之亦然。
    */
   const seedPersonas = () => {
+    const seedDir = path.join(HERE, 'personas-seed')
     try {
-      // 先建目录：**首次运行时它还不存在**（readdir 会 ENOENT），
-      // 不先建的话播种永远不生效 —— 而那是这条功能唯一的一次执行机会。
+      // 共享背景：shared/ 目录缺或空 → 播种
+      const sharedDir = path.join(PERSONAS_DIR, 'shared')
+      fs.mkdirSync(PERSONAS_DIR, { recursive: true })
+      let sharedExisting = []
+      try {
+        sharedExisting = fs.readdirSync(sharedDir).filter(f => f.toLowerCase().endsWith('.md'))
+      } catch { sharedExisting = [] }
+      if (sharedExisting.length === 0) {
+        const seedShared = path.join(seedDir, 'shared')
+        if (fs.existsSync(seedShared)) {
+          fs.mkdirSync(sharedDir, { recursive: true })
+          for (const f of fs.readdirSync(seedShared)) {
+            fs.copyFileSync(path.join(seedShared, f), path.join(sharedDir, f))
+          }
+          boot(`共享背景已播种（${fs.readdirSync(sharedDir).length} 份）`)
+        }
+      }
+      // 风格：顶层没有 .md → 播种 default.md
+      // 不先建目录的话 readdir 永远 ENOENT —— 而那是这条功能唯一的一次执行机会。
       fs.mkdirSync(PERSONAS_DIR, { recursive: true })
       const existing = fs.readdirSync(PERSONAS_DIR).filter(f => f.toLowerCase().endsWith('.md'))
       if (existing.length > 0) return
-      const seed = path.join(HERE, 'personas-seed', 'default.md')
+      const seed = path.join(seedDir, 'default.md')
       if (!fs.existsSync(seed)) return
       fs.copyFileSync(seed, path.join(PERSONAS_DIR, 'default.md'))
-      boot('人设目录为空 → 已播种内置的庄方宜人设（default.md）')
+      boot('人设目录为空 → 已播种内置的庄方宜风格（default.md）')
     } catch (error) {
       boot(`人设播种失败（已忽略）：${error?.message ?? error}`)
     }
@@ -582,17 +615,20 @@ export function apply (ctx, config) {
   // 兜底：宿主没有 `resolveAgent` / agent 作用域拿不到 `systemPrompt` 时，
   // 退回 AGENTS.md 方案（写进聊天工作区，`dsh-agent-instructions` 会加载它）。
   const PERSONA_SECTION_NAME = 'deployment:persona-prefix'
+  /** 记忆 section 的名字与位置（紧挨人设之后、工具说明之前）。 */
+  const MEMORY_SECTION_NAME = 'zf-pet:memory'
+  const MEMORY_SECTION_ORDER = 10
 
   /**
-   * 给聊天会话注册/更新人设 section。
+   * 给聊天会话注册/更新人设 section（加法：共享背景 + 风格）与**共享记忆** section。
    *
    * @param {string} sessionId
    * @returns {Promise<{mode: 'section'|'agents'|'none', reason?: string}>}
    */
   const applyChatPersona = async sessionId => {
     const name = currentPersona()
-    const body = readPersona(PERSONAS_DIR, name, logger)
-    if (body === null) return { mode: 'none', reason: 'unknown-persona' }
+    const composed = composePersona(PERSONAS_DIR, name, logger)
+    if (composed.text === null) return { mode: 'none', reason: 'unknown-persona' }
     const svc = resolveSendService()
     if (svc === null || typeof svc.resolveAgent !== 'function') {
       return { mode: 'agents', reason: 'no-resolveAgent' }
@@ -613,24 +649,33 @@ export function apply (ctx, config) {
       const order = typeof sp.getSectionOrder === 'function'
         ? sp.getSectionOrder('DEPLOYMENT_PERSONA_PREFIX')
         : 0
-      // `interpolate: false`：人设正文里的 `{{` 保持字面（否则会被当成变量引用，
-      // 未定义的引用会让整次组装**抛错** —— 用户的人设里出现双花括号是迟早的事）。
-      const dispose = sp.section({
+      // 先收旧的（同名 section 在同一作用域注册两次会抛）。
+      disposePersonaSection()
+      // `interpolate: false`：人设/记忆正文里的 `{{` 保持字面（否则会被当成
+      // 变量引用，未定义的引用会让整次组装**抛错**）。
+      const disposers = []
+      const d1 = sp.section({
         name: PERSONA_SECTION_NAME,
         order: Number.isFinite(order) ? order : 0,
         text: '本会话的角色设定如下；它取代默认的助手人设。除工具调用等运行规范外，'
-          + '请始终以该角色的身份、语气与知识边界回应。\n\n' + body.trim(),
+          + '请始终以该角色的身份、语气与知识边界回应。\n\n' + composed.text.trim(),
         interpolate: false
       })
-      if (personaSection !== null && personaSection.dispose !== null) {
-        try { personaSection.dispose() } catch { /* 旧会话已没了 */ }
-      }
-      personaSection = {
-        sessionId,
-        persona: name,
-        dispose: typeof dispose === 'function' ? dispose : null
-      }
-      boot(`人设已作为系统提示词注册到聊天会话（${name}，section=${PERSONA_SECTION_NAME}）`)
+      disposers.push(typeof d1 === 'function' ? d1 : null)
+      // ⭐ 跨会话共享记忆：一份 memory.md，注入到**每个**聊天会话的作用域 ——
+      // 换会话/重开会话它都跟着走，这就是"不同会话共享 memory"。
+      const memoryText = ensureMemoryFile(dataDir)
+      const d2 = sp.section({
+        name: MEMORY_SECTION_NAME,
+        order: MEMORY_SECTION_ORDER,
+        text: '以下是你（庄方宜）与用户长期相处积累的记忆，跨会话共享；'
+          + '其中可能有过时的内容 —— 与当前对话冲突时以对话为准。\n\n'
+          + (memoryText.trim() === '' ? '（还没有记住什么。）' : memoryText.trim()),
+        interpolate: false
+      })
+      disposers.push(typeof d2 === 'function' ? d2 : null)
+      personaSection = { sessionId, persona: name, disposers: disposers.filter(d => d !== null) }
+      boot(`人设 + 记忆已注册到聊天会话（${name}，共享背景 ${composed.sharedCount} 份）`)
       return { mode: 'section' }
     } catch (error) {
       logger.warn?.(`zhuang-fangyi-pet: 人设 section 注册失败（退回 AGENTS.md）：${error?.message ?? error}`)
@@ -659,12 +704,7 @@ export function apply (ctx, config) {
   // 插件卸载 → 收掉挂着的 section。**不收的话**：宿主重载插件后旧的
   // `deployment:persona-prefix` scoped section 还在会话作用域里，
   // 新的一次注册又会插一份（或撞名抛错）—— 人设就泄漏到别的会话去了。
-  ctx.effect(() => () => {
-    if (personaSection !== null && personaSection.dispose !== null) {
-      try { personaSection.dispose() } catch { /* 会话已经没了 */ }
-    }
-    personaSection = null
-  }, 'zhuang-fangyi-pet: chat persona section')
+  ctx.effect(() => () => disposePersonaSection(), 'zhuang-fangyi-pet: chat persona section')
 
   /**
    * 解析聊天会话服务并**确保会话存在**。
@@ -721,13 +761,107 @@ export function apply (ctx, config) {
   }
 
   /**
+   * 最近一条用户发的聊天消息（**记忆提炼要用**）。
+   *
+   * 为什么记在这里：提炼需要"用户说了什么 + 她答了什么"这一对。
+   * 回复事件里只有她的答案，所以用户那句得先存下来。
+   */
+  let lastChatSent = null
+
+  /**
+   * 自动提炼记忆（**跨会话共享**）：把这一轮里值得长期记住的事追加到 `memory.md`。
+   *
+   * 设计取舍：
+   *   · **fire-and-forget**：绝不阻塞聊天，失败只记日志（记忆是加分项，不是必需项）；
+   *   · **只提炼这一轮**：全量提炼既贵又重复；已有记忆模型自己在 section 里看得到；
+   *   · **走宿主的 `ctx.llm`**：不自己拉 key、不自己算路由（`agentDefaultModel`
+   *     给的就是用户当前选的那个模型）；
+   *   · **提示词与解析都是纯函数**（`memory.js`），可单测。
+   *
+   * @param {string} userText
+   * @param {string} replyText
+   */
+  const extractChatMemory = (userText, replyText) => {
+    if (settings.get().memoryAuto !== true) return
+    if (typeof userText !== 'string' || userText.trim() === '') return
+    if (typeof replyText !== 'string' || replyText.trim() === '') return
+    // 全部塞进一个 async IIFE：调用方不等它（fire-and-forget）。
+    void (async () => {
+      try {
+        let llm = null
+        try {
+          llm = typeof ctx.get === 'function' ? ctx.get('llm') : undefined
+        } catch { llm = null }
+        if (llm === null || llm === undefined || typeof llm.stream !== 'function') {
+          logger.debug?.('zhuang-fangyi-pet: 宿主没有 llm 服务，跳过记忆提炼')
+          return
+        }
+        let route = null
+        try {
+          const picker = typeof ctx.get === 'function' ? ctx.get('agentDefaultModel') : undefined
+          route = typeof picker?.currentSelection === 'function' ? picker.currentSelection() : null
+        } catch { route = null }
+        const provider = route?.provider
+        const model = route?.model
+        if (typeof provider !== 'string' || typeof model !== 'string') {
+          logger.debug?.('zhuang-fangyi-pet: 拿不到默认模型路由，跳过记忆提炼')
+          return
+        }
+        const prompt = memoryExtractionPrompt(userText, replyText)
+        // 超时保护：提炼是后台任务，绝不能挂着一个请求不放。
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), 30000)
+        timer.unref?.()
+        let out = ''
+        try {
+          // 消息形状照抄宿主 `createUserMessage`：`{role, content:[{type:'text',text}], source, id}`。
+          const messages = [{
+            role: 'user',
+            id: randomUUID(),
+            content: [{ type: 'text', text: prompt }],
+            source: { kind: 'dsh-zhuang-fangyi-pet' }
+          }]
+          const stream = llm.stream({
+            provider,
+            model,
+            messages,
+            maxTokens: 200,
+            purpose: 'zhuang-fangyi-pet-memory',
+            signal: controller.signal
+          })
+          for await (const chunk of stream) {
+            // 只要正文增量；reasoning 增量不进记忆（那是她的"思考"，不是事实）。
+            if (chunk?.type === 'text-delta' && typeof chunk.text === 'string') out += chunk.text
+          }
+        } finally {
+          clearTimeout(timer)
+        }
+        const facts = parseMemoryFacts(out)
+        if (facts.length === 0) return
+        const current = readMemoryFile(dataDir) ?? ''
+        const next = mergeMemory(current, facts, Date.now(), { capBytes: MEMORY_CAP_BYTES })
+        if (writeMemoryFile(dataDir, next)) {
+          boot(`记忆 +${facts.length} 条：${facts.join(' | ').slice(0, 120)}`)
+          // 记忆变了 → 立刻把新的记忆 section 挂回聊天会话（下次组装就带上）。
+          // 不重挂的话要等下一次会话切换才生效，用户会觉得"它没记住"。
+          if (chat.sessionId !== null) {
+            void applyChatPersona(chat.sessionId).catch(() => {})
+          }
+        }
+      } catch (error) {
+        // 记忆提炼失败绝不能影响聊天本身（abort 也是正常路径）。
+        logger.debug?.(`zhuang-fangyi-pet: 记忆提炼失败（已忽略）：${error?.message ?? error}`)
+      }
+    })()
+  }
+
+  /**
    * 发一条聊天消息（**排队语义**，与气泡输入框一致）。
    *
    * ⚠️ `prompt()` 的两条必填约束与 `sendToSession` 完全相同
-   * （`mode` + 真 `AbortSignal`）—— 那个坑踩过两次，这里绝不重犯。
+   * （`mode` + `真 AbortSignal`）—— 那个坑踩过两次，这里绝不重犯。
    */
-  const sendChat = async rawText => {
-    const v = validateChatText(rawText)
+  const sendChat = async rawText => {    const v = validateChatText(rawText)
     if (!v.ok) {
       const error = new Error(v.reason === 'too-long' ? '消息太长' : '消息不能为空')
       error.code = v.reason === 'too-long' ? 'too-long' : 'empty'
@@ -742,6 +876,8 @@ export function apply (ctx, config) {
       mode: 'queue'
     }, new AbortController().signal)
     chat.markSent()
+    // 记住"这一轮用户说了什么" —— 收到回复时要拿它一起做记忆提炼。
+    lastChatSent = { text: v.text, at: Date.now() }
     if (chatStore !== null) {
       chatStore.value = chat.persist()
       chatStore.schedule()
@@ -1245,6 +1381,11 @@ export function apply (ctx, config) {
         durationMs: 12000
       })
       boot(`聊天回复进气泡（${line.length} 字）`)
+      // 记忆提炼：拿"用户那句 + 这句回复"去提炼值得长期记住的事。
+      // fire-and-forget —— 绝不让它拖慢气泡显示。
+      const sent = lastChatSent
+      lastChatSent = null
+      if (sent !== null) extractChatMemory(sent.text, text)
     } catch (error) {
       logger.warn?.(`zhuang-fangyi-pet: 聊天回复处理失败（已忽略）：${error?.message ?? error}`)
     }
@@ -1538,10 +1679,23 @@ export function apply (ctx, config) {
     },
     /** 人设（契约 §3 新增）：**可切换**是用户明确要求的。 */
     personas: {
-      list: () => ({
-        ...personaReport(personas, currentPersona()),
-        items: personas.items
-      }),
+      list: () => {
+        const shared = loadShared(PERSONAS_DIR, logger)
+        return {
+          ...personaReport(personas, currentPersona()),
+          items: personas.items,
+          /**
+           * 共享背景（加法人设的"底座"）：所有风格都拼在它后面。
+           * 设置页要把这几份文件显示出来 —— 用户才知道"世界观写在哪儿"。
+           */
+          shared: {
+            dir: shared.dir,
+            items: shared.items,
+            /** 当前风格实际拼上了几份共享背景（0 = 该风格是自包含的）。 */
+            used: composePersona(PERSONAS_DIR, currentPersona(), logger).sharedCount
+          }
+        }
+      },
       select: async name => {
         const rec = personas.byName.get(name)
         if (rec === undefined) {
@@ -1586,6 +1740,40 @@ export function apply (ctx, config) {
       reload: () => {
         personas = loadPersonas(PERSONAS_DIR, logger)
         return personaReport(personas, currentPersona())
+      }
+    },
+    /**
+     * 记忆（契约 §3 新增）：**跨会话共享**。
+     *
+     * `set` 是整体替换（用户在设置页里编辑），写成功后立刻重挂 section ——
+     * 否则要等下一次会话切换才生效，用户会觉得"改了没用"。
+     */
+    memory: {
+      get: () => {
+        const text = readMemoryFile(dataDir)
+        return {
+          /** 文件不存在时给头注释（用户打开就能看到格式说明）。 */
+          text: text ?? '',
+          bytes: Buffer.byteLength(text ?? '', 'utf8'),
+          capBytes: MEMORY_CAP_BYTES,
+          auto: settings.get().memoryAuto === true,
+          /** 记忆文件位置（设置页显示给用户，方便直接用编辑器改）。 */
+          file: path.join(dataDir, 'memory.md')
+        }
+      },
+      set: text => {
+        if (typeof text !== 'string') return { ok: false, reason: 'not-string' }
+        if (!writeMemoryFile(dataDir, text)) return { ok: false, reason: 'write-failed' }
+        boot(`记忆已更新（${Buffer.byteLength(text, 'utf8')} 字节）`)
+        // 立刻把新记忆挂回会话（下次组装就带上）。
+        if (chat.sessionId !== null) {
+          void applyChatPersona(chat.sessionId).catch(() => {})
+        }
+        return {
+          ok: true,
+          bytes: Buffer.byteLength(text, 'utf8'),
+          text
+        }
       }
     },
     /** 番茄钟状态存取（`/pet/pomodoro` 用；见 routes.js 的说明）。 */

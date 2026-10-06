@@ -1475,6 +1475,135 @@ await okAsync('聊天路由也受令牌/围栏保护（跨站请求被拒）', a
 await new Promise(resolve => chatServer.close(resolve))
 
 /* ══════════════════════════════════════════════════════════════════════════
+ * 5f. 记忆路由（契约 §3 新增，跨会话共享）
+ * ═════════════════════════════════════════════════════════════════════════ */
+section('5f. 记忆路由（/pet/memory）')
+
+let memText = '- 2026-01-01 用户叫小明\n'
+let memFail = false
+const memHandler = createHandler({
+  snapshot,
+  atlas: () => atlas,
+  artDir,
+  token: TOKEN,
+  hub,
+  logger: { warn () {}, debug () {}, info () {} },
+  connection: () => undefined,
+  onPosition: () => {},
+  onCommand: () => ({}),
+  memory: {
+    get: () => ({
+      text: memText,
+      bytes: Buffer.byteLength(memText, 'utf8'),
+      capBytes: 24 * 1024,
+      auto: true,
+      file: 'C:\\fake\\memory.md'
+    }),
+    set: text => {
+      if (memFail) return { ok: false, reason: 'write-failed' }
+      if (typeof text !== 'string') return { ok: false, reason: 'not-string' }
+      memText = text
+      return { ok: true, bytes: Buffer.byteLength(text, 'utf8'), text }
+    }
+  }
+})
+const memServer = http.createServer((req, res) => {
+  memHandler(req, res).catch(() => { if (!res.headersSent) res.writeHead(500); res.end() })
+})
+await new Promise(resolve => memServer.listen(0, '127.0.0.1', resolve))
+const MEM_BASE = `http://127.0.0.1:${memServer.address().port}`
+
+async function memCall (method, body) {
+  const res = await fetch(`${MEM_BASE}${ROUTE_PREFIX}/memory`, {
+    method,
+    headers: auth(body === undefined ? {} : { 'content-type': 'application/json' }),
+    body: body === undefined ? undefined : JSON.stringify(body)
+  })
+  return { status: res.status, body: await res.text() }
+}
+
+await okAsync('GET /memory 返回全文与容量信息', async () => {
+  const r = await memCall('GET')
+  assert.equal(r.status, 200, `状态码 ${r.status}`)
+  const b = JSON.parse(r.body)
+  for (const key of ['text', 'bytes', 'capBytes', 'auto', 'file']) {
+    assert.ok(key in b, `缺字段 ${key}`)
+  }
+  assert.ok(b.text.includes('用户叫小明'))
+  assert.equal(b.capBytes, 24 * 1024)
+})
+
+await okAsync('⭐⭐ POST /memory 真的整体替换（不是追加）', async () => {
+  memText = '- 旧的\n'
+  const r = await memCall('POST', { text: '- 全新的记忆\n' })
+  assert.equal(r.status, 200, `状态码 ${r.status}`)
+  assert.equal(memText, '- 全新的记忆\n', '必须整体替换')
+  assert.ok(!memText.includes('旧的'), '旧内容必须消失（否则"删掉一行"做不到）')
+  const b = JSON.parse(r.body)
+  assert.equal(b.ok, true)
+  assert.equal(b.text, '- 全新的记忆\n')
+})
+
+await okAsync('⭐ 允许清空（空字符串是合法输入）', async () => {
+  const r = await memCall('POST', { text: '' })
+  assert.equal(r.status, 200, `清空应 200，实际 ${r.status}`)
+  assert.equal(memText, '')
+})
+
+await okAsync('缺 text / 非字符串 → 400', async () => {
+  assert.equal((await memCall('POST', {})).status, 400)
+  assert.equal((await memCall('POST', { text: 42 })).status, 400)
+  assert.equal((await memCall('POST', { text: null })).status, 400)
+})
+
+await okAsync('⭐ 写失败 → 500 且带原因（不假装成功）', async () => {
+  memFail = true
+  const r = await memCall('POST', { text: 'x' })
+  memFail = false
+  assert.equal(r.status, 500)
+  assert.equal(JSON.parse(r.body).error, 'write-failed')
+})
+
+await okAsync('不支持的方法 → 405', async () => {
+  const res = await fetch(`${MEM_BASE}${ROUTE_PREFIX}/memory`, {
+    method: 'DELETE', headers: auth()
+  })
+  assert.equal(res.status, 405)
+})
+
+await okAsync('未装配记忆 → 503（不许假装成功）', async () => {
+  const bare = createHandler({
+    snapshot,
+    atlas: () => atlas,
+    artDir,
+    token: TOKEN,
+    hub,
+    logger: { warn () {}, debug () {}, info () {} },
+    connection: () => undefined,
+    onPosition: () => {},
+    onCommand: () => ({})
+  })
+  const srv = http.createServer((req, res) => {
+    bare(req, res).catch(() => { if (!res.headersSent) res.writeHead(500); res.end() })
+  })
+  await new Promise(resolve => srv.listen(0, '127.0.0.1', resolve))
+  const base = `http://127.0.0.1:${srv.address().port}`
+  const res = await fetch(`${base}${ROUTE_PREFIX}/memory`, { headers: auth() })
+  assert.equal(res.status, 503)
+  assert.equal(JSON.parse(await res.text()).error, 'unavailable')
+  await new Promise(resolve => srv.close(resolve))
+})
+
+await okAsync('记忆路由也受令牌/围栏保护（跨站请求被拒）', async () => {
+  const res = await fetch(`${MEM_BASE}${ROUTE_PREFIX}/memory`, {
+    headers: { 'sec-fetch-site': 'cross-site' }
+  })
+  assert.equal(res.status, 403, `跨站请求应 403，实际 ${res.status}`)
+})
+
+await new Promise(resolve => memServer.close(resolve))
+
+/* ══════════════════════════════════════════════════════════════════════════
  * 6. 端口自发现与 exe 定位
  * ═════════════════════════════════════════════════════════════════════════ */
 section('6. 端口自发现与 exe 定位')

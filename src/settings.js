@@ -203,7 +203,18 @@ export function defaultSettings () {
      */
     chatWorkspace: '',
     /** 气泡里的聊天入口开关（关掉就只在设置页聊）。 */
-    chatEnabled: true
+    chatEnabled: true,
+    /**
+     * 自动提炼长期记忆（**跨会话共享**）。
+     *
+     * 开启后：每次收到聊天回复，用宿主默认模型把这一轮里"值得长期记住的事"
+     * 提炼成几行，追加到 `$DSH_HOME/zhuang-fangyi-pet/memory.md`；
+     * 那份记忆会注入到**每一个**聊天会话（所以换会话不会失忆）。
+     *
+     * 默认**开**：用户点名要"不同会话能共享 memory"，不自动记就等于没有。
+     * 关掉后仍可手动编辑记忆（设置页或直接改文件）。
+     */
+    memoryAuto: true
   }
 }
 
@@ -244,7 +255,7 @@ export function normalizeSettings (input) {
   for (const key of ['clickThrough', 'topmost', 'bubble', 'bubbleImages',
     'hint', 'statusAlways', 'notifyComplete', 'attentionReminder',
     'pomodoro', 'pomodoroAutoNext', 'pomodoroNotify', 'pomodoroCountdown',
-    'voice', 'chatEnabled']) {
+    'voice', 'chatEnabled', 'memoryAuto']) {
     if (typeof input[key] === 'boolean') out[key] = input[key]
   }
 

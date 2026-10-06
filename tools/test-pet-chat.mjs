@@ -23,6 +23,8 @@ import {
   loadPersonas,
   readPersona,
   applyPersona,
+  composePersona,
+  loadShared,
   isGeneratedAgentsMd,
   renderAgentsMd,
   isSafePersonaName,
@@ -271,6 +273,86 @@ ok('personaReport 汇总正确', () => {
   assert.equal(rep.current, 'a')
   assert.ok(rep.names.includes('a'))
   assert.equal(rep.dir, dir)
+})
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * 3b. 加法人设：共享背景 + 语言风格
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+section('3b. 加法人设（共享背景 + 语言风格）')
+
+ok('⭐⭐ 组合 = 共享背景（按文件名序）+ 风格', () => {
+  const dir = tmpdir()
+  fs.mkdirSync(path.join(dir, 'shared'), { recursive: true })
+  fs.writeFileSync(path.join(dir, 'shared', '02-身份.md'), '身份：庄方宜。', 'utf8')
+  fs.writeFileSync(path.join(dir, 'shared', '01-世界观.md'), '世界观：塔卫二。', 'utf8')
+  fs.writeFileSync(path.join(dir, 'strict.md'), '# 严格\n\n只说结论。', 'utf8')
+  const r = composePersona(dir, 'strict')
+  assert.ok(r.text !== null)
+  // 顺序按文件名：01 在 02 前
+  assert.ok(r.text.indexOf('世界观') < r.text.indexOf('身份'), '共享背景应按文件名排序拼接')
+  assert.ok(r.text.indexOf('身份') < r.text.indexOf('只说结论'), '风格应在共享背景之后')
+  assert.equal(r.sharedCount, 2)
+  assert.equal(r.style, 'strict')
+})
+
+ok('⭐ 没有 shared/ 目录时行为不变（旧式自包含人设完全兼容）', () => {
+  const dir = tmpdir()
+  fs.writeFileSync(path.join(dir, 'solo.md'), '# 独狼\n\n我自带一切。', 'utf8')
+  const r = composePersona(dir, 'solo')
+  assert.equal(r.sharedCount, 0)
+  assert.equal(r.text, '# 独狼\n\n我自带一切。', '应原样返回（trim 后）')
+})
+
+ok('⭐ 共享背景为空目录 → 等同没有', () => {
+  const dir = tmpdir()
+  fs.mkdirSync(path.join(dir, 'shared'), { recursive: true })
+  fs.writeFileSync(path.join(dir, 'a.md'), '正文', 'utf8')
+  const r = composePersona(dir, 'a')
+  assert.equal(r.sharedCount, 0)
+  assert.equal(r.text, '正文')
+})
+
+ok('风格不存在 → text 为 null（调用方据此报未知人设）', () => {
+  const dir = tmpdir()
+  const r = composePersona(dir, 'nope')
+  assert.equal(r.text, null)
+})
+
+ok('loadShared 只认 .md，且带预览（跳过标题行）', () => {
+  const dir = tmpdir()
+  fs.mkdirSync(path.join(dir, 'shared'), { recursive: true })
+  fs.writeFileSync(path.join(dir, 'shared', 'a.md'), '# 标题\n\n第一行正文', 'utf8')
+  fs.writeFileSync(path.join(dir, 'shared', 'notes.txt'), 'x', 'utf8')
+  const r = loadShared(dir)
+  assert.equal(r.items.length, 1, `应只认 .md，实际 ${r.items.length}`)
+  assert.equal(r.items[0].name, 'a')
+  assert.ok(r.items[0].bytes > 0)
+  assert.equal(r.items[0].preview, '第一行正文', '预览应跳过标题行')
+})
+
+ok('⭐ 人设列表不把 shared/ 当成人设（那是目录不是风格）', () => {
+  const dir = tmpdir()
+  fs.mkdirSync(path.join(dir, 'shared'), { recursive: true })
+  fs.writeFileSync(path.join(dir, 'shared', '背景.md'), '背景', 'utf8')
+  fs.writeFileSync(path.join(dir, 'style.md'), '风格', 'utf8')
+  const r = loadPersonas(dir)
+  const names = r.items.map(i => i.name)
+  assert.ok(names.includes('style'), '风格应在列表里')
+  assert.ok(!names.includes('shared'), `shared 不该出现在人设列表：${names.join(',')}`)
+})
+
+ok('⭐ AGENTS.md 兜底也写**组合后**的文本（两条路人设必须一致）', () => {
+  const dir = tmpdir()
+  const ws = tmpdir()
+  fs.mkdirSync(path.join(dir, 'shared'), { recursive: true })
+  fs.writeFileSync(path.join(dir, 'shared', 'bg.md'), '共享世界观', 'utf8')
+  fs.writeFileSync(path.join(dir, 'style.md'), '风格正文', 'utf8')
+  const r = applyPersona({ workspaceDir: ws, personaDir: dir, name: 'style' })
+  assert.equal(r.ok, true)
+  const text = fs.readFileSync(path.join(ws, 'AGENTS.md'), 'utf8')
+  assert.ok(text.includes('共享世界观'), 'AGENTS.md 必须含共享背景（否则两条路人设不一致）')
+  assert.ok(text.includes('风格正文'), 'AGENTS.md 必须含风格正文')
 })
 
 /* ══════════════════════════════════════════════════════════════════════════

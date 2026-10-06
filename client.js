@@ -209,11 +209,26 @@ window.__ModuleLoader__.load({
         groupChat: '聊天',
         chatEnabled: '允许在气泡里聊天',
         chatEnabledHint: '关闭后只在设置页这里聊',
-        persona: '人设',
-        personaHint: '切换后写入工作区的 AGENTS.md —— DSH 会自动读它',
+        persona: '人设风格',
+        personaHint: '语言风格。世界观与身份写在"共享背景"里，会自动拼在它前面',
         personaReload: '重新扫描人设目录',
         personaDir: '人设目录',
         personaDirHint: '把你的 .md 丢进这个目录，再点"重新扫描"',
+        sharedTitle: '共享背景（所有风格共用）',
+        sharedHint: '这些人设文件会拼在每种风格前面 —— 改一次，所有风格一起变',
+        sharedEmpty: '还没有共享背景（当前风格是自包含的）',
+        sharedUsed: '当前风格已拼接',
+        sharedFiles: '份',
+        memoryTitle: '长期记忆（跨会话共享）',
+        memoryHint: '所有聊天会话共享这份记忆；换会话、重开会话都不会忘',
+        memoryAuto: '自动记住值得长期保留的事',
+        memoryAutoHint: '每次回复后用模型提炼 0~3 条（称呼、项目、约定…），追加到这里',
+        memoryEmpty: '（还没有记住什么）',
+        memorySave: '保存记忆',
+        memorySaved: '已保存',
+        memorySaving: '保存中…',
+        memoryBytes: '字节',
+        memoryFile: '记忆文件',
         chatWorkspace: '聊天工作区',
         chatWorkspaceHint: '留空 = ~/Downloads/庄方宜',
         chatOpen: '打开工作区目录',
@@ -313,11 +328,26 @@ window.__ModuleLoader__.load({
         groupChat: 'Chat',
         chatEnabled: 'Allow chatting from the bubble',
         chatEnabledHint: 'When off, chat only from this settings page',
-        persona: 'Persona',
-        personaHint: 'Switching writes the workspace AGENTS.md — DSH reads it automatically',
+        persona: 'Persona style',
+        personaHint: 'Language style. World & identity live in the shared background and are prepended automatically',
         personaReload: 'Rescan persona folder',
         personaDir: 'Persona folder',
         personaDirHint: 'Drop your .md files there, then hit rescan',
+        sharedTitle: 'Shared background (used by every style)',
+        sharedHint: 'These files are prepended to every style — edit once, all styles change',
+        sharedEmpty: 'No shared background yet (current style is self-contained)',
+        sharedUsed: 'Current style composes',
+        sharedFiles: 'file(s)',
+        memoryTitle: 'Long-term memory (shared across sessions)',
+        memoryHint: 'Every chat session shares this memory; switching or reopening a session keeps it',
+        memoryAuto: 'Automatically remember durable facts',
+        memoryAutoHint: 'After each reply the model extracts 0–3 facts (names, projects, agreements…) and appends them here',
+        memoryEmpty: '(nothing remembered yet)',
+        memorySave: 'Save memory',
+        memorySaved: 'Saved',
+        memorySaving: 'Saving…',
+        memoryBytes: 'bytes',
+        memoryFile: 'Memory file',
         chatWorkspace: 'Chat workspace',
         chatWorkspaceHint: 'Empty = ~/Downloads/庄方宜',
         chatOpen: 'Open workspace folder',
@@ -1039,6 +1069,12 @@ window.__ModuleLoader__.load({
       const [chatStatus, setChatStatus] = useState(null)
       const [chatBusy, setChatBusy] = useState(false)
       const [chatNote, setChatNote] = useState(null)
+      /** 记忆：正文 + 保存状态（v3 跨会话共享）。 */
+      const [memory, setMemory] = useState(null)
+      const [memoryBusy, setMemoryBusy] = useState(false)
+      const [memoryNote, setMemoryNote] = useState(null)
+      /** 记忆草稿用 ref：每敲一个字都变，不该触发整页重渲染。 */
+      const memoryDraftRef = useRef('')
       /** 草稿用 ref 而不是 state：它每敲一个字都变，不该触发重渲染。 */
       const chatDraftRef = useRef('')
       const chatDraft = chatDraftRef.current
@@ -1085,8 +1121,28 @@ window.__ModuleLoader__.load({
           .catch(e => setChatNote(`切换人设失败：${e?.message ?? e}`))
       }
 
-      const sendChatMessage = () => {
-        const text = chatDraftRef.current
+      /**
+       * 保存记忆（整体替换）。失败要**如实报**，不能静默 ——
+       * 用户按了保存却以为没生效，会反复改。
+       */
+      const saveMemory = () => {
+        const fn = runtime.saveMemory
+        if (typeof fn !== 'function') {
+          setMemoryNote('记忆不可用（宿主未装配）')
+          return
+        }
+        setMemoryBusy(true)
+        setMemoryNote(null)
+        Promise.resolve(fn(memoryDraftRef.current))
+          .then(r => {
+            setMemoryNote(t('memorySaved'))
+            if (r !== null && r !== undefined) setMemory(r)
+          })
+          .catch(e => setMemoryNote(`保存失败：${e?.message ?? e}`))
+          .finally(() => setMemoryBusy(false))
+      }
+
+      const sendChatMessage = () => {        const text = chatDraftRef.current
         if (typeof text !== 'string' || text.trim() === '') return
         const fn = runtime.sendChat
         if (typeof fn !== 'function') {
@@ -1122,6 +1178,16 @@ window.__ModuleLoader__.load({
         }
         if (typeof runtime.loadChatStatus === 'function') {
           Promise.resolve(runtime.loadChatStatus()).then(v => { if (alive) setChatStatus(v) }).catch(() => {})
+        }
+        if (typeof runtime.loadMemory === 'function') {
+          Promise.resolve(runtime.loadMemory())
+            .then(v => {
+              if (!alive || v === null || v === undefined) return
+              setMemory(v)
+              // 草稿只在**首次加载**时同步；之后用户可能正在编辑，别覆盖他的输入。
+              if (memoryDraftRef.current === '') memoryDraftRef.current = v.text ?? ''
+            })
+            .catch(() => {})
         }
         return () => { alive = false }
       }, [runtime])
@@ -1451,6 +1517,62 @@ window.__ModuleLoader__.load({
         ]),
         h('p', { key: 'personaDir', className: 'zf-pet-settings__note' },
           `${t('personaDir')}：${personas?.dir ?? t('personaDirHint')}`),
+
+        // ── 共享背景（加法人设的"底座"）────────────────────────────────────
+        //
+        // 用户点名："基于通用的世界观提示词加上不同的语言风格"、"可以在设置中共享"。
+        // 所以这里把"底座"显式列出来 —— 用户才知道世界观写在哪儿、改哪里。
+        h('h4', { key: 'sharedTitle', className: 'zf-pet-settings__sub' }, t('sharedTitle')),
+        h('p', { key: 'sharedHint', className: 'zf-pet-settings__note' }, t('sharedHint')),
+        (personas?.shared?.items?.length ?? 0) === 0
+          ? h('p', { key: 'sharedEmpty', className: 'zf-pet-settings__note' }, t('sharedEmpty'))
+          : h('ul', { key: 'sharedList', className: 'zf-pet-list' },
+              (personas?.shared?.items ?? []).map(it => h('li', { key: it.name },
+                `${it.name}.md · ${it.bytes} ${t('memoryBytes')}` +
+                (it.preview ? ` — ${it.preview}` : '')))),
+        (personas?.shared?.items?.length ?? 0) === 0
+          ? null
+          : h('p', { key: 'sharedUsed', className: 'zf-pet-settings__note' },
+              `${t('sharedUsed')} ${personas?.shared?.used ?? 0} ${t('sharedFiles')}`),
+        h('p', { key: 'sharedDir', className: 'zf-pet-settings__note' },
+          `${t('personaDir')}：${personas?.shared?.dir ?? '—'}`),
+
+        // ── 长期记忆（跨会话共享）──────────────────────────────────────────
+        h('h4', { key: 'memTitle', className: 'zf-pet-settings__sub' }, t('memoryTitle')),
+        h('p', { key: 'memHint', className: 'zf-pet-settings__note' }, t('memoryHint')),
+        h(Toggle, {
+          key: 'memoryAuto',
+          label: t('memoryAuto'),
+          hint: t('memoryAutoHint'),
+          value: settings.memoryAuto,
+          onChange: v => set({ memoryAuto: v })
+        }),
+        h('textarea', {
+          key: 'memBox',
+          className: 'zf-pet-memobox',
+          placeholder: t('memoryEmpty'),
+          spellCheck: false,
+          // **非受控**（defaultValue + onInput）：受控 textarea 每敲一个字都会
+          // 重渲染整个设置页（人设/语音/聊天都在同一棵树里），打字会卡。
+          // `key` 带上字节数 → 外部改了记忆（比如自动提炼追加）时会重建元素，
+          // 用户能看到新内容；但他正在打字时不会被打断（草稿在 ref 里）。
+          defaultValue: memory?.text ?? '',
+          onInput: e => { memoryDraftRef.current = e.target.value }
+        }),
+        h('div', { key: 'memBtns', className: 'zf-pet-settings__btns' }, [
+          h('button', {
+            key: 'save',
+            className: 'zf-pet-settings__btn',
+            disabled: memoryBusy,
+            onClick: () => saveMemory()
+          }, memoryBusy ? t('memorySaving') : t('memorySave'))
+        ]),
+        memoryNote === null
+          ? null
+          : h('p', { key: 'memNote', className: 'zf-pet-settings__note' }, memoryNote),
+        h('p', { key: 'memFile', className: 'zf-pet-settings__note' },
+          `${t('memoryFile')}：${memory?.file ?? '—'}` +
+          (memory === null ? '' : ` · ${memory.bytes ?? 0} / ${memory.capBytes ?? 0} ${t('memoryBytes')}`)),
         h('label', { key: 'chatWs', className: 'zf-pet-row' }, [
           h('span', { key: 'l', className: 'zf-pet-row__label' }, t('chatWorkspace')),
           h('input', {
@@ -1764,6 +1886,21 @@ window.__ModuleLoader__.load({
 }
 .zf-pet-chatrow__input:disabled{ opacity:.6; }
 .zf-pet-chatrow .zf-pet-settings__btn{ margin-top:0;flex:0 0 auto; }
+/* 记忆编辑框（v3）：等宽 + 可纵向拖，长记忆也能看清 */
+.zf-pet-memobox{
+  width:100%;box-sizing:border-box;min-height:120px;max-height:280px;margin-top:6px;
+  padding:8px;border-radius:8px;resize:vertical;
+  border:1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.14));
+  background:var(--dsw-alias-bg-layer-2, transparent);
+  color:var(--dsw-alias-label-primary);font-size:12px;line-height:1.5;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+/* 共享背景文件列表 */
+.zf-pet-list{
+  margin:4px 0 0;padding-left:18px;font-size:11px;
+  color:var(--dsw-alias-label-secondary);
+}
+.zf-pet-list li{ margin:2px 0;word-break:break-all; }
 `
     }
 
@@ -2045,6 +2182,13 @@ window.__ModuleLoader__.load({
         },
         sendChat (text) {
           return api('POST', '/chat', { text })
+        },
+        /** 长期记忆（v3，跨会话共享）：读全文 / 整体替换。 */
+        loadMemory () {
+          return api('GET', '/memory')
+        },
+        saveMemory (text) {
+          return api('POST', '/memory', { text })
         },
         connect,
         dispose () {
