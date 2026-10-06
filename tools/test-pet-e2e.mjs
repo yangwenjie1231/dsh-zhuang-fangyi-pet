@@ -1259,8 +1259,124 @@ await ok('派发 session/event tool/call → 推 working', async () => {
   assert.ok(hit, `未推送 working。最近帧：${JSON.stringify(sse.snapshots().slice(-2))}`)
 })
 
-await ok('派发 turn/end completed → 推 happy', async () => {
-  ctx.emit('session/event', { id: 'e2e-1' }, {
+/* ── ⭐⭐ 聊天回复 → 气泡（用户报的 bug 就在这里）───────────────────────────
+ *
+ * 用户原话："他回我的消息，能不能通过气泡发送出来?"、"气泡里只提示了已发送"。
+ *
+ * 根因：原先用 `ctx.on('assistant/message', …)` 订阅 —— 而
+ * `assistant/message` 是 **SessionEventMap 里的事件**（经 `session/event` 派发），
+ * **cordis 根上没有这个事件名**。`ctx.on` 对未知事件名**不抛错**，
+ * 于是订阅静静地永不触发：日志里一行警告都没有，气泡永远空着。
+ *
+ * 这个测试是**唯一**能抓到它的东西 —— 之前所有套件全绿，因为**没有任何
+ * 测试真的派发过一条回复事件**（这就是它能溜到用户面前的原因）。
+ * ──────────────────────────────────────────────────────────────────────── */
+
+await ok('⭐⭐ 派发 assistant/message（session/event）→ 回复真的进气泡', async () => {
+  // 为什么用**独立装配**而不是主装配：主装配没有 sessionController（`chat.sessionId`
+  // 是 null），而这条要测的正是"聊天会话的回复"。独立装配里我们自己建会话、
+  // 自己发事件，链路完整（sessionController.create → chat.setSession → 事件 → 气泡）。
+  fs.rmSync(path.join(tmpHome, 'zhuang-fangyi-pet', 'chat.json'), { force: true })
+  const chatHome = fs.mkdtempSync(path.join(os.tmpdir(), 'zf-bubble-'))
+  const local = makeCtx(makeWebServer())
+  const prompts = []
+  local.provide('sessionController', {
+    async list () { return { items: [] } },
+    async create () { return { sessionId: 'chat-bubble-1' } },
+    async prompt (req, signal) {
+      if (req?.mode !== 'queue' && req?.mode !== 'steer') throw new Error('mode 必填')
+      signal.throwIfAborted()
+      prompts.push({ ...req })
+      return { accepted: true }
+    }
+  })
+  const petIndex = await import(`file://${path.join(ROOT, 'index.js').replace(/\\/g, '/')}`)
+  petIndex.apply(toCordisLike(local, ['webServer']), {})
+  const ws = local.__services.get('webServer')
+  await ws.listen()
+  const base = `http://127.0.0.1:${ws.port}`
+  await fetch(`${base}/api/zhuang-fangyi/pet/settings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: { chatWorkspace: path.join(chatHome, 'ws') } })
+  })
+  // 先真的发一条，让插件建立/采纳聊天会话（这样 chat.accept 才认这个 id）
+  const sent = await fetch(`${base}/api/zhuang-fangyi/pet/chat`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text: '在吗？' })
+  })
+  assert.equal(sent.status, 200, `发消息应 200，实际 ${sent.status}`)
+  const st = await (await fetch(`${base}/api/zhuang-fangyi/pet/chat`)).json()
+  assert.equal(st.sessionId, 'chat-bubble-1', '会话应已建立')
+
+  // 现在派发一条**真实形状**的回复事件（照抄 SessionEventMap）
+  const seen = []
+  const offSnap = local.__handlers.get('pet/state') ?? []
+  local.emit('session/event', { id: 'chat-bubble-1' }, {
+    type: 'assistant/message',
+    seq: 9001,
+    time: Date.now(),
+    data: {
+      turn: 1,
+      step: 1,
+      message: {
+        id: 'msg-e2e-bubble',
+        role: 'assistant',
+        content: [{ type: 'text', text: '我在。实验刚告一段落，正好歇口气。' }],
+        source: { kind: 'model', provider: 'e2e', model: 'e2e' }
+      },
+      stream: []
+    }
+  })
+  // 直接从快照读气泡（不依赖 SSE：独立装配没有 SSE 客户端）
+  const snap = await (await fetch(`${base}/api/zhuang-fangyi/pet/state`)).json()
+  seen.push(snap)
+  const bubble = snap.bubble
+  // ⭐ 正文必须在 —— 这一条抓的是**两个**真实 bug：
+  //   ① 事件名写错（`ctx.on('assistant/message')` 不存在）→ 气泡压根不弹；
+  //   ② 选到自带文字的贴纸 → 状态机按契约 §4 不叠 Host 文案，
+  //      于是回复正文被整段吞掉（用户看到的就是"只提示了已发送"）。
+  assert.ok(bubble !== null && bubble !== undefined, '应弹出气泡')
+  assert.equal(typeof bubble.text, 'string',
+    `气泡必须带正文（image=${JSON.stringify(bubble.image)} imageHasText=${bubble.imageHasText}）—— ` +
+    '若 imageHasText 为 true，说明聊天回复选到了自带文字的贴纸，正文被吞了')
+  assert.ok(bubble.text.includes('实验刚告一段落'),
+    `气泡正文应是回复内容，实际 ${JSON.stringify(bubble.text)}`)
+  assert.equal(bubble.imageHasText, false,
+    '聊天回复的气泡图必须是**无文字**的（否则状态机不叠文案，正文消失）')
+  // 状态：刚建好的桌宠可能还在 `waking`（唤醒优先级压过 listening）——
+  // 那是合法的，不该焊死具体状态。这里只断言"气泡确实带着回复"。
+  assert.ok(['listening', 'waking', 'thinking'].includes(snap.petState),
+    `聊天回复后桌宠应处于活跃状态，实际 ${snap.petState}`)
+  await ws.close()
+  for (const d of local.__effects) if (typeof d === 'function') assert.doesNotThrow(() => d())
+  fs.rmSync(path.join(tmpHome, 'zhuang-fangyi-pet', 'chat.json'), { force: true })
+})
+
+await ok('⭐ 非聊天会话的回复不进气泡（只认聊天会话，不打扰你的工作会话）', async () => {
+  const before = sse.snapshots().length
+  ctx.emit('session/event', { id: 'session-some-other-work-session' }, {
+    type: 'assistant/message',
+    seq: 9002,
+    time: Date.now(),
+    data: {
+      turn: 1,
+      step: 1,
+      message: {
+        id: 'msg-e2e-other',
+        role: 'assistant',
+        content: [{ type: 'text', text: '这段是你工作会话里的内容，不该出现在桌宠气泡里。' }],
+        source: { kind: 'model', provider: 'e2e', model: 'e2e' }
+      },
+      stream: []
+    }
+  })
+  await new Promise(r => setTimeout(r, 200))
+  const leaked = sse.snapshots().slice(before)
+    .some(s => typeof s.bubble === 'string' && s.bubble.includes('不该出现在桌宠气泡里'))
+  assert.ok(!leaked, '别的会话的回复绝不该进桌宠气泡')
+})
+
+await ok('派发 turn/end completed → 推 happy', async () => {  ctx.emit('session/event', { id: 'e2e-1' }, {
     type: 'turn/end',
     data: { turn: 1, reason: { kind: 'completed' } }
   })

@@ -335,8 +335,10 @@ export function apply (ctx, config) {
    * 抽成具名函数是为了**能被真正测到**：`exposed.pickBubbleImage` 指向的就是
    * 它本身，状态机用的也是它 —— 不是手抄副本。
    */
-  const pickBubbleImage = (key, seed) => {
-    if (!settings.get().bubble || !settings.get().bubbleImages) return null
+  /** 聊天气泡的轮换游标（见 `pickChatBubbleImage`）。 */
+  let chatBubbleCursor = -1
+
+  const pickBubbleImage = (key, seed) => {    if (!settings.get().bubble || !settings.get().bubbleImages) return null
     // 返回**整条记录**（含 `hasText`）而不只是路径：状态机需要知道这张图
     // 是否已经把文字画进去了，才决定要不要叠 Host 文案 ——
     // 自带中文的贴纸再叠一句，屏幕上会出现两段互相打架的文字（契约 §4）。
@@ -362,6 +364,30 @@ export function apply (ctx, config) {
     const fallback = pickPoolEmote(atlas?.bubble, seed)
     if (fallback !== null) lastEmoteFile = fallback.file
     return fallback
+  }
+
+  /**
+   * 给**聊天回复**挑一张气泡图 —— 只要**不带文字**的那种。
+   *
+   * 为什么单独一个函数：状态机有一条正确性规则（契约 §4 的 `hasText`）——
+   * **图自带文字时不叠 Host 文案**。聊天回复的正文是主角，绝不能被一张
+   * 「么么哒」贴纸吞掉（用户实测报过："气泡里只提示了已发送"）。
+   *
+   * 所以这里只从**无文字**的图里挑：
+   *   · 关掉气泡图 → null（纯文字气泡）；
+   *   · 一张无文字的图都挑不到 → null（**宁可没有图，也不能吞掉正文**）。
+   *
+   * @returns {object|null} `{file, hasText: false, …}` 或 null
+   */
+  const pickChatBubbleImage = () => {
+    if (!settings.get().bubble || !settings.get().bubbleImages) return null
+    const pool = Array.isArray(atlas?.bubble) ? atlas.bubble : []
+    const textFree = pool.filter(rec => rec !== null && typeof rec === 'object' &&
+      rec.hasText !== true && typeof rec.file === 'string')
+    if (textFree.length === 0) return null
+    // 轮换而不是每次同一张：连着聊几句时视觉上有变化（与状态机选图同一意图）。
+    chatBubbleCursor = (chatBubbleCursor + 1) % textFree.length
+    return textFree[chatBubbleCursor]
   }
 
   const machine = createPetState({
@@ -1429,38 +1455,44 @@ export function apply (ctx, config) {
   ctx.effect(() => () => offSettings(), 'zhuang-fangyi-pet: settings subscription')
 
   // ── 事件桥：根 Context 收全部 scoped 事件（见 events.js 文件头）──────────
-  const offEvents = bridgeHostEvents(ctx, machine, logger)
+  //
+  // ⚠️ **聊天正文走这条桥的回调**，不是另开一个 `ctx.on`。
+  //
+  // 这里踩过一个真实的坑（用户报"气泡只提示已发送，回复从不出现"）：
+  // 原先写的是 `ctx.on('assistant/message', …)` —— 而 `assistant/message`
+  // 是 **SessionEventMap 里的事件**（经 `session/event` 派发），
+  // **cordis 根上没有这个事件名**。`ctx.on` 对未知事件名**不抛错**，
+  // 于是订阅静静地永远不触发：日志里连一行警告都没有，气泡自然永远空着。
+  //
+  // 现在把 `assistant/message` 从 `session/event` 里接出来交给 `onChatMessage`：
+  // 状态机仍然不读正文（红线不变），聊天另走一条**只认聊天会话**的通道。
+  const offEvents = bridgeHostEvents(ctx, machine, logger, {
+    onChatMessage: (sessionId, event) => onAssistantMessage(sessionId, event)
+  })
   ctx.effect(() => () => offEvents(), 'zhuang-fangyi-pet: host events')
-  boot('状态机 + 事件桥已就绪')
+  boot('状态机 + 事件桥已就绪（含聊天正文通道）')
 
   // ── 聊天回复 → 桌宠气泡 ─────────────────────────────────────────────────
   //
   // ⚠️ **单独订阅，不走状态机**：状态机是"AI 在干什么"的聚合（它故意不看
-  // 消息正文 —— 那是一条硬不变式）。而聊天需要**正文**，所以这里另开一条
+  // 消息正文 —— 那是一条硬不变式）。而聊天需要**正文**，所以另开一条
   // 只服务于聊天的通道，且**只认聊天会话**（`chat.accept` 做过滤）。
   //
   // 为什么不用 `assistant/chunk` 逐字拼：气泡要的是"说完了的整句"，
   // 逐字拼会弹出一堆半截话。用 `assistant/message`（一条完整消息）。
-  const wireChatEvent = (name, handler) => {
+  //
+  // 参数形状（`SessionEventMap` 实测）：
+  //   `{ type: 'assistant/message', data: { turn, step, message: AssistantMessage,
+  //      stream, usage?, interrupted? }, seq, time }`
+  //   `AssistantMessage = { id, role: 'assistant', content: ContentBlock[], source }`
+  const onAssistantMessage = (sessionId, event) => {
     try {
-      const off = ctx.on(name, handler)
-      if (typeof off === 'function') {
-        ctx.effect(() => () => off(), `zhuang-fangyi-pet: chat ${name}`)
-      }
-    } catch (error) {
-      // 事件名在旧版本可能不存在 —— 跳过，绝不让插件瘫掉（与 events.js 同一纪律）。
-      logger.debug?.(`zhuang-fangyi-pet: 聊天事件 ${name} 订阅失败（已跳过）：${error?.message ?? error}`)
-    }
-  }
-
-  const onAssistantMessage = (session, payload) => {
-    try {
-      const sid = typeof session === 'string'
-        ? session
-        : (session?.sessionId ?? session?.id ?? payload?.sessionId ?? null)
-      // 回合标识：优先用事件里的 turn，拿不到就用"消息 id"或时间戳兜底。
-      const turnKey = payload?.turn ?? payload?.turnId ?? payload?.message?.id ??
-        payload?.id ?? `${sid}:${Date.now()}`
+      const sid = typeof sessionId === 'string' ? sessionId : (sessionId?.id ?? null)
+      const payload = event?.data ?? event ?? {}
+      // 回合标识：优先 `turn`（同一回合的多次 step 会各发一条消息，
+      // 用 `message.id` 区分才不会把后续 step 的回复当成重复丢掉）。
+      const turnKey = payload?.message?.id ?? payload?.turn ?? payload?.id ??
+        `${sid}:${Date.now()}`
       if (!chat.accept(sid, turnKey)) return
       const text = extractAssistantText(payload)
       if (text === null) return
@@ -1473,10 +1505,23 @@ export function apply (ctx, config) {
       }
       // 进气泡：用 `chat/reply` 这个 key（它不在语义映射里 → 走全池兜底选图，
       // 但文案是我们给的完整回复）。
+      //
+      // ⚠️ **必须传 `image`，而且必须是"不带文字"的那张**。
+      //
+      // 这里踩过一个真实的坑（用户报"气泡里只提示了已发送"）：状态机有一条
+      // **正确性规则** —— 图自带文字时不叠 Host 文案（否则屏幕上两段文字打架，
+      // 契约 §4 的 `hasText`）。而全池兜底会挑到「么么哒」「好耶！」这类
+      // **自带中文的贴纸**，于是我们传的回复正文被整段丢掉，用户只看到一张贴纸
+      //（优先级/时长都是对的，所以状态机"成功地"弹了一个没有内容的气泡）。
+      //
+      // 修法：聊天回复**显式指定一张纯图**（`hasText: false`），
+      // 让正文永远有地方显示；挑不到纯图就干脆不配图（纯文字气泡也比吞掉正文好）。
+      const image = pickChatBubbleImage()
       machine.notify({
         key: 'chat/reply',
         state: 'listening',
         text: line,
+        image,
         priority: 97,
         durationMs: 12000
       })
@@ -1491,7 +1536,10 @@ export function apply (ctx, config) {
     }
   }
 
-  wireChatEvent('assistant/message', onAssistantMessage)
+  // ⚠️ **不要再写 `ctx.on('assistant/message', …)`** —— 那是 SessionEventMap 的
+  // 事件（经 `session/event` 派发），cordis 根上没有它；`ctx.on` 不抛错，
+  // 于是订阅永远不触发、也没有任何日志（这正是用户报的那个 bug 的根因）。
+  // 订阅已在上面的 `bridgeHostEvents(..., { onChatMessage })` 里完成。
 
   // ── 空闲驱动：`sleeping` 需要时间推进，纯事件驱动不会自己发生 ─────────────
   // 每 15s tick 一次足够（sleepMs 默认 5 分钟，精度要求很低）。

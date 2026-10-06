@@ -40,6 +40,11 @@
  *
  * 其余类型（`assistant/chunk`、`tool/call` 之外的一大堆）**故意不映射**：
  * 桌宠是表现层，读得越少越稳、越不涉隐私。
+ *
+ * ⚠️ `assistant/message` **故意不在这个集合里**：它带**消息正文**，
+ * 而 `state.js` 的红线是"绝不读正文"（`桌宠开发文档.md` §十）。
+ * 聊天要正文，所以走**单独的回调**（`bridgeHostEvents` 的 `onChatMessage`），
+ * 由 `index.js` 决定只对**聊天会话**生效 —— 两条通道，互不污染。
  */
 const SESSION_EVENT_TYPES = new Set([
   'turn/start',
@@ -179,10 +184,15 @@ export function messageOf (error) {
  * @param {object} ctx - cordis Context
  * @param {object} machine - `createPetState()` 的产物
  * @param {object} [logger]
+ * @param {object} [opts]
+ * @param {(sessionId: string, payload: object) => void} [opts.onChatMessage]
+ *   **聊天正文通道**：`session/event` 里的 `assistant/message` 原样交给它。
+ *   与状态机通道**分开**，因为状态机红线是不读正文；由调用方决定只对聊天会话生效。
  * @returns {() => void} 取消全部监听
  */
-export function bridgeHostEvents (ctx, machine, logger = console) {
+export function bridgeHostEvents (ctx, machine, logger = console, opts = {}) {
   const disposers = []
+  const onChatMessage = typeof opts.onChatMessage === 'function' ? opts.onChatMessage : null
 
   const wire = (name, handler) => {
     try {
@@ -207,7 +217,24 @@ export function bridgeHostEvents (ctx, machine, logger = console) {
   // ── scoped 事件：根监听者收全部（见文件头说明）──────────────────────────
   wire('agent/status', payload => feed(fromAgentStatus(payload)))
   wire('agent/error', payload => feed(fromAgentError(payload)))
-  wire('session/event', (session, event) => feed(fromSessionEvent(session, event)))
+  wire('session/event', (session, event) => {
+    // ⭐ 聊天正文通道（**独立于状态机**）。
+    //
+    // 这里踩过一个真实的坑：原先用 `ctx.on('assistant/message', …)` 订阅，
+    // 而 `assistant/message` 是 **SessionEventMap 里的事件**（经 `session/event`
+    // 派发），**cordis 上没有同名事件** —— 于是订阅永远不触发，
+    // 用户看到的现象是"气泡只提示已发送，回复从不出现"，而且**没有任何报错**
+    //（`ctx.on` 对未知事件名不抛）。
+    if (onChatMessage !== null && event !== null && typeof event === 'object' &&
+        event.type === 'assistant/message') {
+      try {
+        onChatMessage(sessionIdOf(session), event)
+      } catch (error) {
+        logger.warn?.(`zhuang-fangyi-pet: 聊天正文回调失败（已忽略）：${error?.message ?? error}`)
+      }
+    }
+    feed(fromSessionEvent(session, event))
+  })
 
   // ── 非 scoped 事件：直接拿 sessionId ───────────────────────────────────
   wire('api-session/status', (sessionId, running) => {
