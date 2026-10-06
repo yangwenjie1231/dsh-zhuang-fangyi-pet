@@ -49,6 +49,13 @@ import { createLauncher } from './src/pet/launcher.js'
 import { createPomodoro } from './src/pet/pomodoro.js'
 import { loadVoice, resolveVoice, voiceReport } from './src/pet/voice.js'
 import { createAffection, INTERACT_KINDS, interactText, interactLabel } from './src/pet/interactions.js'
+import {
+  loadPersonas, applyPersona, readPersona, personaReport, DEFAULT_PERSONA_NAME
+} from './src/pet/persona.js'
+import {
+  createChatState, extractAssistantText, bubbleText, validateChatText,
+  DEFAULT_WORKSPACE_NAME
+} from './src/pet/chat.js'
 
 /** 插件标识（Loader 行 id、token 层 source 共用）。 */
 export const name = 'zhuang-fangyi-pet'
@@ -60,7 +67,6 @@ const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ART_DIR = path.join(HERE, 'art', 'pet')
 const VOICE_DIR = path.join(HERE, 'art', 'voice')
 const DATA_DIR_NAME = 'zhuang-fangyi-pet'
-
 /**
  * 构建标记。由 `tools/deploy.ps1` 在部署时写入（取源文件 mtime）。
  *
@@ -470,6 +476,146 @@ export function apply (ctx, config) {
    */
   let lastInteract = null
   let interactSeq = 0
+
+  // ── 聊天（用户点名："可以与桌宠聊天"）───────────────────────────────────
+  //
+  // 设计：**专用工作区 + 专用会话**，而不是另起一套 LLM 调用。
+  //   · 工作区（默认 `~/Downloads/庄方宜`）里放 `AGENTS.md` = 当前人设；
+  //   · `dsh-agent-instructions` 会自动加载它 —— 不自己发明提示词注入；
+  //   · 用户能在 DSH 界面里看到这段对话、接着聊、翻历史，那才是"聊天"。
+  //
+  // 人设**可切换**（用户明确要求"人设、性格要作为可调的，因为我有好多种提示词"）：
+  // 切换 = 把人设文件同步进工作区 `AGENTS.md`（见 `persona.js` 的安全约束）。
+  const PERSONAS_DIR = path.join(dataDir, 'personas')
+  let personas = loadPersonas(PERSONAS_DIR, logger)
+  // 把人设目录建出来：用户要往里丢自己的 md，没有目录他不知道放哪。
+  try { fs.mkdirSync(PERSONAS_DIR, { recursive: true }) } catch { /* 建不出也不影响内置 */ }
+  boot(`人设已加载：${personas.items.length} 份（目录 ${PERSONAS_DIR}）`)
+
+  let chatStore = null
+  try {
+    chatStore = new JsonStore(path.join(dataDir, 'chat.json'), null, { log: null })
+  } catch (error) {
+    logger.warn?.(`zhuang-fangyi-pet: 聊天状态无法持久化（${error?.message ?? error}）`)
+  }
+  const chat = createChatState()
+  if (chatStore !== null && chatStore.get() !== null) {
+    try { chat.adopt(chatStore.get()) } catch { /* 坏数据按新建处理 */ }
+  }
+
+  /** 当前选中的人设（设置项；`default` = 内置）。 */
+  const currentPersona = () => {
+    const name = settings.get().persona
+    return typeof name === 'string' && name !== '' ? name : DEFAULT_PERSONA_NAME
+  }
+
+  /**
+   * 聊天工作区目录。
+   *
+   * 默认放在**用户的下载目录**下（`~/Downloads/庄方宜`）—— 用户一眼能找到，
+   * 而不是藏在 `$DSH_HOME` 里。设置项可改。
+   */
+  const chatWorkspace = () => {
+    const configured = settings.get().chatWorkspace
+    if (typeof configured === 'string' && configured.trim() !== '') return configured.trim()
+    let base = null
+    try { base = os.homedir() } catch { base = null }
+    if (base === null) base = dataDir
+    return path.join(base, 'Downloads', DEFAULT_WORKSPACE_NAME)
+  }
+
+  /**
+   * 确保聊天工作区存在，且 `AGENTS.md` = 当前人设。
+   *
+   * @returns {{ok: boolean, reason?: string, dir: string, file?: string}}
+   */
+  const ensureWorkspace = () => {
+    const dir = chatWorkspace()
+    const name = currentPersona()
+    const result = applyPersona({ workspaceDir: dir, personaDir: PERSONAS_DIR, name, logger })
+    if (!result.ok) {
+      // `user-file` 是**唯一可接受的失败**：用户在那儿手写了 AGENTS.md，
+      // 我们尊重它（聊天照常能用，只是人设不由我们管）。
+      if (result.reason === 'user-file') {
+        boot(`聊天工作区已有用户手写的 AGENTS.md，不改动它：${dir}`)
+        return { ok: true, dir, reason: 'user-file' }
+      }
+      logger.warn?.(`zhuang-fangyi-pet: 人设写入失败（${result.reason}）：${dir}`)
+      return { ok: false, reason: result.reason, dir }
+    }
+    return { ok: true, dir, file: result.file }
+  }
+
+  /**
+   * 解析聊天会话服务并**确保会话存在**。
+   *
+   * `sessionController.create({cwd, sessionId})` 是"创建或**幂等采纳**"语义，
+   * 所以重启后拿同一个 sessionId 再调一次就能接上原来的对话。
+   */
+  const ensureChatSession = async () => {
+    const svc = resolveSendService()
+    if (svc === null) {
+      const error = new Error(sendMissingReason ?? '宿主未装配 sessionController 服务')
+      error.code = 'unavailable'
+      throw error
+    }
+    if (typeof svc.create !== 'function') {
+      const error = new Error('宿主未提供 sessionController.create（无法新建聊天会话）')
+      error.code = 'unavailable'
+      throw error
+    }
+    const ws = ensureWorkspace()
+    if (!ws.ok) {
+      const error = new Error(`聊天工作区不可用（${ws.reason}）`)
+      error.code = 'no-session'
+      throw error
+    }
+    // 已经有会话：直接用它（并复核工作区仍然是它）。
+    if (chat.sessionId !== null) return chat.sessionId
+    const created = await svc.create({ cwd: ws.dir })
+    const id = created?.sessionId ?? created?.id ?? null
+    if (typeof id !== 'string' || id === '') {
+      const error = new Error('sessionController.create 没有返回 sessionId')
+      error.code = 'no-session'
+      throw error
+    }
+    chat.setSession(id)
+    if (chatStore !== null) {
+      chatStore.value = chat.persist()
+      chatStore.flush()
+    }
+    boot(`聊天会话已建立：${id}（工作区 ${ws.dir}）`)
+    return id
+  }
+
+  /**
+   * 发一条聊天消息（**排队语义**，与气泡输入框一致）。
+   *
+   * ⚠️ `prompt()` 的两条必填约束与 `sendToSession` 完全相同
+   * （`mode` + 真 `AbortSignal`）—— 那个坑踩过两次，这里绝不重犯。
+   */
+  const sendChat = async rawText => {
+    const v = validateChatText(rawText)
+    if (!v.ok) {
+      const error = new Error(v.reason === 'too-long' ? '消息太长' : '消息不能为空')
+      error.code = v.reason === 'too-long' ? 'too-long' : 'empty'
+      throw error
+    }
+    const sessionId = await ensureChatSession()
+    const svc = resolveSendService()
+    await svc.prompt({
+      sessionId,
+      content: [{ type: 'text', text: v.text }],
+      requestId: `zf-pet-chat-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
+      mode: 'queue'
+    }, new AbortController().signal)
+    chat.markSent()
+    if (chatStore !== null) {
+      chatStore.value = chat.persist()
+      chatStore.schedule()
+    }
+    return { sessionId }
+  }
 
   /**
    * 记一次互动：算好感 → 让桌宠说话（气泡 + 表情 + 语音）。
@@ -903,6 +1049,61 @@ export function apply (ctx, config) {
   ctx.effect(() => () => offEvents(), 'zhuang-fangyi-pet: host events')
   boot('状态机 + 事件桥已就绪')
 
+  // ── 聊天回复 → 桌宠气泡 ─────────────────────────────────────────────────
+  //
+  // ⚠️ **单独订阅，不走状态机**：状态机是"AI 在干什么"的聚合（它故意不看
+  // 消息正文 —— 那是一条硬不变式）。而聊天需要**正文**，所以这里另开一条
+  // 只服务于聊天的通道，且**只认聊天会话**（`chat.accept` 做过滤）。
+  //
+  // 为什么不用 `assistant/chunk` 逐字拼：气泡要的是"说完了的整句"，
+  // 逐字拼会弹出一堆半截话。用 `assistant/message`（一条完整消息）。
+  const wireChatEvent = (name, handler) => {
+    try {
+      const off = ctx.on(name, handler)
+      if (typeof off === 'function') {
+        ctx.effect(() => () => off(), `zhuang-fangyi-pet: chat ${name}`)
+      }
+    } catch (error) {
+      // 事件名在旧版本可能不存在 —— 跳过，绝不让插件瘫掉（与 events.js 同一纪律）。
+      logger.debug?.(`zhuang-fangyi-pet: 聊天事件 ${name} 订阅失败（已跳过）：${error?.message ?? error}`)
+    }
+  }
+
+  const onAssistantMessage = (session, payload) => {
+    try {
+      const sid = typeof session === 'string'
+        ? session
+        : (session?.sessionId ?? session?.id ?? payload?.sessionId ?? null)
+      // 回合标识：优先用事件里的 turn，拿不到就用"消息 id"或时间戳兜底。
+      const turnKey = payload?.turn ?? payload?.turnId ?? payload?.message?.id ??
+        payload?.id ?? `${sid}:${Date.now()}`
+      if (!chat.accept(sid, turnKey)) return
+      const text = extractAssistantText(payload)
+      if (text === null) return
+      const line = bubbleText(text)
+      if (line === null) return
+      chat.markReply()
+      if (chatStore !== null) {
+        chatStore.value = chat.persist()
+        chatStore.schedule()
+      }
+      // 进气泡：用 `chat/reply` 这个 key（它不在语义映射里 → 走全池兜底选图，
+      // 但文案是我们给的完整回复）。
+      machine.notify({
+        key: 'chat/reply',
+        state: 'listening',
+        text: line,
+        priority: 97,
+        durationMs: 12000
+      })
+      boot(`聊天回复进气泡（${line.length} 字）`)
+    } catch (error) {
+      logger.warn?.(`zhuang-fangyi-pet: 聊天回复处理失败（已忽略）：${error?.message ?? error}`)
+    }
+  }
+
+  wireChatEvent('assistant/message', onAssistantMessage)
+
   // ── 空闲驱动：`sleeping` 需要时间推进，纯事件驱动不会自己发生 ─────────────
   // 每 15s tick 一次足够（sleepMs 默认 5 分钟，精度要求很低）。
   const ticker = setInterval(() => {
@@ -1158,6 +1359,69 @@ export function apply (ctx, config) {
         affection: affection.snapshot()
       }),
       do: kind => doInteract(kind)
+    },
+    /**
+     * 聊天（契约 §3 新增）。
+     *
+     * `send` 是**异步**的（要 create 会话 + prompt），路由会 await 它。
+     */
+    chat: {
+      status: () => {
+        const ws = chatWorkspace()
+        const snap = chat.snapshot()
+        return {
+          enabled: settings.get().chatEnabled === true,
+          sessionId: snap.sessionId,
+          sentCount: snap.sentCount,
+          replyCount: snap.replyCount,
+          lastError: snap.lastError,
+          persona: currentPersona(),
+          workspace: ws,
+          /** 工作区是否已经真的存在（UI 上"打开目录"按钮据此禁用）。 */
+          workspaceExists: (() => {
+            try { return fs.existsSync(ws) } catch { return false }
+          })(),
+          /** 能力位：宿主没装配 sessionController 就明确不可用。 */
+          available: resolveSendService() !== null,
+          reason: resolveSendService() !== null ? null : (sendMissingReason ?? null)
+        }
+      },
+      send: text => sendChat(text)
+    },
+    /** 人设（契约 §3 新增）：**可切换**是用户明确要求的。 */
+    personas: {
+      list: () => ({
+        ...personaReport(personas, currentPersona()),
+        items: personas.items
+      }),
+      select: name => {
+        const rec = personas.byName.get(name)
+        if (rec === undefined) {
+          return { ok: false, reason: 'unknown-persona', allowed: personas.items.map(p => p.name) }
+        }
+        // 切人设 = 改设置 + 同步 `AGENTS.md`。两步都做完才算成功。
+        settings.update({ persona: name })
+        settings.flush()
+        const applied = ensureWorkspace()
+        if (!applied.ok) {
+          return { ok: false, reason: applied.reason, allowed: personas.items.map(p => p.name) }
+        }
+        // 人设换了 → 广播一帧（exe 的菜单/设置页要看到新值）。
+        hub.broadcast(withSettings(machine.snapshot()))
+        boot(`人设已切换 → ${name}（工作区 ${applied.dir}）`)
+        return {
+          ok: true,
+          persona: name,
+          workspace: applied.dir,
+          /** 用户手写了 AGENTS.md 时我们不动它 —— 如实告诉调用方。 */
+          note: applied.reason === 'user-file' ? '工作区已有用户手写的 AGENTS.md，未改动' : null
+        }
+      },
+      /** 重新扫描人设目录（用户往目录里丢了新的 md 后不必重启）。 */
+      reload: () => {
+        personas = loadPersonas(PERSONAS_DIR, logger)
+        return personaReport(personas, currentPersona())
+      }
     },
     /** 番茄钟状态存取（`/pet/pomodoro` 用；见 routes.js 的说明）。 */
     pomodoro: {

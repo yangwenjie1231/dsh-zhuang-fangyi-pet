@@ -185,7 +185,25 @@ export function defaultSettings () {
     // 运行时**绝不合成**（实测 GPT-SoVITS 冷启动 30.6 秒、热态 5 秒/句，
     // 而桌宠要在一秒内回应点击）。台词是封闭集合，构建期已压成 mp3，
     // 运行时只播放 —— 见 `src/pet/voice.js` 与 `tools/build-voice.ps1`。
-    voice: false
+    voice: false,
+
+    // ── 聊天（用户点名："可以与桌宠聊天"）──────────────────────────────────
+    //
+    // 聊天走**真实 DSH 会话**（专用工作区 + 专用会话），所以人设、历史、
+    // 上下文都由 DSH 管 —— 不自己发明一套提示词注入。
+    //
+    // `persona` = 当前人设名（对应 `$DSH_HOME/zhuang-fangyi-pet/personas/<名>.md`）。
+    // **可切换**是用户明确要求的（"人设、性格要作为可调的，我有好多种提示词"）。
+    persona: 'default',
+    /**
+     * 聊天工作区目录。空 = 默认 `~/Downloads/庄方宜`。
+     *
+     * 放在**下载目录**下而不是 `$DSH_HOME`：用户要能一眼找到它
+     *（他可能想自己往里放资料、看对话记录）。
+     */
+    chatWorkspace: '',
+    /** 气泡里的聊天入口开关（关掉就只在设置页聊）。 */
+    chatEnabled: true
   }
 }
 
@@ -226,8 +244,24 @@ export function normalizeSettings (input) {
   for (const key of ['clickThrough', 'topmost', 'bubble', 'bubbleImages',
     'hint', 'statusAlways', 'notifyComplete', 'attentionReminder',
     'pomodoro', 'pomodoroAutoNext', 'pomodoroNotify', 'pomodoroCountdown',
-    'voice']) {
+    'voice', 'chatEnabled']) {
     if (typeof input[key] === 'boolean') out[key] = input[key]
+  }
+
+  // 人设名与聊天工作区：字符串，走**保守校验**。
+  //
+  // ⚠️ 人设名的白名单校验在 `src/pet/persona.js`（那里才拼路径）。
+  // 这里只保证"是个像样的非空短字符串" —— 设置层不该知道人设的存储细节，
+  // 但**必须挡住明显荒唐的值**（比如 10KB 的字符串）。
+  if (typeof input.persona === 'string') {
+    const p = input.persona.trim()
+    if (p !== '' && p.length <= 64) out.persona = p
+  }
+  if (typeof input.chatWorkspace === 'string') {
+    const w = input.chatWorkspace.trim()
+    // 空字符串是**合法值**（= 用默认目录），所以要单独放行。
+    if (w === '') out.chatWorkspace = ''
+    else if (w.length <= 260) out.chatWorkspace = w
   }
 
   out.x = optionalInt(input.x, base.x)

@@ -37,6 +37,8 @@ import { loadVoice, resolveVoice } from '../src/pet/voice.js'
 import {
   createAffection, INTERACT_KINDS, interactLabel, interactText
 } from '../src/pet/interactions.js'
+import { loadPersonas, personaReport } from '../src/pet/persona.js'
+import { createChatState, validateChatText } from '../src/pet/chat.js'
 import { fileURLToPath } from 'node:url'
 
 /** 包根（测试要读真实产物目录）。 */
@@ -1283,6 +1285,194 @@ await okAsync('互动路由也受令牌/围栏保护（跨站请求被拒）', a
 })
 
 await new Promise(resolve => interactServer.close(resolve))
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * 5e. 聊天与人设路由（契约 §3 新增）
+ * ═════════════════════════════════════════════════════════════════════════ */
+section('5e. 聊天与人设路由（/pet/chat、/pet/personas）')
+
+const chatTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'zf-chat-route-'))
+const chatPersonaDir = path.join(chatTmp, 'personas')
+fs.mkdirSync(chatPersonaDir, { recursive: true })
+fs.writeFileSync(path.join(chatPersonaDir, 'strict.md'), '# 严格模式\n\n简洁。\n', 'utf8')
+const routeChatState = createChatState()
+let chatSent = []
+let chatThrow = null
+const chatHandler = createHandler({
+  snapshot,
+  atlas: () => atlas,
+  artDir,
+  token: TOKEN,
+  hub,
+  logger: { warn () {}, debug () {}, info () {} },
+  connection: () => undefined,
+  onPosition: () => {},
+  onCommand: () => ({}),
+  getSettings: () => settingsValue,
+  setSettings: next => next,
+  chat: {
+    status: () => ({
+      enabled: true,
+      sessionId: routeChatState.sessionId,
+      sentCount: routeChatState.snapshot().sentCount,
+      replyCount: routeChatState.snapshot().replyCount,
+      persona: 'default',
+      workspace: chatTmp,
+      available: true,
+      reason: null
+    }),
+    send: async text => {
+      if (chatThrow !== null) throw chatThrow
+      const v = validateChatText(text)
+      if (!v.ok) {
+        const e = new Error(v.reason)
+        e.code = v.reason
+        throw e
+      }
+      chatSent.push(v.text)
+      routeChatState.markSent()
+      return { sessionId: 'chat-session-1' }
+    }
+  },
+  personas: {
+    list: () => ({ ...personaReport(loadPersonas(chatPersonaDir), 'default') }),
+    select: name => {
+      const p = loadPersonas(chatPersonaDir)
+      if (!p.byName.has(name)) {
+        return { ok: false, reason: 'unknown-persona', allowed: p.items.map(i => i.name) }
+      }
+      return { ok: true, persona: name, workspace: chatTmp, note: null }
+    }
+  }
+})
+const chatServer = http.createServer((req, res) => {
+  chatHandler(req, res).catch(() => { if (!res.headersSent) res.writeHead(500); res.end() })
+})
+await new Promise(resolve => chatServer.listen(0, '127.0.0.1', resolve))
+const CHAT_BASE = `http://127.0.0.1:${chatServer.address().port}`
+
+async function chatCall (method, route, body) {
+  const res = await fetch(`${CHAT_BASE}${ROUTE_PREFIX}${route}`, {
+    method,
+    headers: auth(body === undefined ? {} : { 'content-type': 'application/json' }),
+    body: body === undefined ? undefined : JSON.stringify(body)
+  })
+  return { status: res.status, body: await res.text() }
+}
+
+await okAsync('GET /chat 返回状态（会话/人设/工作区/能力位）', async () => {
+  const r = await chatCall('GET', '/chat')
+  assert.equal(r.status, 200, `状态码 ${r.status}`)
+  const b = JSON.parse(r.body)
+  for (const key of ['enabled', 'sessionId', 'sentCount', 'replyCount', 'persona',
+    'workspace', 'available', 'reason']) {
+    assert.ok(key in b, `状态缺字段 ${key}`)
+  }
+})
+
+await okAsync('⭐⭐ POST /chat 真的把消息发出去（不是只回 ok）', async () => {
+  chatSent = []
+  const r = await chatCall('POST', '/chat', { text: '  你好呀  ' })
+  assert.equal(r.status, 200, `状态码 ${r.status}`)
+  assert.deepEqual(chatSent, ['你好呀'], `应发出 trim 后的文本，实际 ${JSON.stringify(chatSent)}`)
+  assert.equal(JSON.parse(r.body).sessionId, 'chat-session-1')
+})
+
+await okAsync('空消息 → 400（不许发出空气泡）', async () => {
+  for (const bad of ['', '   ', '\n']) {
+    const r = await chatCall('POST', '/chat', { text: bad })
+    assert.equal(r.status, 400, `${JSON.stringify(bad)} 应 400，实际 ${r.status}`)
+    assert.equal(JSON.parse(r.body).error, 'empty')
+  }
+})
+
+await okAsync('超长消息 → 400 too-long', async () => {
+  const r = await chatCall('POST', '/chat', { text: 'a'.repeat(2001) })
+  assert.equal(r.status, 400)
+  assert.equal(JSON.parse(r.body).error, 'too-long')
+})
+
+await okAsync('⭐ 投递失败 → 502 且带宿主给的原因（不吞原因）', async () => {
+  chatThrow = Object.assign(new Error('上游炸了'), { code: 'boom' })
+  const r = await chatCall('POST', '/chat', { text: '你好' })
+  chatThrow = null
+  assert.equal(r.status, 502)
+  const b = JSON.parse(r.body)
+  assert.equal(b.error, 'send-failed')
+  assert.ok(String(b.message).includes('上游炸了'),
+    `502 必须带原因（否则用户只看到"发送失败"），实际 ${JSON.stringify(b)}`)
+})
+
+await okAsync('能力不可用 → 503；无会话 → 409（各自有专属状态码）', async () => {
+  chatThrow = Object.assign(new Error('宿主未装配'), { code: 'unavailable' })
+  assert.equal((await chatCall('POST', '/chat', { text: 'x' })).status, 503)
+  chatThrow = Object.assign(new Error('没会话'), { code: 'no-session' })
+  assert.equal((await chatCall('POST', '/chat', { text: 'x' })).status, 409)
+  chatThrow = null
+})
+
+await okAsync('GET /personas 返回列表（含内置 default）', async () => {
+  const r = await chatCall('GET', '/personas')
+  assert.equal(r.status, 200)
+  const b = JSON.parse(r.body)
+  assert.ok(Array.isArray(b.names), 'names 应是数组')
+  assert.ok(b.names.includes('default'), '必须有内置 default（保证功能永远可用）')
+  assert.ok(b.names.includes('strict'), '应扫到磁盘上的 strict.md')
+})
+
+await okAsync('⭐ POST /personas 切换成功；未知人设 → 400 且列出可选项', async () => {
+  const good = await chatCall('POST', '/personas', { name: 'strict' })
+  assert.equal(good.status, 200, `切换应成功，实际 ${good.status}`)
+  assert.equal(JSON.parse(good.body).persona, 'strict')
+
+  const bad = await chatCall('POST', '/personas', { name: 'nope' })
+  assert.equal(bad.status, 400)
+  const b = JSON.parse(bad.body)
+  assert.equal(b.error, 'unknown-persona')
+  assert.ok(Array.isArray(b.allowed) && b.allowed.includes('default'),
+    '拒绝时必须列出可选项（调用方才能自我纠正）')
+})
+
+await okAsync('⭐ 切换人设的白名单在路由层（非法名到不了 select）', async () => {
+  for (const evil of ['../x', '..', '__proto__', 'toString', '']) {
+    const r = await chatCall('POST', '/personas', { name: evil })
+    assert.equal(r.status, 400, `${JSON.stringify(evil)} 应 400，实际 ${r.status}`)
+  }
+})
+
+await okAsync('未装配聊天/人设 → 503（不许假装成功）', async () => {
+  const bare = createHandler({
+    snapshot,
+    atlas: () => atlas,
+    artDir,
+    token: TOKEN,
+    hub,
+    logger: { warn () {}, debug () {}, info () {} },
+    connection: () => undefined,
+    onPosition: () => {},
+    onCommand: () => ({})
+  })
+  const srv = http.createServer((req, res) => {
+    bare(req, res).catch(() => { if (!res.headersSent) res.writeHead(500); res.end() })
+  })
+  await new Promise(resolve => srv.listen(0, '127.0.0.1', resolve))
+  const base = `http://127.0.0.1:${srv.address().port}`
+  for (const route of ['/chat', '/personas']) {
+    const res = await fetch(`${base}${ROUTE_PREFIX}${route}`, { headers: auth() })
+    assert.equal(res.status, 503, `${route} 应 503，实际 ${res.status}`)
+    assert.equal(JSON.parse(await res.text()).error, 'unavailable')
+  }
+  await new Promise(resolve => srv.close(resolve))
+})
+
+await okAsync('聊天路由也受令牌/围栏保护（跨站请求被拒）', async () => {
+  const res = await fetch(`${CHAT_BASE}${ROUTE_PREFIX}/chat`, {
+    headers: { 'sec-fetch-site': 'cross-site' }
+  })
+  assert.equal(res.status, 403, `跨站请求应 403，实际 ${res.status}`)
+})
+
+await new Promise(resolve => chatServer.close(resolve))
 
 /* ══════════════════════════════════════════════════════════════════════════
  * 6. 端口自发现与 exe 定位

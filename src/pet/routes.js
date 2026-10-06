@@ -181,6 +181,8 @@ function readBody (req) {
  * @param {() => object} [deps.voiceManifest] - 语音清单（`GET /pet/voices`）
  * @param {object} [deps.interact] - 互动（`{list(), do(kind)}`）；
  *   缺失时 `/pet/interact` 返回 503
+ * @param {object} [deps.chat] - 聊天（`{status(), send(text)}`）；缺失时 503
+ * @param {object} [deps.personas] - 人设（`{list(), select(name)}`）；缺失时 503
  * @param {() => object} deps.getSettings - 取当前设置
  * @param {(next: object) => object} deps.setSettings - 覆盖设置（归一化后返回）
  * @param {() => object|undefined} deps.connection - 取 `connection` 服务
@@ -472,6 +474,83 @@ export function createHandler (deps) {
             return
           }
           sendJson(res, 200, { ok: true, action, result, pomodoro: deps.pomodoro.snapshot() })
+          return
+        }
+        sendJson(res, 405, { error: 'method not allowed' })
+        return
+      }
+
+      // ── 聊天（契约 §3 新增）───────────────────────────────────────────
+      //
+      // `GET  /pet/chat`  → 状态（会话 id / 人设 / 工作区 / 计数）
+      // `POST /pet/chat`  → 发一条消息（body `{text}`）
+      // `GET  /pet/personas` → 人设列表
+      // `POST /pet/personas` → 切换人设（body `{name}`）
+      //
+      // 为什么聊天不复用 `/pet/send`：`/pet/send` 是"发到**某个已有**会话"
+      //（用户从列表里挑一个），而聊天是"发到**我们自己的**会话" ——
+      // 它会按需创建工作区与会话，语义完全不同。
+      if (route === '/chat') {
+        if (deps.chat === undefined || deps.chat === null) {
+          sendJson(res, 503, { error: 'unavailable', reason: '宿主未装配聊天' })
+          return
+        }
+        if (req.method === 'GET') {
+          sendJson(res, 200, deps.chat.status())
+          return
+        }
+        if (req.method === 'POST' || req.method === 'PUT') {
+          let parsed
+          try {
+            parsed = JSON.parse(await readBody(req))
+          } catch {
+            sendJson(res, 400, { error: 'invalid json' })
+            return
+          }
+          try {
+            const result = await deps.chat.send(parsed?.text)
+            sendJson(res, 200, { ok: true, sessionId: result?.sessionId ?? null })
+          } catch (error) {
+            const code = error?.code
+            if (code === 'empty') sendJson(res, 400, { error: 'empty' })
+            else if (code === 'too-long') sendJson(res, 400, { error: 'too-long', max: SEND_MAX_CHARS })
+            else if (code === 'no-session') sendJson(res, 409, { error: 'no-session', message: String(error?.message ?? error) })
+            else if (code === 'unavailable') sendJson(res, 503, { error: 'unavailable', reason: String(error?.message ?? error) })
+            else {
+              logger?.warn?.(`zhuang-fangyi-pet: 聊天发送失败（${error?.message ?? error}）`)
+              sendJson(res, 502, { error: 'send-failed', message: String(error?.message ?? error) })
+            }
+          }
+          return
+        }
+        sendJson(res, 405, { error: 'method not allowed' })
+        return
+      }
+
+      if (route === '/personas') {
+        if (deps.personas === undefined || deps.personas === null) {
+          sendJson(res, 503, { error: 'unavailable', reason: '宿主未装配人设' })
+          return
+        }
+        if (req.method === 'GET') {
+          sendJson(res, 200, deps.personas.list())
+          return
+        }
+        if (req.method === 'POST' || req.method === 'PUT') {
+          let parsed
+          try {
+            parsed = JSON.parse(await readBody(req))
+          } catch {
+            sendJson(res, 400, { error: 'invalid json' })
+            return
+          }
+          const result = deps.personas.select(String(parsed?.name ?? ''))
+          if (result.ok !== true) {
+            // 400 而不是 500：名字不在列表里是**调用方的错**，不是内部故障。
+            sendJson(res, 400, { error: result.reason ?? 'bad persona', allowed: result.allowed ?? [] })
+            return
+          }
+          sendJson(res, 200, result)
           return
         }
         sendJson(res, 405, { error: 'method not allowed' })
