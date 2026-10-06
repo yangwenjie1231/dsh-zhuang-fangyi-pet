@@ -179,6 +179,8 @@ function readBody (req) {
  * @param {(name: string) => string|null} [deps.resolveVoice] - 语音名 → 绝对路径
  *   （**白名单查表**，不在清单里返回 null → 404）
  * @param {() => object} [deps.voiceManifest] - 语音清单（`GET /pet/voices`）
+ * @param {object} [deps.interact] - 互动（`{list(), do(kind)}`）；
+ *   缺失时 `/pet/interact` 返回 503
  * @param {() => object} deps.getSettings - 取当前设置
  * @param {(next: object) => object} deps.setSettings - 覆盖设置（归一化后返回）
  * @param {() => object|undefined} deps.connection - 取 `connection` 服务
@@ -470,6 +472,58 @@ export function createHandler (deps) {
             return
           }
           sendJson(res, 200, { ok: true, action, result, pomodoro: deps.pomodoro.snapshot() })
+          return
+        }
+        sendJson(res, 405, { error: 'method not allowed' })
+        return
+      }
+
+      // ── 互动（契约 §3 新增）───────────────────────────────────────────
+      //
+      // `GET  /pet/interact` → 可用动作 + 当前好感度（exe 右键菜单据此建菜单）
+      // `POST /pet/interact {kind}` → 记一次互动，返回新好感度
+      //
+      // ⚠️ 动作名走**白名单**（`INTERACT_KINDS`），与番茄钟同一纪律：
+      // 绝不把用户串透传到内部。
+      if (route === '/interact') {
+        if (deps.interact === undefined || deps.interact === null) {
+          sendJson(res, 503, { error: 'unavailable', reason: '宿主未装配互动' })
+          return
+        }
+        if (req.method === 'GET') {
+          sendJson(res, 200, deps.interact.list())
+          return
+        }
+        if (req.method === 'POST' || req.method === 'PUT') {
+          let parsed
+          try {
+            parsed = JSON.parse(await readBody(req))
+          } catch {
+            sendJson(res, 400, { error: 'invalid json' })
+            return
+          }
+          const kind = String(parsed?.kind ?? '')
+          // ⚠️ 白名单校验在**路由层**做（不只依赖 `do()` 返回 null）：
+          // 动作串绝不允许到达内部。`__proto__`/`toString` 这类原型链名字
+          // 尤其危险 —— 回退验证实测：只在 `do()` 里挡是不够的，
+          // 因为那时串已经进了内部，任何一层"顺手查表"都可能踩到原型。
+          if (!Array.isArray(deps.interact.kinds) ||
+              !deps.interact.kinds.includes(kind)) {
+            sendJson(res, 400, {
+              error: 'bad kind',
+              allowed: deps.interact.kinds ?? []
+            })
+            return
+          }
+          const result = deps.interact.do(kind)
+          if (result === null || result.ok !== true) {
+            sendJson(res, 400, {
+              error: 'bad kind',
+              allowed: result?.allowed ?? []
+            })
+            return
+          }
+          sendJson(res, 200, result)
           return
         }
         sendJson(res, 405, { error: 'method not allowed' })

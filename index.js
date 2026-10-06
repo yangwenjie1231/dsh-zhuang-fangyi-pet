@@ -48,6 +48,7 @@ import { createHandler, newToken, ROUTE_PREFIX } from './src/pet/routes.js'
 import { createLauncher } from './src/pet/launcher.js'
 import { createPomodoro } from './src/pet/pomodoro.js'
 import { loadVoice, resolveVoice, voiceReport } from './src/pet/voice.js'
+import { createAffection, INTERACT_KINDS, interactText, interactLabel } from './src/pet/interactions.js'
 
 /** 插件标识（Loader 行 id、token 层 source 共用）。 */
 export const name = 'zhuang-fangyi-pet'
@@ -440,6 +441,98 @@ export function apply (ctx, config) {
     }
   }
 
+  // ── 互动与好感度（用户点名："增加一些互动"）───────────────────────────────
+  //
+  // 纯逻辑在 `src/pet/interactions.js`（防刷的三道闸都在那里，有 27 条单测）。
+  // 这里只做三件事：持久化、把互动变成"桌宠说一句话"、把状态放进快照。
+  let affectionStore = null
+  try {
+    affectionStore = new JsonStore(path.join(dataDir, 'affection.json'), null, { log: null })
+  } catch (error) {
+    logger.warn?.(`zhuang-fangyi-pet: 好感度无法持久化（${error?.message ?? error}）`)
+  }
+
+  const affection = createAffection()
+  if (affectionStore !== null && affectionStore.get() !== null) {
+    try {
+      affection.adopt(affectionStore.get())
+    } catch (error) {
+      boot(`⚠️ 好感度恢复失败（已忽略）：${error?.message ?? error}`)
+    }
+  }
+
+  /**
+   * 最近一次互动（**给 exe 的一次性信号**）。
+   *
+   * 为什么放在快照里而不是让 exe 自己轮询：互动是"用户点了"这个瞬时事件，
+   * exe 需要**恰好播一次**语音。用一个递增的 `seq` 让 exe 判"这是新的一次"，
+   * 比时间戳可靠（同一毫秒两次互动也不会漏）。
+   */
+  let lastInteract = null
+  let interactSeq = 0
+
+  /**
+   * 记一次互动：算好感 → 让桌宠说话（气泡 + 表情 + 语音）。
+   *
+   * ⚠️ **冷却中也要有反应**（`interactions.js` 的 `accepted` 语义）：
+   * 点了没反应比"没涨分"更像坏了。只有未知动作才真的拒绝。
+   *
+   * @param {string} kind - `pet-head` | `feed` | `praise` | `click`
+   * @returns {object} 给路由的响应体
+   */
+  const doInteract = (kind, at = Date.now()) => {
+    const result = affection.interact(kind, at)
+    if (!result.accepted) return { ok: false, error: 'unknown-kind', allowed: INTERACT_KINDS }
+
+    // 持久化（含冷却与今日记账 —— 缺了它们"重启刷新冷却"就成了后门）。
+    if (affectionStore !== null) {
+      affectionStore.value = affection.persist(at)
+      affectionStore.schedule()
+    }
+
+    // 让桌宠说话。文案取自互动配置（click 故意为 null = 不弹气泡，
+    // 它太频繁，弹气泡会刷屏 —— 但它仍然有语音与表情）。
+    try {
+      const locale = settings.get().locale
+      const text = interactText(kind, locale)
+      machine.notify({
+        key: `interact/${kind}`,
+        // 情绪：夸奖/投喂是开心的，摸摸头/打招呼是平静的。
+        state: kind === 'praise' || kind === 'feed' ? 'happy' : 'listening',
+        text: text ?? undefined,
+        priority: 94,
+        durationMs: 5000
+      })
+    } catch (error) {
+      logger.warn?.(`zhuang-fangyi-pet: 互动气泡失败（${error?.message ?? error}）`)
+    }
+
+    // 语音：交给 exe 播（Host 只告诉它"哪个事件"）。
+    // ⚠️ 这里**不直接播** —— Host 没有音频能力，且播放去重/节流在 exe 侧。
+    // 通过快照里的 `interact` 块把"刚发生的互动"传过去（见 `withSettings`）。
+    lastInteract = {
+      seq: ++interactSeq,
+      kind,
+      voice: result.voice,
+      label: interactLabel(kind),
+      at
+    }
+
+    return {
+      ok: true,
+      kind,
+      label: interactLabel(kind),
+      gain: result.gain,
+      cooling: result.cooling,
+      dailyCapped: result.dailyCapped,
+      tierChanged: result.tierChanged,
+      affection: affection.snapshot(at),
+      /** exe 据此播语音（`pet/*` 事件名）。 */
+      voice: result.voice,
+      text: result.text
+    }
+  }
+
   // 诊断信息（`/pet/diag` 暴露，用于区分"代码没生效"与"进程没重载"）。
   const diagnostics = {
     lastChangeAt: null,
@@ -723,6 +816,15 @@ export function apply (ctx, config) {
     // 番茄钟块：**每帧都带上**（exe 用它显示倒计时，overlay 忽略）。
     // 与 `settings` 同一条通道，exe 断线降级轮询时拿到的也是同一份。
     pomodoro: pomodoro.snapshot(Date.now()),
+    // 好感度（exe 显示档位；overlay 忽略）。
+    affection: affection.snapshot(),
+    /**
+     * 最近一次互动 —— exe 靠 `seq` 判"这是新的一次"从而**恰好播一次**语音。
+     *
+     * 为什么不放时间戳：同一毫秒内两次互动（比如快速点了两下不同按钮）
+     * 时间戳相同，exe 会漏掉第二次。递增序号不会。
+     */
+    interact: lastInteract,
     // 会话列表：给"发送到哪个对话"的选择器用（见 `sessionChoices`）。
     sessions: sessionChoices(snap),
     // 能力位：两半边的 ✎ 入口都靠它决定显不显示（**不做没入口的错误**）。
@@ -1037,6 +1139,26 @@ export function apply (ctx, config) {
       count: voice.count,
       lines: voice.lines
     }),
+    /**
+     * 互动（契约 §3 新增）。
+     *
+     * `list()` 给 exe 建右键菜单用 —— **动作表由 Host 给**，不在 exe 里硬编码。
+     * 这样"加一个互动"只改 `interactions.js`，exe 不用动也不用重新编译。
+     */
+    interact: {
+      /** 可用动作名（路由层用它做白名单校验 —— 与 `list()` 同一份真相）。 */
+      kinds: INTERACT_KINDS,
+      list: () => ({
+        kinds: INTERACT_KINDS.map(k => ({
+          kind: k,
+          label: interactLabel(k),
+          /** 该动作有没有气泡文案（click 没有 —— 它太频繁）。 */
+          hasText: interactText(k, 'zh') !== null
+        })),
+        affection: affection.snapshot()
+      }),
+      do: kind => doInteract(kind)
+    },
     /** 番茄钟状态存取（`/pet/pomodoro` 用；见 routes.js 的说明）。 */
     pomodoro: {
       snapshot: () => pomodoro.snapshot(Date.now()),
@@ -1068,6 +1190,15 @@ export function apply (ctx, config) {
           // 重建语音包后不必重启 DSH（与 reload-art 同一考虑）。
           voice = loadVoice(VOICE_DIR, logger)
           return voiceReport(voice)
+        case 'reset-affection':
+          // 诊断用：好感度写坏了（比如手工改了 json）时能归零重来。
+          // **故意不做成界面按钮** —— 一键清空累计好感是很粗暴的事。
+          affection.reset()
+          if (affectionStore !== null) {
+            affectionStore.value = affection.persist(Date.now())
+            affectionStore.flush()
+          }
+          return affection.snapshot()
         case 'quit':
           launcher.stop()
           return { stopped: true }

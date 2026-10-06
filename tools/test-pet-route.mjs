@@ -34,6 +34,9 @@ import {
 import { createHub } from '../src/pet/hub.js'
 import { createPomodoro } from '../src/pet/pomodoro.js'
 import { loadVoice, resolveVoice } from '../src/pet/voice.js'
+import {
+  createAffection, INTERACT_KINDS, interactLabel, interactText
+} from '../src/pet/interactions.js'
 import { fileURLToPath } from 'node:url'
 
 /** 包根（测试要读真实产物目录）。 */
@@ -1103,6 +1106,183 @@ await okAsync('语音路由也受令牌/围栏保护（跨站请求被拒）', a
 })
 
 await new Promise(resolve => voiceServer.close(resolve))
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * 5d. 互动路由（契约 §3 新增）
+ * ═════════════════════════════════════════════════════════════════════════ */
+section('5d. 互动路由（/pet/interact）')
+
+// 用**真实** interactions.js（不是桩）：这条链路真正会出错的是
+// "白名单没接上"与"好感度没真的变"，桩只能验证"路由转发了"。
+let affClock = 1_700_000_000_000
+const realAffection = createAffection({ now: () => affClock })
+const interactCalls = []
+const interactHandler = createHandler({
+  snapshot,
+  atlas: () => atlas,
+  artDir,
+  token: TOKEN,
+  hub,
+  logger: { warn () {}, debug () {}, info () {} },
+  connection: () => undefined,
+  onPosition: () => {},
+  onCommand: () => ({}),
+  getSettings: () => settingsValue,
+  setSettings: next => next,
+  interact: {
+    kinds: INTERACT_KINDS,
+    list: () => ({
+      kinds: INTERACT_KINDS.map(k => ({
+        kind: k,
+        label: interactLabel(k),
+        hasText: interactText(k, 'zh') !== null
+      })),
+      affection: realAffection.snapshot(affClock)
+    }),
+    do: kind => {
+      interactCalls.push(kind)
+      const r = realAffection.interact(kind, affClock)
+      if (!r.accepted) return { ok: false, allowed: INTERACT_KINDS }
+      return {
+        ok: true,
+        kind,
+        label: interactLabel(kind),
+        gain: r.gain,
+        cooling: r.cooling,
+        tierChanged: r.tierChanged,
+        affection: realAffection.snapshot(affClock),
+        voice: r.voice
+      }
+    }
+  }
+})
+const interactServer = http.createServer((req, res) => {
+  interactHandler(req, res).catch(() => { if (!res.headersSent) res.writeHead(500); res.end() })
+})
+await new Promise(resolve => interactServer.listen(0, '127.0.0.1', resolve))
+const INT_BASE = `http://127.0.0.1:${interactServer.address().port}`
+
+async function intCall (method, body) {
+  const res = await fetch(`${INT_BASE}${ROUTE_PREFIX}/interact`, {
+    method,
+    headers: auth(body === undefined ? {} : { 'content-type': 'application/json' }),
+    body: body === undefined ? undefined : JSON.stringify(body)
+  })
+  return { status: res.status, body: await res.text() }
+}
+
+await okAsync('GET /interact 返回动作表与好感度（exe 据此建右键菜单）', async () => {
+  const r = await intCall('GET')
+  assert.equal(r.status, 200, `状态码 ${r.status}`)
+  const body = JSON.parse(r.body)
+  assert.ok(Array.isArray(body.kinds), 'kinds 应是数组')
+  assert.equal(body.kinds.length, INTERACT_KINDS.length)
+  for (const k of body.kinds) {
+    assert.ok(INTERACT_KINDS.includes(k.kind), `未知动作泄漏到线上：${k.kind}`)
+    assert.ok(typeof k.label === 'string' && k.label !== '', `${k.kind} 缺标签`)
+    assert.equal(typeof k.hasText, 'boolean')
+  }
+  assert.ok(body.affection, '应带好感度')
+  assert.equal(typeof body.affection.points, 'number')
+  assert.equal(typeof body.affection.tier, 'string')
+})
+
+await okAsync('⭐⭐ 三个正经互动**真的**加好感（不是只回 ok）', async () => {
+  for (const kind of ['pet-head', 'feed', 'praise']) {
+    const before = realAffection.internals.points
+    affClock += 10 * 60 * 1000   // 跨过所有冷却
+    const r = await intCall('POST', { kind })
+    assert.equal(r.status, 200, `${kind} 应 200，实际 ${r.status}`)
+    const body = JSON.parse(r.body)
+    assert.equal(body.ok, true)
+    assert.ok(body.gain > 0, `${kind} 应加好感，实际 gain=${body.gain}`)
+    assert.ok(realAffection.internals.points > before,
+      `${kind} 真实好感度应增加（${before} → ${realAffection.internals.points}）`)
+    assert.equal(body.affection.points, realAffection.internals.points,
+      '回执里的好感度必须反映真实状态')
+  }
+})
+
+await okAsync('⭐ click 是低收益的（防止"点鼠标"成为最快升级方式）', async () => {
+  affClock += 10 * 60 * 1000
+  const r = await intCall('POST', { kind: 'click' })
+  const body = JSON.parse(r.body)
+  assert.equal(body.ok, true)
+  assert.ok(body.gain <= 1, `click 的收益应 ≤1，实际 ${body.gain}`)
+})
+
+await okAsync('⭐⭐ 白名单之外的动作根本到不了 do()（不是靠它返回 null 兜底）', async () => {
+  const EVIL = ['__proto__', 'constructor', 'toString', 'hasOwnProperty', '',
+    'praise;exit', 'PRAISE', 'praise ', 'pet-head\n', 'valueOf', 'reset']
+  for (const evil of EVIL) {
+    interactCalls.length = 0
+    const r = await intCall('POST', { kind: evil })
+    assert.equal(r.status, 400, `动作 ${JSON.stringify(evil)} 应 400，实际 ${r.status}`)
+    assert.deepEqual(interactCalls, [],
+      `动作 ${JSON.stringify(evil)} **不该到达 do()**，实际到达了：${JSON.stringify(interactCalls)}`)
+  }
+})
+
+await okAsync('白名单内的动作确实到达 do()（否则上面的断言是空的）', async () => {
+  for (const good of INTERACT_KINDS) {
+    interactCalls.length = 0
+    affClock += 10 * 60 * 1000
+    const r = await intCall('POST', { kind: good })
+    assert.equal(r.status, 200, `合法动作 ${good} 应 200，实际 ${r.status}`)
+    assert.deepEqual(interactCalls, [good],
+      `合法动作 ${good} 必须到达 do()，实际：${JSON.stringify(interactCalls)}`)
+  }
+})
+
+await okAsync('缺 kind / 非法 JSON → 400', async () => {
+  assert.equal((await intCall('POST', {})).status, 400)
+  const res = await fetch(`${INT_BASE}${ROUTE_PREFIX}/interact`, {
+    method: 'POST',
+    headers: auth({ 'content-type': 'application/json' }),
+    body: '{oops'
+  })
+  assert.equal(res.status, 400)
+})
+
+await okAsync('不支持的方法 → 405', async () => {
+  const res = await fetch(`${INT_BASE}${ROUTE_PREFIX}/interact`, {
+    method: 'DELETE',
+    headers: auth()
+  })
+  assert.equal(res.status, 405)
+})
+
+await okAsync('未装配互动时返回 503（不许假装成功）', async () => {
+  const bare = createHandler({
+    snapshot,
+    atlas: () => atlas,
+    artDir,
+    token: TOKEN,
+    hub,
+    logger: { warn () {}, debug () {}, info () {} },
+    connection: () => undefined,
+    onPosition: () => {},
+    onCommand: () => ({})
+  })
+  const srv = http.createServer((req, res) => {
+    bare(req, res).catch(() => { if (!res.headersSent) res.writeHead(500); res.end() })
+  })
+  await new Promise(resolve => srv.listen(0, '127.0.0.1', resolve))
+  const base = `http://127.0.0.1:${srv.address().port}`
+  const res = await fetch(`${base}${ROUTE_PREFIX}/interact`, { headers: auth() })
+  assert.equal(res.status, 503)
+  assert.equal(JSON.parse(await res.text()).error, 'unavailable')
+  await new Promise(resolve => srv.close(resolve))
+})
+
+await okAsync('互动路由也受令牌/围栏保护（跨站请求被拒）', async () => {
+  const res = await fetch(`${INT_BASE}${ROUTE_PREFIX}/interact`, {
+    headers: { 'sec-fetch-site': 'cross-site' }
+  })
+  assert.equal(res.status, 403, `跨站请求应 403，实际 ${res.status}`)
+})
+
+await new Promise(resolve => interactServer.close(resolve))
 
 /* ══════════════════════════════════════════════════════════════════════════
  * 6. 端口自发现与 exe 定位
