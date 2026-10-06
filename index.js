@@ -599,6 +599,61 @@ export function apply (ctx, config) {
     }
   }
 
+  /**
+   * 确保聊天工作区在 **DSH 的工作区注册表**里存在，并返回它的 id。
+   *
+   * ── 为什么必须有这一步（用户实测报的问题）────────────────────────────────
+   *
+   * "聊天能不能单独建一个工作区啊，而不是归类在未分类"。
+   *
+   * 根因：DSH 的「工作区」是**一份独立的注册表**
+   *（`$DSH_HOME/storages/workspace.json` 的 `tables.workspaces`），
+   * 光给会话一个 cwd **不会**让它归属任何工作区 —— 于是它掉进「未分类」。
+   * 实测确认：聊天会话的 `cwd` 确实是 `…/Downloads/庄方宜`，目录也真的存在，
+   * 但注册表里没有这个 path 的记录 → 未分类。
+   *
+   * 机制（实测自宿主源码 `dsh-api-session-controller` 的 `SessionCommandController`）：
+   *   · `sessionController.create({ workspaceId })` 会 `workspace.attachSession()`
+   *     把会话挂进那个工作区；
+   *   · ⚠️ **`workspaceId` 与 `cwd` 互斥**：两个都传会抛
+   *     `gateway/bad-request: session.create accepts workspaceId or cwd, not both`。
+   *     所以走这条路时**不能再传 cwd**（cwd 由工作区的 path 决定）。
+   *
+   * 用 `workspaceRegistry.create(path, title)`：它**幂等**
+   *（"the existing or newly durable workspace"），已存在就返回已有的。
+   *
+   * @returns {Promise<string|null>} workspaceId；拿不到注册表时返回 null（退回 cwd 路）
+   */
+  const ensureChatWorkspaceId = async () => {
+    let registry = null
+    try {
+      registry = typeof ctx.get === 'function' ? ctx.get('workspaceRegistry') : undefined
+    } catch { registry = null }
+    if (registry === null || registry === undefined || typeof registry.create !== 'function') {
+      // 宿主没这个服务（旧版本/精简 profile）→ 退回 cwd 路（会话仍可用，只是未分类）。
+      boot('宿主未提供 workspaceRegistry，聊天会话退回 cwd 归属（可能显示为未分类）')
+      return null
+    }
+    const dir = chatWorkspace()
+    try {
+      // 先建目录：`create()` 明确要求 path 是**已存在的目录**
+      //（"Existing directory to own"），否则抛 "path is not a directory"。
+      fs.mkdirSync(dir, { recursive: true })
+      // title 只在**新建**记录时生效（已有记录不会被改名 —— 用户自己改过的标题要尊重）。
+      const wsRecord = await registry.create(dir, DEFAULT_WORKSPACE_NAME)
+      const id = wsRecord?.id ?? wsRecord?.workspaceId ?? null
+      if (typeof id !== 'string' || id === '') {
+        boot('workspaceRegistry.create 没有返回 id，聊天会话退回 cwd 归属')
+        return null
+      }
+      return id
+    } catch (error) {
+      // 拿不到工作区不该让聊天不可用 —— 退回 cwd 路（只是显示为未分类）。
+      logger.warn?.(`zhuang-fangyi-pet: 聊天工作区注册失败（退回 cwd）：${error?.message ?? error}`)
+      return null
+    }
+  }
+
   // ── 人设 → 系统提示词（**会话级替换**）─────────────────────────────────────
   //
   // 机制（实测自宿主源码 `@deepseek-ai/dsh-system-prompt`）：
@@ -707,9 +762,43 @@ export function apply (ctx, config) {
   ctx.effect(() => () => disposePersonaSection(), 'zhuang-fangyi-pet: chat persona section')
 
   /**
+   * 把**已存在**的聊天会话挂进工作区（迁移用）。
+   *
+   * 为什么需要：用户已经在「未分类」里聊过了（那时我们还没建工作区）。
+   * `Workspace.attachSession()` 会校验"会话 cwd == 工作区 path"——
+   * 而聊天会话的 cwd 恰好就是工作区目录，所以**能挂**。
+   *
+   * 只做一次、失败只记日志：这是"把旧会话挪到正确位置"的补偿，
+   * 失败了聊天照常可用（只是仍显示未分类）。
+   *
+   * @param {string} workspaceId
+   * @param {string} sessionId
+   */
+  const attachExistingChatSession = async (workspaceId, sessionId) => {
+    try {
+      let registry = null
+      try {
+        registry = typeof ctx.get === 'function' ? ctx.get('workspaceRegistry') : undefined
+      } catch { registry = null }
+      const wsRecord = registry?.get?.(workspaceId)
+      if (wsRecord === undefined || wsRecord === null) return false
+      // 已经在里面了 → 什么都不做（幂等）。
+      if (Array.isArray(wsRecord.sessionIds) && wsRecord.sessionIds.includes(sessionId)) return true
+      if (typeof wsRecord.attachSession !== 'function') return false
+      await wsRecord.attachSession(sessionId)
+      boot(`已把现有聊天会话挂进工作区：${sessionId}`)
+      return true
+    } catch (error) {
+      // 挂不上不算错（比如会话 cwd 被用户改过）—— 如实记一笔就够了。
+      logger.warn?.(`zhuang-fangyi-pet: 现有聊天会话挂进工作区失败（已忽略）：${error?.message ?? error}`)
+      return false
+    }
+  }
+
+  /**
    * 解析聊天会话服务并**确保会话存在**。
    *
-   * `sessionController.create({cwd, sessionId})` 是"创建或**幂等采纳**"语义，
+   * `sessionController.create({sessionId})` 是"创建或**幂等采纳**"语义，
    * 所以重启后拿同一个 sessionId 再调一次就能接上原来的对话。
    */
   const ensureChatSession = async () => {
@@ -732,11 +821,22 @@ export function apply (ctx, config) {
     }
     // 已有会话（新建过或重启采纳的）：只需保证人设 section 挂在它身上。
     if (chat.sessionId !== null) {
+      // ⭐ 迁移：这条会话可能是"还没建工作区"时创建的（显示为未分类）。
+      // 工作区是幂等注册的，所以每次都可以安全地尝试把它挂进去 ——
+      // 已经在里面时 `attachSession` 那一步会被跳过（见函数内的幂等检查）。
+      const workspaceId = await ensureChatWorkspaceId()
+      if (workspaceId !== null) await attachExistingChatSession(workspaceId, chat.sessionId)
       const applied = await applyChatPersona(chat.sessionId)
       if (applied.mode === 'agents') writePersonaAgentsMd()   // 兜底
       return chat.sessionId
     }
-    const created = await svc.create({ cwd: ws.dir })
+    // ⭐ 先注册工作区，再按 **workspaceId** 建会话 —— 这样它才会被归到
+    // 独立的工作区里，而不是掉进「未分类」（用户实测反馈的就是这个）。
+    const workspaceId = await ensureChatWorkspaceId()
+    // ⚠️ `workspaceId` 与 `cwd` **互斥**（宿主会抛 gateway/bad-request）。
+    const created = await svc.create(
+      workspaceId === null ? { cwd: ws.dir } : { workspaceId }
+    )
     const id = created?.sessionId ?? created?.id ?? null
     if (typeof id !== 'string' || id === '') {
       const error = new Error('sessionController.create 没有返回 sessionId')
@@ -1658,6 +1758,22 @@ export function apply (ctx, config) {
       status: () => {
         const ws = chatWorkspace()
         const snap = chat.snapshot()
+        // 工作区归属：让"到底归到哪儿了"可见（用户反馈过"归类在未分类"）。
+        let workspaceId = null
+        let workspaceTitle = null
+        try {
+          const registry = typeof ctx.get === 'function' ? ctx.get('workspaceRegistry') : undefined
+          if (registry !== null && registry !== undefined && typeof registry.list === 'function') {
+            const hit = registry.list().find(w => {
+              const p = String(w?.path ?? '').replace(/[\\/]+$/, '')
+              return p.toLowerCase() === ws.replace(/[\\/]+$/, '').toLowerCase()
+            })
+            if (hit !== undefined) {
+              workspaceId = hit.id ?? null
+              workspaceTitle = hit.title ?? null
+            }
+          }
+        } catch { /* 拿不到就不显示（不假装有） */ }
         return {
           enabled: settings.get().chatEnabled === true,
           sessionId: snap.sessionId,
@@ -1666,6 +1782,9 @@ export function apply (ctx, config) {
           lastError: snap.lastError,
           persona: currentPersona(),
           workspace: ws,
+          /** DSH 工作区注册表里的归属（null = 未注册 → 会显示为"未分类"）。 */
+          workspaceId,
+          workspaceTitle,
           /** 工作区是否已经真的存在（UI 上"打开目录"按钮据此禁用）。 */
           workspaceExists: (() => {
             try { return fs.existsSync(ws) } catch { return false }

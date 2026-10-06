@@ -233,6 +233,8 @@ window.__ModuleLoader__.load({
         chatWorkspaceHint: '留空 = ~/Downloads/庄方宜',
         chatOpen: '打开工作区目录',
         chatStatus: '聊天状态',
+        chatWsOk: '已归入工作区',
+        chatWsNone: '尚未归入工作区（下次发消息时会自动建并挂上）',
         chatSend: '发一条',
         chatPlaceholder: '和庄方宜说点什么…',
         chatSending: '发送中…',
@@ -352,6 +354,8 @@ window.__ModuleLoader__.load({
         chatWorkspaceHint: 'Empty = ~/Downloads/庄方宜',
         chatOpen: 'Open workspace folder',
         chatStatus: 'Chat status',
+        chatWsOk: 'Filed under workspace',
+        chatWsNone: 'Not filed under a workspace yet (created on your next message)',
         chatSend: 'Send',
         chatPlaceholder: 'Say something to her…',
         chatSending: 'Sending…',
@@ -1613,6 +1617,18 @@ window.__ModuleLoader__.load({
             ? t('chatNoSession')
             : `${t('chatStatus')}：${chatStatus.sessionId ?? t('chatNoSession')} · ` +
               `已发 ${chatStatus.sentCount ?? 0} / 已回 ${chatStatus.replyCount ?? 0}`),
+        // ⭐ 工作区归属：用户反馈过"归类在未分类"，所以把归属**显示出来** ——
+        // 修没修好他自己一眼能看到，不用去翻工作区列表。
+        chatStatus === null
+          ? null
+          : h('p', {
+              key: 'chatWsInfo',
+              className: 'zf-pet-settings__note',
+              'data-zf-ws': chatStatus.workspaceId ? 'ok' : 'none'
+            },
+            chatStatus.workspaceId
+              ? `${t('chatWsOk')}：${chatStatus.workspaceTitle ?? chatStatus.workspaceId}`
+              : t('chatWsNone')),
 
         h('h3', { key: 'g5', className: 'zf-pet-settings__group' }, t('groupStatus')),
         h('div', { key: 'status', className: 'zf-pet-status' }, [

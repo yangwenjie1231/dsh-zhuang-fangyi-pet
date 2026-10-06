@@ -555,6 +555,194 @@ await ok('⭐⭐ 聊天发送 → 人设作为 deployment:persona-prefix 注册�
   for (const d of local.__effects) if (typeof d === 'function') assert.doesNotThrow(() => d())
 })
 
+/* ── ⭐ 工作区归属：聊天必须归到独立工作区，而不是"未分类" ──────────────────
+ *
+ * 用户实测反馈："聊天能不能单独建一个工作区啊，而不是归类在未分类"。
+ * 根因：DSH 的工作区是**独立注册表**（`workspaceRegistry`），光给会话一个 cwd
+ * 不会让它归属任何工作区。修法是先 `workspaceRegistry.create(path, title)`
+ * 拿到 workspaceId，再 `sessionController.create({ workspaceId })`。
+ *
+ * ⚠️ **`workspaceId` 与 `cwd` 互斥**（宿主会抛 `gateway/bad-request`）——
+ * 这一条必须断言，否则"两个都传"会在真机上直接失败。
+ * ──────────────────────────────────────────────────────────────────────── */
+
+await ok('⭐⭐ 聊天会话按 workspaceId 创建（不再掉进"未分类"）', async () => {
+  // 清掉上一条测试留下的会话：共享 tmpHome 会串味（实测踩到：前一个测试写过
+  // chat.json，于是这里走的是"采纳已有会话"分支，create 根本没被调用）。
+  fs.rmSync(path.join(tmpHome, 'zhuang-fangyi-pet', 'chat.json'), { force: true })
+  const chatHome = fs.mkdtempSync(path.join(os.tmpdir(), 'zf-ws-e2e-'))
+  const local = makeCtx(makeWebServer())
+  const created = []
+  const wsCalls = []
+  const fakeWorkspace = {
+    id: 'ws-zf-1',
+    path: path.join(chatHome, 'ws'),
+    title: '庄方宜',
+    sessionIds: [],
+    attachSession: async sid => { fakeWorkspace.sessionIds.push(sid) }
+  }
+  local.provide('workspaceRegistry', {
+    async create (p, title) { wsCalls.push({ p, title }); fakeWorkspace.path = p; return fakeWorkspace },
+    get (id) { return id === fakeWorkspace.id ? fakeWorkspace : undefined },
+    list () { return [fakeWorkspace] }
+  })
+  local.provide('sessionController', {
+    async list () { return { items: [] } },
+    async create (req) {
+      created.push({ ...req })
+      return { sessionId: 'chat-ws-1' }
+    },
+    async prompt (req, signal) {
+      if (req?.mode !== 'queue' && req?.mode !== 'steer') throw new Error('mode 必填')
+      signal.throwIfAborted()
+      return { accepted: true }
+    }
+  })
+  const petIndex = await import(`file://${path.join(ROOT, 'index.js').replace(/\\/g, '/')}`)
+  petIndex.apply(toCordisLike(local, ['webServer']), {})
+  const ws = local.__services.get('webServer')
+  await ws.listen()
+  const base = `http://127.0.0.1:${ws.port}`
+  await fetch(`${base}/api/zhuang-fangyi/pet/settings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: { chatWorkspace: path.join(chatHome, 'ws') } })
+  })
+  const res = await fetch(`${base}/api/zhuang-fangyi/pet/chat`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text: '你好' })
+  })
+  assert.equal(res.status, 200, `聊天应 200，实际 ${res.status}`)
+  // ⭐ 工作区先被注册（幂等接口），标题就是工作区名
+  assert.equal(wsCalls.length, 1, `应注册一次工作区，实际 ${wsCalls.length}`)
+  assert.equal(wsCalls[0].p, path.join(chatHome, 'ws'), '注册的 path 应是聊天工作区目录')
+  assert.equal(wsCalls[0].title, '庄方宜', '工作区标题应是「庄方宜」')
+  // ⭐⭐ 会话用 workspaceId 创建，且**不带 cwd**（两者互斥，宿主会抛）
+  assert.equal(created.length, 1)
+  assert.equal(created[0].workspaceId, 'ws-zf-1', `应带 workspaceId，实际 ${JSON.stringify(created[0])}`)
+  assert.equal(created[0].cwd, undefined,
+    'workspaceId 与 cwd 互斥 —— 同时传宿主会抛 gateway/bad-request')
+  // 状态里能看出归属（用户不用去猜"到底归到哪儿了"）
+  const st = await (await fetch(`${base}/api/zhuang-fangyi/pet/chat`)).json()
+  assert.equal(st.workspaceId, 'ws-zf-1', '状态应报出工作区 id')
+  assert.equal(st.workspaceTitle, '庄方宜', '状态应报出工作区标题')
+  await ws.close()
+  for (const d of local.__effects) if (typeof d === 'function') assert.doesNotThrow(() => d())
+})
+
+await ok('⭐ 宿主没有 workspaceRegistry → 退回 cwd（聊天仍可用，不假装有工作区）', async () => {
+  fs.rmSync(path.join(tmpHome, 'zhuang-fangyi-pet', 'chat.json'), { force: true })
+  const chatHome = fs.mkdtempSync(path.join(os.tmpdir(), 'zf-ws-fb-'))
+  const { local, created } = makeChatAssembly({ withResolveAgent: false })
+  const petIndex = await import(`file://${path.join(ROOT, 'index.js').replace(/\\/g, '/')}`)
+  petIndex.apply(toCordisLike(local, ['webServer']), {})
+  const ws = local.__services.get('webServer')
+  await ws.listen()
+  const base = `http://127.0.0.1:${ws.port}`
+  await fetch(`${base}/api/zhuang-fangyi/pet/settings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: { chatWorkspace: path.join(chatHome, 'ws') } })
+  })
+  const res = await fetch(`${base}/api/zhuang-fangyi/pet/chat`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text: '你好' })
+  })
+  assert.equal(res.status, 200, '没有工作区注册表时聊天也必须能用')
+  assert.equal(created[0].workspaceId, undefined, '拿不到注册表就不该编一个 workspaceId')
+  assert.equal(created[0].cwd, path.join(chatHome, 'ws'), '应退回 cwd 路')
+  await ws.close()
+  for (const d of local.__effects) if (typeof d === 'function') assert.doesNotThrow(() => d())
+})
+
+await ok('⭐⭐ 注册表返回垃圾（没有 id）→ 退回 cwd，绝不编一个假 workspaceId', async () => {
+  // 为什么单独测这条：`create()` 的返回值形状是**宿主的契约**，
+  // 万一它不返回 id（版本差异/字段改名），我们绝不能拿一个编的 id 去建会话 ——
+  // 那样宿主会抛 `workspace/not-found`，而用户看到的是"聊天坏了"。
+  // 正确行为是**退回 cwd**（会话仍能用，只是显示未分类）。
+  fs.rmSync(path.join(tmpHome, 'zhuang-fangyi-pet', 'chat.json'), { force: true })
+  const chatHome = fs.mkdtempSync(path.join(os.tmpdir(), 'zf-ws-bad-'))
+  const local = makeCtx(makeWebServer())
+  const created = []
+  local.provide('workspaceRegistry', {
+    // 故意返回一个**没有 id** 的记录
+    async create () { return { path: 'x', title: 'y' } },
+    get () { return undefined },
+    list () { return [] }
+  })
+  local.provide('sessionController', {
+    async list () { return { items: [] } },
+    async create (req) { created.push({ ...req }); return { sessionId: 'chat-bad-1' } },
+    async prompt (req, signal) { signal.throwIfAborted(); return { accepted: true } }
+  })
+  const petIndex = await import(`file://${path.join(ROOT, 'index.js').replace(/\\/g, '/')}`)
+  petIndex.apply(toCordisLike(local, ['webServer']), {})
+  const ws = local.__services.get('webServer')
+  await ws.listen()
+  const base = `http://127.0.0.1:${ws.port}`
+  await fetch(`${base}/api/zhuang-fangyi/pet/settings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: { chatWorkspace: path.join(chatHome, 'ws') } })
+  })
+  const res = await fetch(`${base}/api/zhuang-fangyi/pet/chat`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text: '你好' })
+  })
+  assert.equal(res.status, 200, '注册表给不出 id 时聊天也必须能用')
+  assert.equal(created[0].workspaceId, undefined, '绝不能编一个假 workspaceId（宿主会抛 workspace/not-found）')
+  assert.equal(created[0].cwd, path.join(chatHome, 'ws'), '应退回 cwd 路')
+  await ws.close()
+  for (const d of local.__effects) if (typeof d === 'function') assert.doesNotThrow(() => d())
+})
+
+await ok('⭐⭐ 已有会话会被补挂进工作区（迁移"未分类"里的旧会话）', async () => {
+  const chatHome = fs.mkdtempSync(path.join(os.tmpdir(), 'zf-ws-mig-'))
+  const local = makeCtx(makeWebServer())
+  const attached = []
+  const fakeWorkspace = {
+    id: 'ws-zf-2',
+    path: path.join(chatHome, 'ws'),
+    title: '庄方宜',
+    sessionIds: [],
+    attachSession: async sid => { attached.push(sid) }
+  }
+  local.provide('workspaceRegistry', {
+    async create (p, title) { fakeWorkspace.path = p; return fakeWorkspace },
+    get (id) { return id === fakeWorkspace.id ? fakeWorkspace : undefined },
+    list () { return [fakeWorkspace] }
+  })
+  local.provide('sessionController', {
+    async list () { return { items: [] } },
+    // 关键：**采纳**已有会话（chat.json 里那条），不是新建
+    async create () { return { sessionId: 'chat-existing-1' } },
+    async prompt (req, signal) {
+      if (req?.mode !== 'queue' && req?.mode !== 'steer') throw new Error('mode 必填')
+      signal.throwIfAborted()
+      return { accepted: true }
+    }
+  })
+  // 预置一条"已存在"的聊天会话（模拟用户之前聊过、当时还没有工作区）
+  fs.writeFileSync(path.join(tmpHome, 'zhuang-fangyi-pet', 'chat.json'), JSON.stringify({
+    sessionId: 'chat-existing-1', sentCount: 1, replyCount: 0
+  }), 'utf8')
+  const petIndex = await import(`file://${path.join(ROOT, 'index.js').replace(/\\/g, '/')}`)
+  petIndex.apply(toCordisLike(local, ['webServer']), {})
+  const ws = local.__services.get('webServer')
+  await ws.listen()
+  const base = `http://127.0.0.1:${ws.port}`
+  await fetch(`${base}/api/zhuang-fangyi/pet/settings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: { chatWorkspace: path.join(chatHome, 'ws') } })
+  })
+  await fetch(`${base}/api/zhuang-fangyi/pet/chat`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text: '你好' })
+  })
+  assert.deepEqual(attached, ['chat-existing-1'],
+    `已有会话应被补挂进工作区，实际 ${JSON.stringify(attached)}`)
+  await ws.close()
+  for (const d of local.__effects) if (typeof d === 'function') assert.doesNotThrow(() => d())
+  fs.rmSync(path.join(tmpHome, 'zhuang-fangyi-pet', 'chat.json'), { force: true })
+})
+
 await ok('⭐ 宿主没有 resolveAgent → 退回 AGENTS.md（功能不瘸）', async () => {
   const chatHome = fs.mkdtempSync(path.join(os.tmpdir(), 'zf-persona-fb-'))
   const { local, registered } = makeChatAssembly({ withResolveAgent: false })
