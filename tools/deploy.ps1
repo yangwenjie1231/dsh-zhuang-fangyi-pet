@@ -42,7 +42,9 @@ $Dst = Join-Path $DshHome "profiles\$Profile\node_modules\dsh-zhuang-fangyi-pet"
 # 顶层文件（与 package.json 的 files 字段一致）
 $Files = @('index.js', 'client.js', 'package.json', 'cordis.patch.yml', 'README.md')
 # 目录。`bin` 单独处理（可 -SkipExe 跳过）。
-$Dirs = @('src', 'tools', 'docs', 'art', 'pet')
+# `personas-seed` 是**首次运行播种**用的内置人设（Host 把它复制进 $DSH_HOME），
+# 漏拷的症状：新机器上人设目录永远为空，聊天没有角色（且毫无报错）。
+$Dirs = @('src', 'tools', 'docs', 'art', 'pet', 'personas-seed')
 
 Write-Host "源:   $Src"
 Write-Host "目标: $Dst"

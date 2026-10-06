@@ -544,7 +544,10 @@ export function createHandler (deps) {
             sendJson(res, 400, { error: 'invalid json' })
             return
           }
-          const result = deps.personas.select(String(parsed?.name ?? ''))
+          // ⚠️ `select` 是**异步**的：换人设可能要把 section 挂到活着的聊天
+          // 会话上（resolveAgent 是异步的）。漏 await 的话 result 永远是
+          // Promise，`result.ok !== true` 恒成立 → 切换永远 400。
+          const result = await deps.personas.select(String(parsed?.name ?? ''))
           if (result.ok !== true) {
             // 400 而不是 500：名字不在列表里是**调用方的错**，不是内部故障。
             sendJson(res, 400, { error: result.reason ?? 'bad persona', allowed: result.allowed ?? [] })

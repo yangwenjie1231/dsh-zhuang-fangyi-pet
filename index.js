@@ -480,17 +480,13 @@ export function apply (ctx, config) {
   // ── 聊天（用户点名："可以与桌宠聊天"）───────────────────────────────────
   //
   // 设计：**专用工作区 + 专用会话**，而不是另起一套 LLM 调用。
-  //   · 工作区（默认 `~/Downloads/庄方宜`）里放 `AGENTS.md` = 当前人设；
-  //   · `dsh-agent-instructions` 会自动加载它 —— 不自己发明提示词注入；
+  //   · 人设**优先走系统提示词 section**（会话级替换，见下 `applyChatPersona`）；
+  //   · 宿主不支持时退回 AGENTS.md（`dsh-agent-instructions` 自动加载）；
   //   · 用户能在 DSH 界面里看到这段对话、接着聊、翻历史，那才是"聊天"。
   //
   // 人设**可切换**（用户明确要求"人设、性格要作为可调的，因为我有好多种提示词"）：
   // 切换 = 把人设文件同步进工作区 `AGENTS.md`（见 `persona.js` 的安全约束）。
   const PERSONAS_DIR = path.join(dataDir, 'personas')
-  let personas = loadPersonas(PERSONAS_DIR, logger)
-  // 把人设目录建出来：用户要往里丢自己的 md，没有目录他不知道放哪。
-  try { fs.mkdirSync(PERSONAS_DIR, { recursive: true }) } catch { /* 建不出也不影响内置 */ }
-  boot(`人设已加载：${personas.items.length} 份（目录 ${PERSONAS_DIR}）`)
 
   let chatStore = null
   try {
@@ -502,6 +498,40 @@ export function apply (ctx, config) {
   if (chatStore !== null && chatStore.get() !== null) {
     try { chat.adopt(chatStore.get()) } catch { /* 坏数据按新建处理 */ }
   }
+
+  /**
+   * 当前挂在聊天会话上的人设 section（`{sessionId, persona, dispose}` 或 null）。
+   *
+   * 同名 section 在同一作用域注册两次会抛，所以换人设/换会话前必须先
+   * dispose 旧的 —— 这个状态就是那本账。
+   */
+  let personaSection = null
+
+  /**
+   * **首次运行播种**：把包里的人设样例（用户提供的庄方宜完整人设）放进
+   * `personas/`，让 `default` 一开始就是真角色而不是空壳。
+   *
+   * 只在**目录为空**时播种：之后用户删掉它（想换自己的）不该被复活，
+   * 用户改过它更不该被覆盖 —— 那是不可逆的数据丢失。
+   */
+  const seedPersonas = () => {
+    try {
+      // 先建目录：**首次运行时它还不存在**（readdir 会 ENOENT），
+      // 不先建的话播种永远不生效 —— 而那是这条功能唯一的一次执行机会。
+      fs.mkdirSync(PERSONAS_DIR, { recursive: true })
+      const existing = fs.readdirSync(PERSONAS_DIR).filter(f => f.toLowerCase().endsWith('.md'))
+      if (existing.length > 0) return
+      const seed = path.join(HERE, 'personas-seed', 'default.md')
+      if (!fs.existsSync(seed)) return
+      fs.copyFileSync(seed, path.join(PERSONAS_DIR, 'default.md'))
+      boot('人设目录为空 → 已播种内置的庄方宜人设（default.md）')
+    } catch (error) {
+      boot(`人设播种失败（已忽略）：${error?.message ?? error}`)
+    }
+  }
+  seedPersonas()
+  let personas = loadPersonas(PERSONAS_DIR, logger)
+  boot(`人设已加载：${personas.items.length} 份（目录 ${PERSONAS_DIR}）`)
 
   /** 当前选中的人设（设置项；`default` = 内置）。 */
   const currentPersona = () => {
@@ -524,12 +554,92 @@ export function apply (ctx, config) {
     return path.join(base, 'Downloads', DEFAULT_WORKSPACE_NAME)
   }
 
+  /** 只建目录（`create({cwd})` 需要它存在）；**不写 AGENTS.md**。 */
+  const ensureWorkspaceDir = () => {
+    const dir = chatWorkspace()
+    try {
+      fs.mkdirSync(dir, { recursive: true })
+      return { ok: true, dir }
+    } catch (error) {
+      logger.warn?.(`zhuang-fangyi-pet: 聊天工作区创建失败（${error?.message ?? error}）：${dir}`)
+      return { ok: false, reason: 'mkdir-failed', dir }
+    }
+  }
+
+  // ── 人设 → 系统提示词（**会话级替换**）─────────────────────────────────────
+  //
+  // 机制（实测自宿主源码 `@deepseek-ai/dsh-system-prompt`）：
+  //   · `systemPrompt.section({name, order, text})` 注册一段系统提示词；
+  //   · **同名 scoped section 遮蔽全局** —— 源码注释原文：
+  //     "for a per-agent override, register through that agent's `agent.ctx` instead"；
+  //   · `deployment:persona-prefix`（order 0）就是**官方人设槽位**：
+  //     "an agent preset shadows the deployment's persona with its own"。
+  //
+  // 所以：把人设注册到**聊天会话那个 agent 的作用域**里、用官方人设槽位的名字
+  // —— 替换只发生在这一个会话，别的会话（你的工作会话）完全不受影响。
+  // 这正是"仅在聊天中替换"的宿主原生实现。
+  //
+  // 兜底：宿主没有 `resolveAgent` / agent 作用域拿不到 `systemPrompt` 时，
+  // 退回 AGENTS.md 方案（写进聊天工作区，`dsh-agent-instructions` 会加载它）。
+  const PERSONA_SECTION_NAME = 'deployment:persona-prefix'
+
   /**
-   * 确保聊天工作区存在，且 `AGENTS.md` = 当前人设。
+   * 给聊天会话注册/更新人设 section。
    *
-   * @returns {{ok: boolean, reason?: string, dir: string, file?: string}}
+   * @param {string} sessionId
+   * @returns {Promise<{mode: 'section'|'agents'|'none', reason?: string}>}
    */
-  const ensureWorkspace = () => {
+  const applyChatPersona = async sessionId => {
+    const name = currentPersona()
+    const body = readPersona(PERSONAS_DIR, name, logger)
+    if (body === null) return { mode: 'none', reason: 'unknown-persona' }
+    const svc = resolveSendService()
+    if (svc === null || typeof svc.resolveAgent !== 'function') {
+      return { mode: 'agents', reason: 'no-resolveAgent' }
+    }
+    try {
+      const resolved = await svc.resolveAgent(sessionId)
+      const agent = resolved?.agent ?? resolved?.value?.agent ?? null
+      const actx = agent?.ctx ?? null
+      if (actx === null) return { mode: 'agents', reason: 'no-agent' }
+      // ⚠️ 读取未声明服务在 cordis 上会**抛**（可选链防不住）——所以必须 try。
+      let sp = null
+      try {
+        sp = typeof actx.get === 'function' ? actx.get('systemPrompt') : undefined
+      } catch { sp = null }
+      if (sp === null || sp === undefined || typeof sp.section !== 'function') {
+        return { mode: 'agents', reason: 'no-systemPrompt' }
+      }
+      const order = typeof sp.getSectionOrder === 'function'
+        ? sp.getSectionOrder('DEPLOYMENT_PERSONA_PREFIX')
+        : 0
+      // `interpolate: false`：人设正文里的 `{{` 保持字面（否则会被当成变量引用，
+      // 未定义的引用会让整次组装**抛错** —— 用户的人设里出现双花括号是迟早的事）。
+      const dispose = sp.section({
+        name: PERSONA_SECTION_NAME,
+        order: Number.isFinite(order) ? order : 0,
+        text: '本会话的角色设定如下；它取代默认的助手人设。除工具调用等运行规范外，'
+          + '请始终以该角色的身份、语气与知识边界回应。\n\n' + body.trim(),
+        interpolate: false
+      })
+      if (personaSection !== null && personaSection.dispose !== null) {
+        try { personaSection.dispose() } catch { /* 旧会话已没了 */ }
+      }
+      personaSection = {
+        sessionId,
+        persona: name,
+        dispose: typeof dispose === 'function' ? dispose : null
+      }
+      boot(`人设已作为系统提示词注册到聊天会话（${name}，section=${PERSONA_SECTION_NAME}）`)
+      return { mode: 'section' }
+    } catch (error) {
+      logger.warn?.(`zhuang-fangyi-pet: 人设 section 注册失败（退回 AGENTS.md）：${error?.message ?? error}`)
+      return { mode: 'agents', reason: 'section-failed' }
+    }
+  }
+
+  /** 把人设写进工作区 AGENTS.md（**兜底路径**；section 路成功时不走这里）。 */
+  const writePersonaAgentsMd = () => {
     const dir = chatWorkspace()
     const name = currentPersona()
     const result = applyPersona({ workspaceDir: dir, personaDir: PERSONAS_DIR, name, logger })
@@ -545,6 +655,16 @@ export function apply (ctx, config) {
     }
     return { ok: true, dir, file: result.file }
   }
+
+  // 插件卸载 → 收掉挂着的 section。**不收的话**：宿主重载插件后旧的
+  // `deployment:persona-prefix` scoped section 还在会话作用域里，
+  // 新的一次注册又会插一份（或撞名抛错）—— 人设就泄漏到别的会话去了。
+  ctx.effect(() => () => {
+    if (personaSection !== null && personaSection.dispose !== null) {
+      try { personaSection.dispose() } catch { /* 会话已经没了 */ }
+    }
+    personaSection = null
+  }, 'zhuang-fangyi-pet: chat persona section')
 
   /**
    * 解析聊天会话服务并**确保会话存在**。
@@ -564,14 +684,18 @@ export function apply (ctx, config) {
       error.code = 'unavailable'
       throw error
     }
-    const ws = ensureWorkspace()
+    const ws = ensureWorkspaceDir()
     if (!ws.ok) {
-      const error = new Error(`聊天工作区不可用（${ws.reason}）`)
+      const error = new Error('聊天工作区目录创建失败')
       error.code = 'no-session'
       throw error
     }
-    // 已经有会话：直接用它（并复核工作区仍然是它）。
-    if (chat.sessionId !== null) return chat.sessionId
+    // 已有会话（新建过或重启采纳的）：只需保证人设 section 挂在它身上。
+    if (chat.sessionId !== null) {
+      const applied = await applyChatPersona(chat.sessionId)
+      if (applied.mode === 'agents') writePersonaAgentsMd()   // 兜底
+      return chat.sessionId
+    }
     const created = await svc.create({ cwd: ws.dir })
     const id = created?.sessionId ?? created?.id ?? null
     if (typeof id !== 'string' || id === '') {
@@ -584,7 +708,15 @@ export function apply (ctx, config) {
       chatStore.value = chat.persist()
       chatStore.flush()
     }
-    boot(`聊天会话已建立：${id}（工作区 ${ws.dir}）`)
+    // 人设：优先走**会话级 section**（真正替换系统提示词、只影响这个会话）；
+    // 宿主不支持时退回 AGENTS.md。
+    const applied = await applyChatPersona(id)
+    if (applied.mode === 'agents') {
+      const md = writePersonaAgentsMd()
+      boot(`聊天会话已建立：${id}（人设走 AGENTS.md：${md.ok ? 'ok' : md.reason}）`)
+    } else {
+      boot(`聊天会话已建立：${id}（人设走系统提示词 section）`)
+    }
     return id
   }
 
@@ -1410,27 +1542,44 @@ export function apply (ctx, config) {
         ...personaReport(personas, currentPersona()),
         items: personas.items
       }),
-      select: name => {
+      select: async name => {
         const rec = personas.byName.get(name)
         if (rec === undefined) {
           return { ok: false, reason: 'unknown-persona', allowed: personas.items.map(p => p.name) }
         }
-        // 切人设 = 改设置 + 同步 `AGENTS.md`。两步都做完才算成功。
+        // 切人设 = 改设置 + 把新人设送到聊天会话上。
+        // section 路成功时只换 section（旧的同名 section 先 dispose）；
+        // 走 AGENTS.md 兜底时重写文件。两条路都由 applyChatPersona 内部选好。
         settings.update({ persona: name })
         settings.flush()
-        const applied = ensureWorkspace()
+        let applied = { ok: true, dir: chatWorkspace(), mode: 'none' }
+        if (chat.sessionId !== null) {
+          // 会话活着：直接换 section（applyChatPersona 内部会先 dispose 旧的）。
+          const r = await applyChatPersona(chat.sessionId)
+          applied = { ok: true, dir: chatWorkspace(), mode: r.mode }
+          if (r.mode === 'agents') {
+            const md = writePersonaAgentsMd()
+            if (!md.ok) applied = { ok: false, reason: md.reason, allowed: personas.items.map(p => p.name) }
+          }
+        } else {
+          // 会话还没建：只更新兜底用的 AGENTS.md（section 等会话建立时再挂）。
+          const md = writePersonaAgentsMd()
+          if (!md.ok) applied = { ok: false, reason: md.reason, allowed: personas.items.map(p => p.name) }
+        }
         if (!applied.ok) {
           return { ok: false, reason: applied.reason, allowed: personas.items.map(p => p.name) }
         }
         // 人设换了 → 广播一帧（exe 的菜单/设置页要看到新值）。
         hub.broadcast(withSettings(machine.snapshot()))
-        boot(`人设已切换 → ${name}（工作区 ${applied.dir}）`)
+        boot(`人设已切换 → ${name}（${applied.mode === 'section' ? '系统提示词 section' : 'AGENTS.md'}）`)
         return {
           ok: true,
           persona: name,
           workspace: applied.dir,
+          /** 走的是哪条路（UI 可以显示"重启会话后生效"之类）。 */
+          mode: applied.mode,
           /** 用户手写了 AGENTS.md 时我们不动它 —— 如实告诉调用方。 */
-          note: applied.reason === 'user-file' ? '工作区已有用户手写的 AGENTS.md，未改动' : null
+          note: null
         }
       },
       /** 重新扫描人设目录（用户往目录里丢了新的 md 后不必重启）。 */

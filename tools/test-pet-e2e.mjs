@@ -423,6 +423,200 @@ await ok('⭐ 有 sessionController 时：list() 的标题进快照，指定会�
   // 必须关掉这个桩 webServer：它真的在 listen，不关会让测试进程挂着不退出。
   await ws.close()
 })
+
+/* ── 人设：播种、会话级 section、AGENTS.md 兜底（v3）───────────────────────── */
+
+section('1b. 人设 → 系统提示词（会话级替换）')
+
+await ok('⭐ 首次运行播种：default.md 出现且内容是庄方宜完整人设', async () => {
+  const p = path.join(tmpHome, 'zhuang-fangyi-pet', 'personas', 'default.md')
+  assert.ok(fs.existsSync(p), `播种文件不存在：${p}`)
+  const text = fs.readFileSync(p, 'utf8')
+  assert.ok(text.includes('# 庄方宜'), '应有标题（列表显示用）')
+  // 用户点名的台词必须逐字在（防止我"顺手改写"了人设内容）
+  for (const line of ['能咬牙坚持下来，就不算输。', '人还在，那就什么都在。',
+    '冬天总会过去，春天总会再来。']) {
+    assert.ok(text.includes(line), `台词缺失：${line}`)
+  }
+  // 给我的指令（"注意合理替换…"）绝不能进人设正文 —— 模型读到会困惑
+  assert.ok(!text.includes('仅在聊天中替换'), '元指令不该出现在人设正文里')
+})
+
+await ok('GET /personas 列出播种的人设，标题取自 # 行', async () => {
+  const r = await get('/api/zhuang-fangyi/pet/personas')
+  assert.equal(r.status, 200)
+  const body = JSON.parse(r.body)
+  assert.ok(body.names.includes('default'), '应有 default')
+  const d = body.items.find(i => i.name === 'default')
+  assert.equal(d.title, '庄方宜', `标题应取 # 行，实际 ${JSON.stringify(d?.title)}`)
+})
+
+/**
+ * 装配一个带完整聊天链路的实例：sessionController.create + prompt + resolveAgent。
+ *
+ * `agentCtx.get('systemPrompt')` 返回**记录器** —— 断言打在"注册了什么 section"
+ * 上，这正是"会话级替换"的可观测结果。
+ */
+function makeChatAssembly ({ withResolveAgent }) {
+  const local = makeCtx(makeWebServer())
+  const created = []
+  const prompts = []
+  const registered = []
+  let disposed = 0
+  const agentCtx = {
+    get (name) {
+      if (name === 'systemPrompt') {
+        return {
+          section (s) {
+            registered.push({ ...s })
+            disposed += 0
+            return () => { disposed += 1 }
+          },
+          getSectionOrder (n) { return n === 'DEPLOYMENT_PERSONA_PREFIX' ? 0 : -1 }
+        }
+      }
+      return undefined
+    }
+  }
+  local.provide('sessionController', {
+    async list () { return { items: [] } },
+    create: async req => { created.push({ ...req }); return { sessionId: 'chat-e2e-1' } },
+    async prompt (req, signal) {
+      if (req?.mode !== 'queue' && req?.mode !== 'steer') throw new Error('mode 必填')
+      signal.throwIfAborted()
+      prompts.push({ ...req, __signal: signal })
+      return { accepted: true }
+    },
+    ...(withResolveAgent
+      ? { resolveAgent: async () => ({ agent: { ctx: agentCtx } }) }
+      : {})
+  })
+  const petIndex = null // 与上面同一导入（复用 petIndex 变量会遮蔽，这里直接用 pet）
+  local.__petApply = null
+  return { local, created, prompts, registered, disposeCount: () => disposed }
+}
+
+await ok('⭐⭐ 聊天发送 → 人设作为 deployment:persona-prefix 注册到会话作用域', async () => {
+  const chatHome = fs.mkdtempSync(path.join(os.tmpdir(), 'zf-persona-e2e-'))
+  const { local, created, prompts, registered } = makeChatAssembly({ withResolveAgent: true })
+  const petIndex = await import(`file://${path.join(ROOT, 'index.js').replace(/\\/g, '/')}`)
+  petIndex.apply(toCordisLike(local, ['webServer']), {})
+  const ws = local.__services.get('webServer')
+  await ws.listen()
+  const base = `http://127.0.0.1:${ws.port}`
+  // 工作区指到临时目录：**绝不**在真机 Downloads 里建目录（测试纪律）
+  await fetch(`${base}/api/zhuang-fangyi/pet/settings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: { chatWorkspace: path.join(chatHome, 'ws') } })
+  })
+  const res = await fetch(`${base}/api/zhuang-fangyi/pet/chat`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text: '你好' })
+  })
+  assert.equal(res.status, 200, `聊天发送应 200，实际 ${res.status}`)
+  // create 收到的 cwd 就是设置的工作区
+  assert.equal(created.length, 1)
+  assert.equal(created[0].cwd, path.join(chatHome, 'ws'))
+  // ⭐ 人设 section 已注册到 agent 作用域，用的就是官方人设槽位的名字
+  assert.equal(registered.length, 1, `应注册恰好一个 section，实际 ${registered.length}`)
+  assert.equal(registered[0].name, 'deployment:persona-prefix',
+    `必须用官方人设槽位名（遮蔽部署人设），实际 ${registered[0].name}`)
+  assert.equal(registered[0].interpolate, false,
+    '必须 interpolate:false —— 人设正文里的 {{ 不该被当变量（未定义引用会让组装抛错）')
+  assert.ok(registered[0].text.includes('取代默认的助手人设'), '应有替换声明')
+  assert.ok(registered[0].text.includes('能咬牙坚持下来，就不算输。'),
+    '人设正文应逐字进入 section')
+  // ⭐ section 路成功 → **不写** AGENTS.md（否则人设文本进提示词两遍）
+  assert.ok(!fs.existsSync(path.join(chatHome, 'ws', 'AGENTS.md')),
+    'section 路成功时不应再写 AGENTS.md（会双重注入）')
+  // 聊天 prompt 正常投递（mode/signal 约束与 /pet/send 同一套）
+  assert.equal(prompts.length, 1)
+  assert.equal(prompts[0].mode, 'queue')
+  await ws.close()
+  for (const d of local.__effects) if (typeof d === 'function') assert.doesNotThrow(() => d())
+})
+
+await ok('⭐ 宿主没有 resolveAgent → 退回 AGENTS.md（功能不瘸）', async () => {
+  const chatHome = fs.mkdtempSync(path.join(os.tmpdir(), 'zf-persona-fb-'))
+  const { local, registered } = makeChatAssembly({ withResolveAgent: false })
+  const petIndex = await import(`file://${path.join(ROOT, 'index.js').replace(/\\/g, '/')}`)
+  petIndex.apply(toCordisLike(local, ['webServer']), {})
+  const ws = local.__services.get('webServer')
+  await ws.listen()
+  const base = `http://127.0.0.1:${ws.port}`
+  await fetch(`${base}/api/zhuang-fangyi/pet/settings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: { chatWorkspace: path.join(chatHome, 'ws') } })
+  })
+  const res = await fetch(`${base}/api/zhuang-fangyi/pet/chat`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text: '你好' })
+  })
+  assert.equal(res.status, 200)
+  assert.equal(registered.length, 0, '没有 resolveAgent 就不该有 section')
+  // 兜底：AGENTS.md 应被写进工作区
+  const md = path.join(chatHome, 'ws', 'AGENTS.md')
+  assert.ok(fs.existsSync(md), `兜底路径应写 AGENTS.md：${md}`)
+  const text = fs.readFileSync(md, 'utf8')
+  assert.ok(text.includes('能咬牙坚持下来，就不算输。'), 'AGENTS.md 应含人设正文')
+  await ws.close()
+  for (const d of local.__effects) if (typeof d === 'function') assert.doesNotThrow(() => d())
+})
+
+await ok('⭐ 切换人设 → 旧 section 先 dispose 再挂新的（不撞名、不残留）', async () => {
+  const chatHome = fs.mkdtempSync(path.join(os.tmpdir(), 'zf-persona-sw-'))
+  // 先放第二个人设
+  const personaDir = path.join(tmpHome, 'zhuang-fangyi-pet', 'personas')
+  fs.writeFileSync(path.join(personaDir, 'strict.md'), '# 严格模式\n\n只说结论。\n', 'utf8')
+  const asm = makeChatAssembly({ withResolveAgent: true })
+  const { local, registered } = asm
+  const petIndex = await import(`file://${path.join(ROOT, 'index.js').replace(/\\/g, '/')}`)
+  petIndex.apply(toCordisLike(local, ['webServer']), {})
+  const ws = local.__services.get('webServer')
+  await ws.listen()
+  const base = `http://127.0.0.1:${ws.port}`
+  await fetch(`${base}/api/zhuang-fangyi/pet/settings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: { chatWorkspace: path.join(chatHome, 'ws') } })
+  })
+  await fetch(`${base}/api/zhuang-fangyi/pet/chat`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text: '你好' })
+  })
+  assert.equal(registered.length, 1)
+  const before = asm.disposeCount()
+  const sw = await fetch(`${base}/api/zhuang-fangyi/pet/personas`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: 'strict' })
+  })
+  assert.equal(sw.status, 200, `切换应 200，实际 ${sw.status}`)
+  assert.equal(registered.length, 2, '切换后应注册新 section')
+  assert.equal(asm.disposeCount(), before + 1, '旧 section 必须先 dispose（否则同名注册会抛/残留）')
+  assert.ok(registered[1].text.includes('只说结论。'), '新 section 应含新人设正文')
+  assert.ok(!registered[1].text.includes('能咬牙坚持下来'), '旧人设不该残留')
+  await ws.close()
+  for (const d of local.__effects) if (typeof d === 'function') assert.doesNotThrow(() => d())
+  fs.rmSync(path.join(personaDir, 'strict.md'), { force: true })
+})
+
+/* ── 工程卫生：.ps1 必须带 UTF-8 BOM（这条抓到过 3 次真实事故）─────────────── */
+
+await ok('⭐⭐ 所有 tools/*.ps1 都是 UTF-8 **带 BOM**（PS 5.1 否则按 ANSI 解析中文）', async () => {
+  // 为什么放在测试里而不是脚本自己里：BOM 被 `edit`/`write` 工具剥掉后，
+  // 脚本在 PS 5.1 下**解析都过不了**，自己永远没机会自检。
+  // 本轮 real-world 事故：build-voice.ps1、deploy.ps1 各炸过一次，
+  // 症状都是"Missing closing '}'"这种莫名其妙的解析错误。
+  const toolDir = path.join(ROOT, 'tools')
+  const scripts = fs.readdirSync(toolDir).filter(f => f.toLowerCase().endsWith('.ps1'))
+  assert.ok(scripts.length > 0, 'tools 下应至少有一个 .ps1（找不到说明测试跑错目录）')
+  for (const f of scripts) {
+    const head = fs.readFileSync(path.join(toolDir, f)).subarray(0, 3)
+    const hasBom = head[0] === 0xEF && head[1] === 0xBB && head[2] === 0xBF
+    assert.ok(hasBom, `tools/${f} 缺 UTF-8 BOM —— PS 5.1 会把它按 ANSI 解析直接崩。` +
+      '修复：用 [System.IO.File]::WriteAllText($p, $text, new UTF8Encoding($true)) 补回。')
+  }
+})
+
 /* ── 画廊（读操作，无副作用）────────────────────────────────────────────── */
 
 await ok('⭐ 快照 settings 块带 hint/statusAlways（原生窗状态显示的依据，契约 §2 v6）', async () => {
