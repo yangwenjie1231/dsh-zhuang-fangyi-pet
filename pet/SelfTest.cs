@@ -87,6 +87,7 @@ namespace DshZhuangFangyiPet
                 TestPomodoro();
                 TestVoice();
                 TestInteract();
+                TestChatMode();
                 TestMutex();
                 TestHttp(opt);
             }
@@ -1947,6 +1948,86 @@ namespace DshZhuangFangyiPet
                   "好感度显示：档位名可读、满级时 nextMin=0（界面显示已满级）",
                   "25 分 → " + (disp == null ? "?" : disp.Label()) +
                   "；200 分 → nextMin=" + (maxed == null ? "?" : maxed.NextMin.ToString()));
+        }
+
+        // ------------------------------------------------------------------
+        // v3：聊天模式（输入窗的"聊天 / 指定对话"两种投递目标）
+        // ------------------------------------------------------------------
+        //
+        // ⚠️ 这一节**不测真实发送**（那要起宿主），测的是：
+        // 能力位解析、以及"不可用时**藏起选项**而不是留着让你点了报错"。
+        private static void TestChatMode()
+        {
+            // (1) 块缺失 → 不可用（旧 Host 零回归：输入窗只显示"指定对话"）
+            PetSnapshot noBlock = PetSnapshot.Parse(
+                "{\"rev\":1,\"petState\":\"idle\",\"label\":\"待机中\"}");
+            Check(noBlock != null && noBlock.Chat == null &&
+                  !PetChatInfo.ShouldShowChat(noBlock.Chat),
+                  "chat 块缺失 → 不可用（旧快照零回归）",
+                  "Chat=" + (noBlock == null || noBlock.Chat == null ? "null" : "非 null") +
+                  " → ShouldShow=false");
+
+            // (2) 完整块解析
+            PetSnapshot s = PetSnapshot.Parse(
+                "{\"rev\":2,\"petState\":\"idle\",\"chat\":{" +
+                "\"available\":true,\"enabled\":true,\"reason\":null,\"persona\":\"庄方宜\"}}");
+            PetChatInfo c = s == null ? null : s.Chat;
+            Check(c != null && c.Available && c.Enabled && c.Persona == "庄方宜" &&
+                  PetChatInfo.ShouldShowChat(c),
+                  "chat 块解析：能力位 + 人设名",
+                  c == null ? "解析失败" : ("available=1 enabled=1 persona=" + c.Persona));
+
+            // (3) ⭐ available=false → 不显示（宿主没装配，留着入口就是坑）
+            PetSnapshot off = PetSnapshot.Parse(
+                "{\"rev\":3,\"petState\":\"idle\",\"chat\":{\"available\":false," +
+                "\"enabled\":true,\"reason\":\"宿主未装配 sessionController\"}}");
+            Check(off != null && off.Chat != null && !PetChatInfo.ShouldShowChat(off.Chat),
+                  "⭐ available=false → 不显示聊天选项（不给一个点了必失败的入口）",
+                  "reason=" + (off?.Chat?.Reason ?? "(null)"));
+
+            // (4) ⭐ 用户关掉（enabled=false）时 Host 会报 available=false
+            //     —— 两种"不可用"的原因不同，reason 要能区分
+            PetSnapshot userOff = PetSnapshot.Parse(
+                "{\"rev\":4,\"petState\":\"idle\",\"chat\":{\"available\":false," +
+                "\"enabled\":false,\"reason\":\"聊天已在设置里关闭\"}}");
+            Check(userOff != null && !PetChatInfo.ShouldShowChat(userOff.Chat) &&
+                  userOff.Chat.Enabled == false &&
+                  (userOff.Chat.Reason ?? "").Contains("设置"),
+                  "⭐ 用户关掉聊天 → 也不显示，且 reason 指明是设置里关的（不是宿主问题）",
+                  "reason=" + (userOff?.Chat?.Reason ?? "(null)"));
+
+            // (5) ShouldShowChat 对 null 安全
+            Check(!PetChatInfo.ShouldShowChat(null),
+                  "ShouldShowChat(null) 安全返回 false", "null → false");
+
+            // (6) ⭐ 真实输入窗：可用性变化时选项真的跟着变
+            PetInput input = new PetInput(null);
+            try
+            {
+                List<string> both = input.DiagSetChatAvailability(true, true);
+                bool okBoth = both.Count == 2 && both[0] == "聊天" && both[1] == "指定对话";
+                Check(okBoth, "⭐ 可用时输入窗有「聊天 + 指定对话」两个选项",
+                      string.Join(" / ", both));
+
+                List<string> noHost = input.DiagSetChatAvailability(false, true);
+                bool okNoHost = noHost.Count == 1 && noHost[0] == "指定对话";
+                Check(okNoHost, "⭐ 宿主不可用时只剩「指定对话」（聊天选项被藏起来）",
+                      string.Join(" / ", noHost));
+
+                List<string> chatOff = input.DiagSetChatAvailability(true, false);
+                bool okChatOff = chatOff.Count == 1 && chatOff[0] == "指定对话";
+                Check(okChatOff, "⭐ 用户关掉聊天时也只剩「指定对话」",
+                      string.Join(" / ", chatOff));
+
+                // 反向确认：重新打开后两个选项回来（证明不是"一旦隐藏就回不来"）
+                List<string> back = input.DiagSetChatAvailability(true, true);
+                Check(back.Count == 2, "反向：重新可用后两个选项都回来",
+                      string.Join(" / ", back));
+            }
+            finally
+            {
+                try { input.Close(); } catch { }
+            }
         }
 
         private static void TestClamp()

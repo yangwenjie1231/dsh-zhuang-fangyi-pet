@@ -978,6 +978,22 @@ export function apply (ctx, config) {
     send: {
       available: resolveSendService() !== null,
       reason: sendMissingReason ?? null
+    },
+    /**
+     * 聊天能力位（契约 §2 v9，additive）。
+     *
+     * exe 的输入窗靠它决定"聊天"那个选项显不显示 ——
+     * **给了入口但点了必失败是最糟的交互**（✎ 按钮当初就是为此用能力位控制的）。
+     */
+    chat: {
+      available: resolveSendService() !== null && settings.get().chatEnabled === true,
+      /** 设置里的总开关（与 available 分开：一个"宿主不行"、一个"用户不要"）。 */
+      enabled: settings.get().chatEnabled === true,
+      reason: resolveSendService() !== null
+        ? (settings.get().chatEnabled === true ? null : '聊天已在设置里关闭')
+        : (sendMissingReason ?? null),
+      /** 当前人设（exe 的提示语里可以显示）。 */
+      persona: currentPersona()
     }
   })
 

@@ -190,6 +190,28 @@ namespace DshZhuangFangyiPet
         }
     }
 
+    /// <summary>
+    /// 契约 §2（v9，additive）：snapshot.chat —— 聊天能力位。
+    ///
+    /// 块缺失（旧 Host）→ `Chat=null` → 输入窗只显示"指定对话"（零回归）。
+    /// </summary>
+    internal sealed class PetChatInfo
+    {
+        /// <summary>能不能聊（宿主装配了 sessionController **且**用户没关）。</summary>
+        public bool Available;
+        /// <summary>用户设置里的开关（与 Available 分开：一个"宿主不行"、一个"用户不要"）。</summary>
+        public bool Enabled;
+        public string Reason;
+        /// <summary>当前人设名（提示语里可以显示）。</summary>
+        public string Persona;
+
+        /// <summary>纯函数：输入窗该不该显示"聊天"选项。</summary>
+        public static bool ShouldShowChat(PetChatInfo chat)
+        {
+            return chat != null && chat.Available;
+        }
+    }
+
     internal sealed class PetSnapshot
     {
         public long Rev = -1;
@@ -204,6 +226,8 @@ namespace DshZhuangFangyiPet
         public PetPomodoroInfo Pomodoro;
         /// <summary>契约 §2 v9（additive）：好感度块。块缺失 = null（旧 Host）。</summary>
         public PetAffectionInfo Affection;
+        /// <summary>契约 §2 v9（additive）：聊天能力位。块缺失 = null（按不可用处理）。</summary>
+        public PetChatInfo Chat;
         /// <summary>
         /// 契约 §2 v9（additive）：最近一次互动（一次性信号）。
         ///
@@ -347,6 +371,19 @@ namespace DshZhuangFangyiPet
                 pi.Available = send.Bool("available", false);
                 pi.Reason = send.Str("reason", null);
                 s.Send = pi;
+            }
+
+            // 契约 §2 v9（additive）：聊天能力位。**块缺失 → null → 按不可用处理**
+            //（旧 Host 没有这个功能，输入窗就不显示"聊天"选项）。
+            PetJson.JVal chatv = root.Get("chat");
+            if (chatv != null && chatv.IsObj)
+            {
+                PetChatInfo ci = new PetChatInfo();
+                ci.Available = chatv.Bool("available", false);
+                ci.Enabled = chatv.Bool("enabled", false);
+                ci.Reason = chatv.Str("reason", null);
+                ci.Persona = chatv.Str("persona", null);
+                s.Chat = ci;
             }
 
             // 契约 §2 v7（additive）：番茄钟块。**块缺失 → Pomodoro=null**，

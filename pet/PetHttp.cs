@@ -768,6 +768,87 @@ namespace DshZhuangFangyiPet
         }
 
         /// <summary>
+        /// 发一条**聊天**消息（v3：POST /pet/chat）。
+        ///
+        /// 与 `PostSend` 的差别：`PostSend` 发到你**指定的已有会话**，
+        /// 而聊天发给**专用聊天会话**（工作区「庄方宜」，人设由 AGENTS.md 决定），
+        /// 宿主会按需创建工作区与会话。
+        ///
+        /// 回调形状与 `PostSend` **完全一致**（`(status, body)`），
+        /// 所以输入窗的失败文案映射能整段复用 —— 不为聊天再写一套错误提示。
+        /// </summary>
+        public void PostChat(string text, Action<int, string> done)
+        {
+            PostChatOrSend("/api/zhuang-fangyi/pet/chat", "{\"text\":\"" + Escape(text ?? "") + "\"}", done);
+        }
+
+        /// <summary>
+        /// 两个 POST 的公共实现（发消息与聊天只差 URL 与 body）。
+        ///
+        /// 抽出来的理由：这段有 40 行（超时、令牌、401 计数、错误体读取），
+        /// 抄两遍早晚有一处忘了同步 —— 而"忘了同步"在这类代码里的表现
+        /// 就是"其中一个通道的失败原因丢了"，正是 502 那次的形态。
+        /// </summary>
+        private void PostChatOrSend(string path, string json, Action<int, string> done)
+        {
+            if (done == null) return;
+            if (_disposed) { done(0, "http 已释放"); return; }
+            string url = _base + path;
+            string token = _token;
+            ThreadPool.QueueUserWorkItem(delegate(object _)
+            {
+                try
+                {
+                    HttpWebRequest req = (HttpWebRequest)WebRequest.Create(url);
+                    req.Method = "POST";
+                    req.Timeout = 20000;
+                    req.ReadWriteTimeout = 20000;
+                    req.Proxy = null;
+                    req.KeepAlive = false;
+                    req.ContentType = "application/json; charset=utf-8";
+                    req.Headers["Authorization"] = "Bearer " + token;
+                    byte[] payload = new UTF8Encoding(false).GetBytes(json);
+                    req.ContentLength = payload.Length;
+                    using (Stream rs = req.GetRequestStream()) rs.Write(payload, 0, payload.Length);
+                    using (HttpWebResponse resp = (HttpWebResponse)req.GetResponse())
+                    {
+                        int code = (int)resp.StatusCode;
+                        using (Stream st = resp.GetResponseStream())
+                        {
+                            done(code, new UTF8Encoding(false).GetString(ReadAll(st, 256 * 1024)));
+                        }
+                    }
+                }
+                catch (WebException wex)
+                {
+                    // 非 2xx 会走到这里 —— 但**响应体里有宿主给的原因**，
+                    // 必须读出来（502 那次就是把它丢了，界面上只剩"发送失败"）。
+                    int code = 0;
+                    string body = null;
+                    try
+                    {
+                        HttpWebResponse r = wex.Response as HttpWebResponse;
+                        if (r != null)
+                        {
+                            code = (int)r.StatusCode;
+                            using (Stream st = r.GetResponseStream())
+                            {
+                                if (st != null) body = new UTF8Encoding(false).GetString(ReadAll(st, 256 * 1024));
+                            }
+                        }
+                    }
+                    catch { }
+                    if (code == 0) code = 0;   // 网络层失败：0
+                    done(code, body);
+                }
+                catch (Exception ex)
+                {
+                    done(0, PetLog.Describe(ex));
+                }
+            });
+        }
+
+        /// <summary>
         /// 拉互动动作表（GET /pet/interact）→ 回调（线程池线程上被调，UI 侧要自己切回来）。
         ///
         /// **菜单项由 Host 给**（不在 exe 里硬编码）：加一个互动只改

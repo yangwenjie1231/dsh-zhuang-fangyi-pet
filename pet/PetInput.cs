@@ -35,8 +35,21 @@ namespace DshZhuangFangyiPet
         /// <summary>当前可选的会话（与 ComboBox 项一一对应）。</summary>
         private List<PetSessionChoice> _choices = new List<PetSessionChoice>();
 
-        private readonly PetHttp _http;
-        private readonly Dispatcher _ui;
+        private readonly PetHttp _http;        private readonly Dispatcher _ui;
+
+        // ── v3：聊天模式 ────────────────────────────────────────────────────
+        /// <summary>投递目标选择器（"聊天" / "指定对话"）。</summary>
+        private ComboBox _modeBox;
+        private TextBlock _modeLabel;
+        /// <summary>true = 发给专用聊天会话（`/pet/chat`），false = 发到指定对话。</summary>
+        private bool ChatMode
+        {
+            get { return _modeBox != null && _modeBox.SelectedIndex == 0; }
+        }
+        /// <summary>宿主是否装配了聊天（false 时只留"指定对话"，不给一个必失败的选项）。</summary>
+        private bool _chatAvailable;
+        /// <summary>设置里是否允许在气泡里聊天（关掉时同样隐藏聊天选项）。</summary>
+        private bool _chatEnabled = true;
 
         private IntPtr _hwnd;
         private bool _sending;
@@ -159,9 +172,41 @@ namespace DshZhuangFangyiPet
             _target.Margin = new Thickness(0, 0, 0, 0);
             _target.SelectionChanged += delegate { SetHint(); };
 
+            // ── v3：聊天模式（用户点名"可以与桌宠聊天"）─────────────────────
+            //
+            // 两种投递目标的差别（用户必须能看懂，否则会发错地方）：
+            //   · **聊天**   → 发到**专用聊天会话**（工作区「庄方宜」，
+            //                  人设由 AGENTS.md 决定，回复会进气泡）；
+            //   · **某个对话** → 发到你选的那个已有会话（原来的行为）。
+            //
+            // 为什么放在同一个窗口而不是两个窗口：用户的心智是"我要说句话"，
+            // 具体发去哪是次要选择 —— 多开一个窗口只会让他困惑该用哪个。
+            _modeLabel = new TextBlock();
+            _modeLabel.Text = "发给";
+            _modeLabel.FontSize = 11;
+            _modeLabel.Foreground = new SolidColorBrush(Color.FromArgb(170, 90, 100, 120));
+            _modeLabel.VerticalAlignment = VerticalAlignment.Center;
+            _modeLabel.Margin = new Thickness(0, 0, 6, 0);
+
+            _modeBox = new ComboBox();
+            _modeBox.FontSize = 12;
+            _modeBox.MinWidth = 88;
+            _modeBox.Margin = new Thickness(0, 0, 6, 0);
+            _modeBox.Items.Add("聊天");
+            _modeBox.Items.Add("指定对话");
+            _modeBox.SelectedIndex = 0;   // 默认聊天（那是用户点名的功能）
+            _modeBox.SelectionChanged += delegate
+            {
+                if (_syncing) return;
+                UpdateModeVisibility();
+                SetHint();
+            };
+
             _targetRow = new StackPanel();
             _targetRow.Orientation = Orientation.Horizontal;
             _targetRow.Margin = new Thickness(12, 10, 12, 0);
+            _targetRow.Children.Add(_modeLabel);
+            _targetRow.Children.Add(_modeBox);
             _targetRow.Children.Add(_targetLabel);
             _targetRow.Children.Add(_projectBox);
             _targetRow.Children.Add(_target);
@@ -281,6 +326,7 @@ namespace DshZhuangFangyiPet
             if (IsVisible) { _box.Focus(); _box.SelectAll(); return; }
             _sending = false;
             _box.Clear();
+            UpdateModeVisibility();
             SetHint();
             Show();
 
@@ -469,6 +515,66 @@ namespace DshZhuangFangyiPet
             return r;
         }
 
+        // ── v3：聊天模式 ────────────────────────────────────────────────────
+
+        /// <summary>
+        /// 告诉输入窗"聊天能不能用"（宿主能力位 + 用户设置）。
+        ///
+        /// ⚠️ 不可用时**把选项藏起来**（而不是留着让你点了报错）：
+        /// "给了入口但点了必失败"是最糟的交互 —— 发消息那个 ✎ 按钮
+        /// 当初就是为此才用 `available` 位控制的。
+        /// </summary>
+        public void SetChatAvailability(bool available, bool enabled)
+        {
+            _chatAvailable = available;
+            _chatEnabled = enabled;
+            UpdateModeVisibility();
+        }
+
+        /// <summary>按可用性重建"投递目标"下拉的选项，并保证选中项合法。</summary>
+        private void UpdateModeVisibility()
+        {
+            if (_modeBox == null) return;
+            bool canChat = _chatAvailable && _chatEnabled;
+            _syncing = true;
+            try
+            {
+                int want = _modeBox.SelectedIndex;
+                _modeBox.Items.Clear();
+                if (canChat) _modeBox.Items.Add("聊天");
+                _modeBox.Items.Add("指定对话");
+                // 默认选聊天（用户点名的功能）；不能聊就只能是"指定对话"。
+                _modeBox.SelectedIndex = canChat ? Math.Max(0, Math.Min(want < 0 ? 0 : want, _modeBox.Items.Count - 1)) : 0;
+            }
+            finally { _syncing = false; }
+
+            // 只有"指定对话"模式才需要那三个选择器 —— 聊天模式下它们是噪音，
+            // 而且会让人以为"聊天还要挑对话"。
+            Visibility vis = ChatMode ? Visibility.Collapsed : Visibility.Visible;
+            if (_targetLabel != null) _targetLabel.Visibility = vis;
+            if (_projectBox != null) _projectBox.Visibility = vis;
+            if (_target != null) _target.Visibility = vis;
+        }
+
+        /// <summary>自检诊断用：当前投递目标下拉的条目。</summary>
+        internal List<string> DiagModeItems()
+        {
+            List<string> r = new List<string>();
+            if (_modeBox == null) return r;
+            for (int i = 0; i < _modeBox.Items.Count; i++) r.Add(Convert.ToString(_modeBox.Items[i]));
+            return r;
+        }
+
+        /// <summary>自检诊断用：当前是不是聊天模式。</summary>
+        internal bool DiagChatMode { get { return ChatMode; } }
+
+        /// <summary>自检诊断用：设置可用性并读回选项（不起窗口）。</summary>
+        internal List<string> DiagSetChatAvailability(bool available, bool enabled)
+        {
+            SetChatAvailability(available, enabled);
+            return DiagModeItems();
+        }
+
         /// <summary>自检诊断用：切到第 n 个项目并返回该项目的对话条目。</summary>
         internal List<string> DiagSwitchProject(int n)
         {
@@ -482,11 +588,14 @@ namespace DshZhuangFangyiPet
         private void SetHint()
         {
             int n = _box.Text == null ? 0 : _box.Text.Length;
+            // 提示语随模式变 —— 用户要一眼知道这条会发到哪去（发错地方比发不出去更糟）。
+            string where = ChatMode ? "和庄方宜聊天" : "发给指定对话";
             if (n > 0)
                 _hint.Text = n.ToString(CultureInfo.InvariantCulture) + " / " +
-                             PetHttp.SendTextMax.ToString(CultureInfo.InvariantCulture) + " · Ctrl+Enter 发送 · Esc 关闭";
+                             PetHttp.SendTextMax.ToString(CultureInfo.InvariantCulture) +
+                             " · " + where + " · Ctrl+Enter 发送 · Esc 关闭";
             else
-                _hint.Text = "发给庄方宜…（Ctrl+Enter 发送 · Esc 关闭）";
+                _hint.Text = where + "…（Ctrl+Enter 发送 · Esc 关闭）";
         }
 
         private void OnBoxKeyDown(object sender, KeyEventArgs e)
@@ -522,6 +631,19 @@ namespace DshZhuangFangyiPet
             _hint.Foreground = new SolidColorBrush(Color.FromArgb(160, 90, 100, 120));
             _hint.Text = "发送中…";
             _box.IsEnabled = false;
+
+            // ── v3：按模式分流 ──────────────────────────────────────────────
+            //
+            // 两条路都回同一个回调形状 `(status, body)`，所以 `OnSendDone`
+            // 与错误文案映射完全复用 —— 不为了"聊天"再写一套失败提示。
+            if (ChatMode)
+            {
+                _http.PostChat(text, delegate(int status, string body)
+                {
+                    _ui.BeginInvoke(DispatcherPriority.Normal, new Action(delegate { OnSendDone(status, body); }));
+                });
+                return;
+            }
             _http.PostSend(text, SelectedSessionId(), delegate(int status, string body)
             {
                 // 线程池线程 → 切回 UI

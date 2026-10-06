@@ -239,6 +239,12 @@ namespace DshZhuangFangyiPet
         private bool _sendAvailable;   // snapshot.send.available（块缺失=false）
         private PetInput _input;
 
+        // v3：聊天（输入窗的"聊天 / 指定对话"两种模式）
+        /// <summary>宿主是否装配了聊天（`snapshot.chat.available`）。</summary>
+        private bool _chatAvailable;
+        /// <summary>设置里是否允许在气泡里聊天（`settings.chatEnabled`）。</summary>
+        private bool _chatOn = true;
+
         // task-8：attention 常亮提醒（上次应用的值；null=无提醒）
         private PetAttentionInfo _lastAttention;
 
@@ -643,6 +649,9 @@ namespace DshZhuangFangyiPet
 
             // task-7：send 能力位（available=false 或块缺失 → 不显示 ✎）
             ApplySendInfo(snap.Send);
+
+            // v3：聊天能力位（不可用 → 输入窗不显示"聊天"选项）
+            ApplyChatInfo(snap.Chat);
 
             // task-8：attention diff（值没变零日志；null → 立刻收恒亮气泡）
             ApplyAttention(snap);
@@ -1121,9 +1130,25 @@ namespace DshZhuangFangyiPet
                 (send != null && !string.IsNullOrEmpty(send.Reason) ? "（" + send.Reason + "）" : ""))));
         }
 
-        /// <summary>✎ 被点（只有可用时按钮才可见；防御式再查一次）→ 打开输入窗。</summary>
-        private void OnSendButtonClicked()
+        /// <summary>
+        /// v3：聊天能力位变化 → 告诉输入窗（它据此决定"聊天"选项显不显示）。
+        ///
+        /// 值没变就不动（避免每帧重填下拉 —— 那会把用户正在选的东西重置）。
+        /// </summary>
+        private void ApplyChatInfo(PetChatInfo chat)
         {
+            bool avail = PetChatInfo.ShouldShowChat(chat);
+            bool on = chat != null && chat.Enabled;
+            if (avail == _chatAvailable && on == _chatOn) return;
+            _chatAvailable = avail;
+            _chatOn = on;
+            try { if (_input != null) _input.SetChatAvailability(avail, on); } catch { }
+            PetLog.Info("聊天能力位 → " + (avail ? "可用" : "不可用") +
+                        (chat != null && !string.IsNullOrEmpty(chat.Reason) ? ("（" + chat.Reason + "）") : ""));
+        }
+
+        /// <summary>✎ 被点（只有可用时按钮才可见；防御式再查一次）→ 打开输入窗。</summary>
+        private void OnSendButtonClicked()        {
             if (!_sendAvailable) return;
             if (_input == null)
             {
@@ -1151,6 +1176,9 @@ namespace DshZhuangFangyiPet
             }
             // 每次打开都刷一次可选对话（用户可能刚开了新对话/结束了旧的）
             ApplySendChoices();
+            // v3：把"聊天能不能用"告诉输入窗（不可用就把选项藏起来 ——
+            // "给了入口但点了必失败"是最糟的交互）。
+            try { _input.SetChatAvailability(_chatAvailable, _chatOn); } catch { }
             int x, y, w, h;
             _win.GetScreenRect(out x, out y, out w, out h);
             _win.SetSendOpen(true);
