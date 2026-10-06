@@ -111,6 +111,19 @@ namespace DshZhuangFangyiPet
         /// <summary>自检诊断用：当前是否处于可见态。</summary>
         internal bool DiagShouldShow { get { return _wanted; } }
 
+        /// <summary>
+        /// 窗口句柄（Program 算定位锚点时要用它取 DPI）。
+        /// `Window` 不公开 `Handle`，所以自己转一次 —— 句柄在 Loaded 后才有值。
+        /// </summary>
+        internal IntPtr HandleOrZero
+        {
+            get
+            {
+                if (_hwnd != IntPtr.Zero) return _hwnd;
+                try { return new WindowInteropHelper(this).Handle; } catch { return IntPtr.Zero; }
+            }
+        }
+
         private void OnLoaded(object sender, RoutedEventArgs e)
         {
             _hwnd = new WindowInteropHelper(this).Handle;

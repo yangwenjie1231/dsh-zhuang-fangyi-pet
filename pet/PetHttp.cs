@@ -656,6 +656,36 @@ namespace DshZhuangFangyiPet
         }
 
         /// <summary>
+        /// 番茄钟**设置**（总开关 / 倒计时显示）→ POST /pet/settings。
+        ///
+        /// 为什么与 `PostPomodoro` 分开：那两个是**持久化设置**（要落盘、重启后还在），
+        /// 而 start/pause/skip 是**瞬时动作**（不落盘，重启后不该自动接着跑）。
+        /// 混在一条通道里会让"重启后番茄钟自己开始计时"这种怪事变得可能。
+        ///
+        /// 参数为 `null` = 本次不改该字段（合并语义，与 `/pet/settings` 一致）。
+        /// </summary>
+        public void PostSettingsPomodoro(bool? enabled, bool? countdown)
+        {
+            string body = "{";
+            bool first = true;
+            if (enabled.HasValue)
+            {
+                body += "\"pomodoro\":" + (enabled.Value ? "true" : "false");
+                first = false;
+            }
+            if (countdown.HasValue)
+            {
+                if (!first) body += ",";
+                body += "\"pomodoroCountdown\":" + (countdown.Value ? "true" : "false");
+            }
+            body += "}";
+            // 两个都为 null 时 body 是 "{}"：那是空补丁，宿主侧归一化后无变化，
+            // 不会误改任何设置。但发一个空请求没意义，直接跳过。
+            if (body == "{}") return;
+            PostJson("/api/zhuang-fangyi/pet/settings", body);
+        }
+
+        /// <summary>
         /// 契约 §3 新增：GET /pet/settings → {"settings":{…}}。
         /// 原生 exe 目前不用它（位置走 POST /pet/position），但保留读取入口，
         /// 供将来「宿主侧持久化缩放/穿透」使用；失败一律返回 null，绝不抛。

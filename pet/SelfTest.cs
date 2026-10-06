@@ -84,6 +84,7 @@ namespace DshZhuangFangyiPet
                 TestClamp();
                 TestWindows(opt, artDir, cacheDir, sheet);
                 TestAttentionPresentation();
+                TestPomodoro();
                 TestMutex();
                 TestHttp(opt);
             }
@@ -1349,6 +1350,201 @@ namespace DshZhuangFangyiPet
                 Pump(100);
             try { if (bubble != null) bubble.ForceClose(); } catch { }
             }
+        }
+
+        // ------------------------------------------------------------------
+        // v7：番茄钟（用户点名"增加番茄钟提醒我休息"）
+        // ------------------------------------------------------------------
+        //
+        // ⚠️ 这一节测的**全是纯函数与解析**，不测计时推进 —— 推进逻辑在 Host 的
+        // `src/pet/pomodoro.js` 里（那边有 43 条带假时钟的单测覆盖"每 4 轮长休"
+        // 这类跨 25 分钟的行为）。exe 侧只负责**显示**，所以这里盯的是：
+        // 解析健壮性、本地插值、格式化与 Host 同口径、显隐规则、定位。
+        private static void TestPomodoro()
+        {
+            // (1) 块缺失 → null（旧 Host 快照零回归）
+            PetSnapshot noBlock = PetSnapshot.Parse(
+                "{\"rev\":1,\"petState\":\"idle\",\"label\":\"待机中\"}");
+            Check(noBlock != null && noBlock.Pomodoro == null,
+                  "pomodoro 块缺失 → null（旧快照零回归）",
+                  "Pomodoro=" + (noBlock == null || noBlock.Pomodoro == null ? "null" : "非 null"));
+
+            // (2) 完整块解析
+            PetSnapshot s = PetSnapshot.Parse(
+                "{\"rev\":2,\"petState\":\"idle\",\"label\":\"待机中\",\"pomodoro\":{" +
+                "\"enabled\":true,\"phase\":\"focus\",\"running\":true," +
+                "\"remainingMs\":1500000,\"totalMs\":1500000,\"endsAt\":1700000000000," +
+                "\"completed\":2,\"round\":3,\"roundsPerLongBreak\":4," +
+                "\"autoNext\":true,\"notify\":true,\"text\":\"25:00\",\"show\":true}}");
+            PetPomodoroInfo p = s == null ? null : s.Pomodoro;
+            bool parsed = p != null && p.Enabled && p.Phase == "focus" && p.Running &&
+                          p.RemainingMs == 1500000 && p.TotalMs == 1500000 &&
+                          p.EndsAt == 1700000000000L && p.Completed == 2 && p.Round == 3 &&
+                          p.RoundsPerLongBreak == 4 && p.Show;
+            Check(parsed, "pomodoro 解析：字段齐全",
+                  p == null ? "解析失败" : ("phase=" + p.Phase + " running=" + (p.Running ? "1" : "0") +
+                  " remain=" + p.RemainingMs + " round=" + p.Round + "/" + p.RoundsPerLongBreak));
+
+            // (3) 非法值回落（不崩）
+            PetSnapshot bad = PetSnapshot.Parse(
+                "{\"rev\":3,\"petState\":\"idle\",\"pomodoro\":{" +
+                "\"enabled\":true,\"phase\":\"__nonsense__\",\"running\":false," +
+                "\"remainingMs\":-500,\"totalMs\":-1,\"endsAt\":0," +
+                "\"completed\":-9,\"round\":0,\"roundsPerLongBreak\":0}}");
+            PetPomodoroInfo bp = bad == null ? null : bad.Pomodoro;
+            bool sane = bp != null && bp.Phase == "focus" && bp.RemainingMs == 0 &&
+                        bp.TotalMs == 0 && bp.Completed == 0 && bp.Round == 1 &&
+                        bp.RoundsPerLongBreak == 4;
+            Check(sane, "pomodoro 非法值回落（负数/0/未知 phase 都不崩）",
+                  bp == null ? "解析失败" : ("phase=" + bp.Phase + " remain=" + bp.RemainingMs +
+                  " round=" + bp.Round + " per=" + bp.RoundsPerLongBreak));
+
+            // (4) ⭐ 本地插值：跑着时用 endsAt - now（Host 不每秒推帧）
+            PetPomodoroInfo run = new PetPomodoroInfo();
+            run.Enabled = true; run.Running = true; run.EndsAt = 1_700_000_060_000L;
+            run.RemainingMs = 999_999;   // 故意给个错的：跑着时应以 endsAt 为准
+            long at = 1_700_000_000_000L;
+            bool interp = run.RemainingAt(at) == 60_000L;
+            Check(interp, "⭐ 跑着时按 endsAt 本地插值（不依赖 Host 每秒推帧）",
+                  "endsAt-now=" + run.RemainingAt(at) + "ms（Host 给的 999999ms 被忽略）");
+
+            // (5) ⭐ 暂停时用 Host 的 remainingMs（endsAt 为 0，绝不能拿它算）
+            PetPomodoroInfo paused = new PetPomodoroInfo();
+            paused.Enabled = true; paused.Running = false; paused.EndsAt = 0;
+            paused.RemainingMs = 754_000;
+            bool frozen = paused.RemainingAt(at) == 754_000L;
+            Check(frozen, "⭐ 暂停时用 Host 的剩余值（EndsAt=0 不会算出负数）",
+                  "remain=" + paused.RemainingAt(at) + "ms");
+
+            // (5b) ⭐⭐ **Running=true 但 EndsAt 缺失**时也必须回落 RemainingMs。
+            //
+            // 这一条是回退验证逼出来的：原先只测了 Running=false 的情形，
+            // 而那种情形下 `!Running` 已经短路，`|| EndsAt <= 0` 那段**从未被走到**
+            // —— 把 `EndsAt <= 0` 删掉，自检照样全绿（探针实测 FAIL=0）。
+            // 真实场景：残缺/被截断的快照，或旧 Host 给了 running 却没给 endsAt。
+            // 那时硬算 `EndsAt - now` 会得到 -1750000000000ms 这种荒唐值。
+            PetPomodoroInfo noEnds = new PetPomodoroInfo();
+            noEnds.Enabled = true; noEnds.Running = true; noEnds.EndsAt = 0;
+            noEnds.RemainingMs = 321_000;
+            bool fellBack = noEnds.RemainingAt(at) == 321_000L;
+            Check(fellBack, "⭐⭐ Running=true 但 EndsAt 缺失 → 回落 Host 的剩余值（不硬算负数）",
+                  "EndsAt=0 且 running=1 → " + noEnds.RemainingAt(at) + "ms（期望 321000）");
+
+            // (6) 插值下限夹 0（倒计时走完不该显示 -00:03）
+            PetPomodoroInfo over = new PetPomodoroInfo();
+            over.Running = true; over.EndsAt = at - 5_000; over.RemainingMs = 0;
+            bool clamped = over.RemainingAt(at) == 0L;
+            Check(clamped, "插值下限夹 0（不出现负数倒计时）",
+                  "已过期 5s → " + over.RemainingAt(at) + "ms");
+
+            // (7) ⭐⭐ 格式化必须与 Host 同口径（向上取整）
+            // 差一秒会让托盘显示 24:59、桌宠下面显示 25:00，用户以为其中一个坏了。
+            bool fmt =
+                PetApp.FormatRemaining(400) == "00:01" &&      // 向上取整（Host 的 Math.ceil）
+                PetApp.FormatRemaining(0) == "00:00" &&
+                PetApp.FormatRemaining(-5) == "00:00" &&       // 负数不出负号
+                PetApp.FormatRemaining(60_000) == "01:00" &&
+                PetApp.FormatRemaining(1_500_000) == "25:00" &&
+                PetApp.FormatRemaining(59_999) == "01:00" &&
+                PetApp.FormatRemaining(3_600_000) == "1:00:00" &&
+                PetApp.FormatRemaining(3_661_000) == "1:01:01";
+            Check(fmt, "⭐⭐ 剩余时间格式化与 Host 同口径（向上取整 / 时分进位）",
+                  "400ms→" + PetApp.FormatRemaining(400) + " 1.5Mms→" + PetApp.FormatRemaining(1_500_000) +
+                  " 3600s→" + PetApp.FormatRemaining(3_600_000));
+
+            // (8) 阶段名标签
+            bool labels = PetApp.PomodoroPhaseLabel("focus") == "专注" &&
+                          PetApp.PomodoroPhaseLabel("break") == "休息" &&
+                          PetApp.PomodoroPhaseLabel("long-break") == "长休息" &&
+                          PetApp.PomodoroPhaseLabel("__x__") == "专注";   // 未知按专注（前向兼容）
+            Check(labels, "阶段名标签（未知阶段回落专注，不显示空白）",
+                  "focus→" + PetApp.PomodoroPhaseLabel("focus") +
+                  " long-break→" + PetApp.PomodoroPhaseLabel("long-break"));
+
+            // (9) 显示文本：专注带轮次、休息不带
+            PetPomodoroInfo fp = new PetPomodoroInfo();
+            fp.Enabled = true; fp.Show = true; fp.Running = false;
+            fp.Phase = "focus"; fp.Round = 3; fp.RoundsPerLongBreak = 4;
+            fp.RemainingMs = 754_000; fp.EndsAt = 0;
+            string focusText = PetApp.PomodoroTextFor(fp, at);
+            fp.Phase = "break";
+            string breakText = PetApp.PomodoroTextFor(fp, at);
+            bool textOk = focusText == "专注 12:34 · 3/4" && breakText == "休息 12:34";
+            Check(textOk, "显示文本：专注带轮次、休息不带（避免误以为在专注）",
+                  "focus=\"" + focusText + "\" break=\"" + breakText + "\"");
+
+            // (10) show=false / enabled=false / 块 null → 不显示
+            PetPomodoroInfo off = new PetPomodoroInfo();
+            off.Enabled = true; off.Show = false;
+            bool hidden = PetApp.PomodoroTextFor(off, at) == null &&
+                          PetApp.PomodoroTextFor(null, at) == null;
+            PetPomodoroInfo disabled = new PetPomodoroInfo();
+            disabled.Enabled = false; disabled.Show = true;
+            hidden = hidden && PetApp.PomodoroTextFor(disabled, at) == null;
+            Check(hidden, "enabled=false / show=false / 块 null 一律不显示",
+                  "三种关闭路径都返回 null");
+
+            // (11) diff：值相同 = Same（零日志零重排）
+            PetPomodoroInfo a1 = PetSnapshot.Parse(
+                "{\"rev\":4,\"petState\":\"idle\",\"pomodoro\":{\"enabled\":true,\"phase\":\"focus\"," +
+                "\"running\":true,\"remainingMs\":1000,\"totalMs\":2000,\"endsAt\":5,\"completed\":1," +
+                "\"round\":1,\"roundsPerLongBreak\":4,\"show\":true}}").Pomodoro;
+            PetPomodoroInfo a2 = PetSnapshot.Parse(
+                "{\"rev\":5,\"petState\":\"idle\",\"pomodoro\":{\"enabled\":true,\"phase\":\"focus\"," +
+                "\"running\":true,\"remainingMs\":1000,\"totalMs\":2000,\"endsAt\":5,\"completed\":1," +
+                "\"round\":1,\"roundsPerLongBreak\":4,\"show\":true}}").Pomodoro;
+            PetPomodoroInfo a3 = PetSnapshot.Parse(
+                "{\"rev\":6,\"petState\":\"idle\",\"pomodoro\":{\"enabled\":true,\"phase\":\"break\"," +
+                "\"running\":true,\"remainingMs\":1000,\"totalMs\":2000,\"endsAt\":5,\"completed\":1," +
+                "\"round\":1,\"roundsPerLongBreak\":4,\"show\":true}}").Pomodoro;
+            bool diffOk = PetPomodoroInfo.Same(a1, a2) && !PetPomodoroInfo.Same(a1, a3) &&
+                          PetPomodoroInfo.Same(null, null) && !PetPomodoroInfo.Same(a1, null);
+            Check(diffOk, "pomodoro diff：同值不动作、阶段变化才动作、null 与有值不同",
+                  "同值→true；focus→break→false；null/null→true");
+
+            // (12) ⭐ 动作白名单（exe 侧也要挡一层，不能只靠 Host）
+            bool wl = PetHttp.IsKnownPomodoroAction("start") &&
+                      PetHttp.IsKnownPomodoroAction("pause") &&
+                      PetHttp.IsKnownPomodoroAction("toggle") &&
+                      PetHttp.IsKnownPomodoroAction("skip") &&
+                      PetHttp.IsKnownPomodoroAction("reset") &&
+                      !PetHttp.IsKnownPomodoroAction("__proto__") &&
+                      !PetHttp.IsKnownPomodoroAction("START") &&      // 大小写敏感
+                      !PetHttp.IsKnownPomodoroAction("start ") &&     // 尾空格不许过
+                      !PetHttp.IsKnownPomodoroAction("") &&
+                      !PetHttp.IsKnownPomodoroAction(null) &&
+                      !PetHttp.IsKnownPomodoroAction("start;exit");
+            Check(wl, "番茄钟动作白名单（大小写/空格/注入串一律拒绝）",
+                  "5 个合法动作通过；__proto__/START/尾空格/空/注入串全部拒绝");
+
+            // (13) 倒计时窗：纯展示（不吃焦点、置顶）
+            PetPomodoro pomo = new PetPomodoro();
+            Check(pomo.IsPureDisplay, "番茄钟窗是纯展示（不抢焦点 + 置顶）",
+                  "ShowActivated=false, Topmost=true");
+
+            // (14) 定位复用 ComputeTarget（测运行路径，不是副本）
+            double tx, ty; int bw, bh;
+            pomo.DiagTargetFor(1000, 800, 200, 200, out tx, out ty, out bw, out bh);
+            bool placed = tx > 0 && ty > 800;   // 在本体下方
+            Check(placed, "倒计时窗贴本体下方居中（复用 ComputeTarget）",
+                  "本体(1000,800,200,200) → 窗 " + bw + "x" + bh + " @" + (int)tx + "," + (int)ty);
+
+            // (15) ⭐ 显隐：**穿透时照显示**（与状态文字的关键差别）
+            pomo.DiagSetState("专注 25:00", true, true);
+            bool shownWhenWanted = pomo.DiagShouldShow;
+            pomo.DiagSetState("专注 25:00", false, true);
+            bool hiddenWhenOff = !pomo.DiagShouldShow;
+            pomo.DiagSetState("专注 25:00", true, false);   // 本体藏了 → 一起藏
+            bool hiddenWithPet = !pomo.DiagShouldShow;
+            pomo.DiagSetState("", true, true);              // 没内容 → 不显示空框
+            bool hiddenWhenEmpty = !pomo.DiagShouldShow;
+            Check(shownWhenWanted && hiddenWhenOff && hiddenWithPet && hiddenWhenEmpty,
+                  "⭐ 倒计时显隐：要显示就显示 / 关掉不显示 / 本体藏了一起藏 / 空内容不显示",
+                  "wanted→" + shownWhenWanted + " off→" + hiddenWhenOff +
+                  " petHidden→" + hiddenWithPet + " empty→" + hiddenWhenEmpty);
+
+            try { pomo.ForceClose(); } catch { }
+            Pump(60);
         }
 
         private static void TestClamp()

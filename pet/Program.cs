@@ -360,19 +360,23 @@ namespace DshZhuangFangyiPet
                         // 状态文字也是独立窗口 —— 与气泡同理：本体藏了它必须一起藏，
                         // 否则会出现「隐藏了桌宠、底下还挂着一行状态」。
                         _status.Hide();
+                        // 番茄钟窗同理（独立窗口不会自己跟着藏）。
+                        try { _pomo.Hide(); } catch { }
                         _hovering = false;
                     }
-                    else if (_bubbleOn && _lastBubbleId != _shownBubbleId)
+                    else
                     {
-                        // 重新显示时把"当前该显示的气泡"补回来（隐藏期间收到的气泡不会自己重现）。
-                        ReplayCurrentBubble();
+                        // 重新显示：气泡与倒计时都要补回来（独立窗口不会自己重现）。
+                        if (_bubbleOn && _lastBubbleId != _shownBubbleId) ReplayCurrentBubble();
+                        RefreshPomodoro();
+                        RefreshStatusLabel();
                     }
                 }
                 catch (Exception ex) { PetLog.Warn("气泡联动失败: " + PetLog.Describe(ex)); }
             };
             _tray.SetClickThrough = delegate(bool on) { _win.SetClickThrough(on); };
             _tray.SetTopmost = delegate(bool on) { _win.SetTopmost(on); _tray.SetTopmostCheck(on); };
-            _tray.SetScale = delegate(double s) { _win.SetScale(s); _win.ReclampPosition(false); _bubble.SetScale(s); _status.SetScale(s); };
+            _tray.SetScale = delegate(double s) { _win.SetScale(s); _win.ReclampPosition(false); _bubble.SetScale(s); _status.SetScale(s); _pomo.SetScale(s); };
             _tray.SetBubble = delegate(bool on)
             {
                 _bubbleOn = on;
@@ -464,6 +468,17 @@ namespace DshZhuangFangyiPet
             _scalePostTimer = new DispatcherTimer(DispatcherPriority.Background);
             _scalePostTimer.Interval = TimeSpan.FromMilliseconds(300);   // task-6：去抖
             _scalePostTimer.Tick += OnScalePostTick;
+
+            // v7：番茄钟倒计时每秒重绘一次。
+            //
+            // **为什么在 exe 侧每秒刷**：Host 只在**阶段切换**时推帧（那才是真事件）。
+            // 若让 Host 每秒推，25 分钟 = 1500 帧无意义广播。秒级显示由 exe 用
+            // `endsAt` 本地插值 —— 两个进程读同一个系统时钟，插值是安全的。
+            // exe **绝不在这里判定"阶段结束"**：那只在 Host 里做，这里到 0 只是显示到 0。
+            _pomoTimer = new DispatcherTimer(DispatcherPriority.Background);
+            _pomoTimer.Interval = TimeSpan.FromSeconds(1);
+            _pomoTimer.Tick += OnPomodoroTick;
+            _pomoTimer.Start();
 
             if (_http != null) _http.Start();
 
@@ -590,7 +605,9 @@ namespace DshZhuangFangyiPet
             // 状态文字同理由首帧对齐（它同样吃 SetScale）；顺带刷一次显隐 ——
             // hint/statusAlways 也是"首帧就该生效"的设置。
             try { _status.SetScale(_win.Scale); } catch { }
+            try { _pomo.SetScale(_win.Scale); } catch { }
             try { RefreshStatusLabel(); } catch { }
+            try { RefreshPomodoro(); } catch { }
 
             // 输入窗开着时，会话列表跟着快照走（新开/结束的对话要即时反映）
             if (_input != null) ApplySendChoices();
@@ -600,6 +617,9 @@ namespace DshZhuangFangyiPet
 
             // task-8：attention diff（值没变零日志；null → 立刻收恒亮气泡）
             ApplyAttention(snap);
+
+            // v7：番茄钟 diff（块变化才动；null → 收起倒计时窗）
+            ApplyPomodoro(snap);
 
             // 状态文字：快照的 label 是**已本地化**的状态词（待机中/正在思考…）。
             // 先存进本体窗，再刷新标签（标签通过 VisibleLabel() 读它，单一真相）。
@@ -707,6 +727,7 @@ namespace DshZhuangFangyiPet
                 // 正在显示的气泡立即换色，不必等下一次弹出。
                 try { _bubble.ApplyTheme(darkNow); } catch (Exception ex) { PetLog.Warn("气泡换色失败: " + PetLog.Describe(ex)); }
                 try { _status.ApplyTheme(darkNow); } catch { }
+                try { _pomo.ApplyTheme(darkNow); } catch { }
                 changed = true;
             }
 
@@ -749,6 +770,59 @@ namespace DshZhuangFangyiPet
         private void WireAttentionButton()
         {
             _bubble.GoAction = delegate { OnFocusDsh(); };
+        }
+
+        // ------------------------------------------------------------------
+        // v7：番茄钟（块变化才动；exe 只显示，绝不判定阶段结束）
+        // ------------------------------------------------------------------
+
+        /// <summary>
+        /// 应用快照里的番茄钟块。
+        ///
+        /// **只负责显示**：倒计时的推进由 `_pomoTimer` 每秒本地插值，
+        /// "阶段结束 → 该提醒了"完全在 Host 里（它是唯一真相）。
+        /// exe 若自己也判一次，DSH 重启/断线时两边口径必然分叉。
+        /// </summary>
+        private void ApplyPomodoro(PetSnapshot snap)
+        {
+            PetPomodoroInfo p = snap == null ? null : snap.Pomodoro;
+
+            // 值没变就不动（避免每帧重排窗口导致闪烁）。
+            // 但**每秒的本地插值不算"变"** —— 这里比的是块本身。
+            if (PetPomodoroInfo.Same(p, _lastPomodoro))
+            {
+                // 即使块没变，也要刷一次显隐：本体刚显示/隐藏时倒计时得跟着走。
+                RefreshPomodoro();
+                return;
+            }
+
+            bool had = _lastPomodoro != null;
+            _lastPomodoro = p;
+
+            if (p == null)
+            {
+                if (had) PetLog.Info("番茄钟 → 块消失（旧 Host 或未启用）");
+                RefreshPomodoro();
+                _tray.Refresh();
+                return;
+            }
+
+            if (had)
+            {
+                PetLog.Info("番茄钟 → phase=" + p.Phase + " running=" + (p.Running ? "1" : "0") +
+                            " remain=" + p.RemainingMs.ToString(CultureInfo.InvariantCulture) + "ms" +
+                            " round=" + p.Round.ToString(CultureInfo.InvariantCulture) +
+                            "/" + p.RoundsPerLongBreak.ToString(CultureInfo.InvariantCulture) +
+                            " completed=" + p.Completed.ToString(CultureInfo.InvariantCulture));
+            }
+            else
+            {
+                PetLog.Info("番茄钟 → 首次收到块 phase=" + p.Phase +
+                            " enabled=" + (p.Enabled ? "1" : "0") + " show=" + (p.Show ? "1" : "0"));
+            }
+
+            RefreshPomodoro();
+            _tray.Refresh();
         }
 
         // ------------------------------------------------------------------
@@ -866,6 +940,8 @@ namespace DshZhuangFangyiPet
             // 气泡同比缩放：滚轮时立刻重排（否则气泡僵在原尺寸，看着很突兀）
             try { _bubble.SetScale(newScale); } catch (Exception ex) { PetLog.Warn("气泡缩放失败: " + PetLog.Describe(ex)); }
             try { _status.SetScale(newScale); } catch { }
+            try { _pomo.SetScale(newScale); } catch { }
+            try { RefreshPomodoro(); } catch { }
         }
 
         private void OnScalePostTick(object sender, EventArgs e)
@@ -1080,7 +1156,8 @@ namespace DshZhuangFangyiPet
             if (_pomo == null || !_pomo.IsVisible) return new int[] { petX, petY, petW, petH };
             try
             {
-                double dpi = PetNative.GetDpiForWindowSafe(_pomo.Handle) / 96.0;
+                IntPtr h = _pomo.HandleOrZero;
+                double dpi = h == IntPtr.Zero ? 1.0 : PetNative.GetDpiForWindowSafe(h) / 96.0;
                 if (dpi <= 0) dpi = 1.0;
                 int bw, bh;
                 _pomo.DiagMetrics(out bw, out bh);
@@ -1329,9 +1406,18 @@ namespace DshZhuangFangyiPet
 
         public void Dispose()
         {
+            // 定时器先停：不然退出过程中还可能触发一次 Tick（访问已释放的窗口）。
+            try { if (_pomoTimer != null) _pomoTimer.Stop(); } catch { }
+            try { if (_retryTimer != null) _retryTimer.Stop(); } catch { }
+            try { if (_diagTimer != null) _diagTimer.Stop(); } catch { }
+            try { if (_scalePostTimer != null) _scalePostTimer.Stop(); } catch { }
             try { if (_http != null) _http.Dispose(); } catch { }
             try { if (_tray != null) _tray.Dispose(); } catch { }
             try { if (_bubble != null) _bubble.ForceClose(); } catch { }
+            // ⚠️ 状态文字窗**曾经漏在这里**：它有自己的 HwndSource 钩子，
+            // 不 ForceClose 会留下一个孤儿窗口（退出后仍浮在屏幕上）。
+            try { if (_status != null) _status.ForceClose(); } catch { }
+            try { if (_pomo != null) _pomo.ForceClose(); } catch { }
             try { if (_win != null) _win.ForceClose(); } catch { }
             try { if (_store != null) _store.Dispose(); } catch { }
         }

@@ -185,25 +185,25 @@ namespace DshZhuangFangyiPet
 
             _miPomodoroToggle = new ToolStripMenuItem("开始专注(&S)");
             _miPomodoroToggle.Click += delegate { TogglePomodoro(); Refresh(); };
-            _miPomodoro.Add(_miPomodoroToggle);
+            _miPomodoro.DropDownItems.Add(_miPomodoroToggle);
 
             _miPomodoroSkip = new ToolStripMenuItem("跳过当前阶段(&K)");
             _miPomodoroSkip.Click += delegate { SkipPomodoro(); Refresh(); };
-            _miPomodoro.Add(_miPomodoroSkip);
+            _miPomodoro.DropDownItems.Add(_miPomodoroSkip);
 
             _miPomodoroReset = new ToolStripMenuItem("重置(&R)");
             _miPomodoroReset.Click += delegate { ResetPomodoro(); Refresh(); };
-            _miPomodoro.Add(_miPomodoroReset);
+            _miPomodoro.DropDownItems.Add(_miPomodoroReset);
 
             _miPomodoro.DropDownItems.Add(new ToolStripSeparator());
 
             _miPomodoroEnabled = new ToolStripMenuItem("启用番茄钟");
             _miPomodoroEnabled.Click += delegate { SetPomodoroEnabled(!GetPomodoroEnabled()); Refresh(); };
-            _miPomodoro.Add(_miPomodoroEnabled);
+            _miPomodoro.DropDownItems.Add(_miPomodoroEnabled);
 
             _miPomodoroCountdown = new ToolStripMenuItem("显示倒计时");
             _miPomodoroCountdown.Click += delegate { SetPomodoroCountdown(!GetPomodoroCountdown()); Refresh(); };
-            _miPomodoro.Add(_miPomodoroCountdown);
+            _miPomodoro.DropDownItems.Add(_miPomodoroCountdown);
 
             _menu.Items.Add(_miPomodoro);
 
