@@ -2194,7 +2194,14 @@ namespace DshZhuangFangyiPet
                       "hwnd=0x" + h.ToInt64().ToString("X") + " NCHITTEST(10,10)=" + r1.ToInt32() +
                       " (200,200)=" + r2.ToInt32() + " 期望 -1");
 
-                // ---- 契约 §4 opaque：不透明满幅贴纸不画气泡底；透明抠图恢复默认 ----
+                // ---- 气泡外壳：**按内容决定，不按图片 alpha 决定** ----
+                //
+                // 用户的原话："表情做气泡内容的时候，为什么一定要加个白底？白底可以去掉啊"。
+                // 白底的唯一用途是**让文字可读** —— 纯表情（贴纸/动图）自己就是内容，
+                // 垫白卡只会多出双层边框 + 白占内边距。所以规则是：
+                //   · 满幅贴纸（opaque=true）      → 不画外壳（原规则）
+                //   · 纯图片、无文字（image-only）  → **也不画外壳**（本次新增）
+                //   · 有文字                        → 必须有卡片承载
                 BitmapSource bmp = MakeSolidBubbleBitmap(24);
                 PetBubbleInfo ob = new PetBubbleInfo();
                 ob.Id = 990001;
@@ -2203,18 +2210,34 @@ namespace DshZhuangFangyiPet
                 ob.Opaque = true;
                 bubble.Show(ob, bmp);
                 bool opaqueOk = bubble.IsOpaquePresentation;
-                Check(opaqueOk, "不透明满幅气泡：不画底/边框/内边距 + 图片上限放宽 240",
+                Check(opaqueOk, "满幅贴纸气泡：不画底/边框/内边距 + 图片上限放宽 240",
                       "IsOpaquePresentation=" + opaqueOk +
                       "（背景透明、BorderThickness=0、Padding=0、MaxWidth/MaxHeight=240，投影保留）");
 
+                // 纯表情（透明抠图、无文字）—— 同样不套白卡
                 PetBubbleInfo tb = new PetBubbleInfo();
                 tb.Id = 990002;
                 tb.Kind = "image";
                 tb.Image = "bubble/cutout-selftest.png";
                 bubble.Show(tb, bmp);
-                bool backOk = !bubble.IsOpaquePresentation;
-                Check(backOk, "透明抠图气泡：opaque 贴纸之后恢复默认底/边框/内边距 + 上限 160x200",
-                      "第二次显示普通抠图，IsOpaquePresentation=" + bubble.IsOpaquePresentation + " 期望 false");
+                bool cutoutBare = bubble.IsOpaquePresentation && bubble.DiagPaddingLeft == 0;
+                Check(cutoutBare, "⭐ 纯表情（无文字）：**不垫白底**（用户明确要求去掉）",
+                      "IsOpaquePresentation=" + bubble.IsOpaquePresentation +
+                      " PaddingLeft=" + bubble.DiagPaddingLeft + " 期望：true / 0");
+
+                // 反向：**有文字**时必须恢复白卡 —— 否则字直接飘在桌面上看不清
+                // ⚠️ id 必须避开后面动图用例用的号段：`Show` 对**同 id 会拒收**
+                //（契约 §2 的幂等保护），撞号会让后面那条"动图在推进"假红。
+                PetBubbleInfo txt = new PetBubbleInfo();
+                txt.Id = 990011;
+                txt.Kind = "both";
+                txt.Image = "bubble/cutout-selftest.png";
+                txt.Text = "正在调用工具…";
+                bubble.Show(txt, bmp);
+                bool textCard = !bubble.IsOpaquePresentation && bubble.DiagPaddingLeft > 0;
+                Check(textCard, "⭐ 有文字的气泡必须恢复白卡（否则字飘在桌面上看不清）",
+                      "IsOpaquePresentation=" + bubble.IsOpaquePresentation +
+                      " PaddingLeft=" + bubble.DiagPaddingLeft + " 期望：false / >0");
 
                 // ---- 契约 §4 v-next：气泡**动图**（真 GIF → 全帧解码 → 定时器真推进）----
                 //

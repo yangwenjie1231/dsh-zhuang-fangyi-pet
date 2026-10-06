@@ -508,11 +508,22 @@ namespace DshZhuangFangyiPet
             _text.Text = hasText ? b.Text : "";
             _text.Visibility = hasText ? Visibility.Visible : Visibility.Collapsed;
 
-            // 契约 §4 opaque：不透明满幅贴纸图本身就是一张卡片，
-            // 再画气泡自己的底/边框/内边距会出现「白纸贴在浅色框里」的双层边框 → 全部去掉。
-            // 透明抠图（缺省/显式 false）保持原有呈现不变。
-            // task-8：attention 气泡恒走默认底（attention 有自己的描边/头部条，满幅贴纸语义不适用）。
-            _opaquePresentation = hasImg && b.Opaque && !attention;
+            // 气泡外壳怎么画 —— **按"内容"决定，不按图片的 alpha 决定**。
+            //
+            // 用户问过一句很到位的话："表情做气泡内容的时候，为什么一定要加个白底？
+            // 白底可以去掉啊"。答案是对的，白底的**唯一用途是让文字可读**：
+            //   · 有文字 → 需要卡片承载（否则字直接飘在桌面上，深色壁纸下看不清）；
+            //   · 纯图片（贴纸/动图/满幅） → 图片自己就是内容，垫一层白卡只会多出
+            //     「白纸贴在浅色框里」的双层边框，还白占一圈内边距。
+            //
+            // 所以这里不再用 `b.Opaque` 一个开关兼管两件事：
+            //   · `_opaquePresentation` 现在表示**"不画任何外壳"**；
+            //   · 触发条件是 `opaque（满幅贴纸）` **或** `有图但无文字（纯表情）`。
+            // 契约字段 `opaque` 的语义保持不变（渲染方不得再套气泡底），
+            // 这里只是把"纯图片也不必套"这个更一般的规则实现出来。
+            // task-8：attention 恒走默认底（它有自己的描边/头部条，贴纸语义不适用）。
+            bool imageOnly = hasImg && !hasText;
+            _opaquePresentation = (b.Opaque || imageOnly) && !attention;
             ApplyBubbleChrome(_opaquePresentation);
 
             // task-8：attention 头部条 —— 徽标（count>=2）与「去处理」按钮
@@ -625,9 +636,20 @@ namespace DshZhuangFangyiPet
         /// 上一条 opaque 贴纸留下的样式必须能完全恢复）。
         /// 投影（_border.Effect）两种模式共用，不在切换范围。
         /// </summary>
-        private void ApplyBubbleChrome(bool opaque)
+        /// <summary>
+        /// 气泡外壳。
+        ///
+        /// `bare=true`（= 不画外壳）：用于**纯图片**气泡（满幅贴纸 / 动图 / 透明抠图贴纸）。
+        /// 图片自己就是内容，再垫白底会出现双层边框、还白占内边距。
+        /// `bare=false`：**有文字**的气泡需要卡片承载（否则字飘在桌面上看不清）。
+        ///
+        /// 注意：**没有外壳 ≠ 没有投影**。`_border.Effect` 两种模式都保留 ——
+        /// 表情图直接贴在壁纸上时，靠投影才能"浮起来"、不至于糊在背景里
+        ///（白卡原本顺带提供了这层边界感，去掉卡就得让投影承担）。
+        /// </summary>
+        private void ApplyBubbleChrome(bool bare)
         {
-            if (opaque)
+            if (bare)
             {
                 _border.Background = Brushes.Transparent;
                 _border.BorderBrush = Brushes.Transparent;
