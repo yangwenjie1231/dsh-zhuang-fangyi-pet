@@ -1208,6 +1208,102 @@ await ok('⭐ 探测端点：服务连不上时如实报错（不假装成功）
   for (const d of local.__effects) if (typeof d === 'function') assert.doesNotThrow(() => d())
 })
 
+await ok('⭐⭐ 服务控制路由：动作白名单 + 顺序不被 /speech/<name> 抢走', async () => {
+  // 这条同时防两件事：
+  //   ① 动作白名单（绝不把用户串透传到内部，与番茄钟/互动同一纪律）；
+  //   ② **路由顺序** —— `/speech/service` 必须排在 `/speech/<name>` 前缀分支
+  //      之前，否则 `service` 会被当成"要取名为 service 的语音"而 404
+  //     （`/speech/probe` 已经踩过一次这个坑）。
+  const chatHome = fs.mkdtempSync(path.join(os.tmpdir(), 'zf-svc-'))
+  const local = makeCtx(makeWebServer())
+  const petIndex = await import(`file://${path.join(ROOT, 'index.js').replace(/\\/g, '/')}`)
+  petIndex.apply(toCordisLike(local, ['webServer']), {})
+  const ws = local.__services.get('webServer')
+  await ws.listen()
+  const base = `http://127.0.0.1:${ws.port}`
+  await fetch(`${base}/api/zhuang-fangyi/pet/settings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: { chatWorkspace: path.join(chatHome, 'ws') } })
+  })
+  const post = body => fetch(`${base}/api/zhuang-fangyi/pet/speech/service`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body)
+  })
+
+  // ① status：只读快照，必须带常驻/是否我们起的/pid 等字段
+  const st = await post({ action: 'status' })
+  assert.equal(st.status, 200, `status 应 200，实际 ${st.status}`)
+  const stBody = await st.json()
+  for (const k of ['resident', 'launchable', 'ours', 'ready', 'idleStopSec']) {
+    assert.ok(k in stBody, `状态缺字段 ${k}`)
+  }
+  // ② 非法动作 → 400 且列出可选项（不是 500，也不是静默当成 status）
+  const bad = await post({ action: '__proto__' })
+  assert.equal(bad.status, 400, `非法动作应 400，实际 ${bad.status}`)
+  const badBody = await bad.json()
+  assert.deepEqual(badBody.allowed, ['start', 'stop', 'status'])
+  // ③ stop：没起过任何进程 → stopped=false，且**如实说明原因**
+  const stop = await post({ action: 'stop' })
+  assert.equal(stop.status, 200)
+  const stopBody = await stop.json()
+  assert.equal(stopBody.stopped, false, '没起过进程就不该说"停了"')
+  assert.ok(typeof stopBody.note === 'string' && stopBody.note.length > 0,
+    '必须解释为什么没停成（"不是你起的" vs "停止失败"）')
+  // ④ start：本机探测不到子插件仓库时 → ok=false 且带原因（不假装成功）
+  const start = await post({ action: 'start' })
+  assert.equal(start.status, 200, 'start 自身应 200（结果在 body 里）')
+  const startBody = await start.json()
+  if (startBody.ok === false) {
+    assert.ok(typeof startBody.reason === 'string' && startBody.reason.length > 0,
+      '启动失败必须给原因')
+  }
+  // ⑤ GET 该方法 → 405（控制是写操作，不该能被 GET 触发）
+  const got = await fetch(`${base}/api/zhuang-fangyi/pet/speech/service`)
+  assert.equal(got.status, 405, `GET 应 405，实际 ${got.status}`)
+  await ws.close()
+  for (const d of local.__effects) if (typeof d === 'function') assert.doesNotThrow(() => d())
+})
+
+await ok('⭐⭐ 常驻开关真的存下去并进状态（点了等于没点是最糟的）', async () => {
+  const chatHome = fs.mkdtempSync(path.join(os.tmpdir(), 'zf-resident-'))
+  const local = makeCtx(makeWebServer())
+  const petIndex = await import(`file://${path.join(ROOT, 'index.js').replace(/\\/g, '/')}`)
+  petIndex.apply(toCordisLike(local, ['webServer']), {})
+  const ws = local.__services.get('webServer')
+  await ws.listen()
+  const base = `http://127.0.0.1:${ws.port}`
+  const patch = body => fetch(`${base}/api/zhuang-fangyi/pet/settings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: body })
+  })
+  await patch({ chatWorkspace: path.join(chatHome, 'ws') })
+
+  // 默认关（不占显存）
+  let st = await (await fetch(`${base}/api/zhuang-fangyi/pet/speech`)).json()
+  assert.equal(st.service.resident, false, '默认应是非常驻')
+
+  // 打开常驻 → 状态里必须跟着变
+  await patch({ ttsResident: true })
+  st = await (await fetch(`${base}/api/zhuang-fangyi/pet/speech`)).json()
+  assert.equal(st.service.resident, true,
+    'ttsResident=true 没进状态 —— 开关点了等于没点（设置白名单漏了它？）')
+
+  // 空闲释放时间也要能改（非常驻模式的旋钮）
+  await patch({ ttsResident: false, ttsIdleStopSec: 42 })
+  st = await (await fetch(`${base}/api/zhuang-fangyi/pet/speech`)).json()
+  assert.equal(st.service.resident, false)
+  assert.equal(st.service.idleStopSec, 42, 'ttsIdleStopSec 应真的生效')
+
+  // 非法空闲值被夹住（不能把荒唐值灌进决策）
+  await patch({ ttsIdleStopSec: -5 })
+  st = await (await fetch(`${base}/api/zhuang-fangyi/pet/speech`)).json()
+  assert.ok(st.service.idleStopSec >= 0, `负数应被夹到 >=0，实际 ${st.service.idleStopSec}`)
+
+  // 状态里必须带"启动命令解析结果"（用户能看到桌宠到底会执行什么）
+  assert.ok('launch' in st, '状态应带 launch（诊断用）')
+  await ws.close()
+  for (const d of local.__effects) if (typeof d === 'function') assert.doesNotThrow(() => d())
+})
+
 /* ── 画廊（读操作，无副作用）────────────────────────────────────────────── */
 
 await ok('⭐ 快照 settings 块带 hint/statusAlways（原生窗状态显示的依据，契约 §2 v6）', async () => {

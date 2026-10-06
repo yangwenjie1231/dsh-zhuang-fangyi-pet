@@ -227,6 +227,22 @@ window.__ModuleLoader__.load({
         speakRepliesHint: '合成需要几秒（GPU 约 3 秒/句），气泡会先显示文字',
         ttsUrl: '合成服务地址',
         speechMaxChars: '每次朗读字数上限',
+        ttsResident: '让语音模型常驻',
+        ttsResidentHint: '常驻：启动一次后一直留在显存里，每次合成立刻开始（占显存）。关闭：空闲后自动停掉释放显存，但每次会话第一次合成要等模型加载',
+        ttsIdleStopSec: '空闲多少秒后释放（秒，0 = 不停）',
+        svcStart: '启动服务',
+        svcStop: '停止并释放',
+        svcState: '合成服务',
+        svcOurs: '运行中（桌宠启动的）',
+        svcExternal: '运行中（你自己启动的，桌宠不会停它）',
+        svcDown: '未运行',
+        svcResidentOn: '常驻',
+        svcUnknown: '合成服务：状态未知',
+        svcLaunch: '启动命令',
+        svcStartOk: '服务已就绪',
+        svcStartFail: '启动失败',
+        svcStopOk: '已停止，显存已释放',
+        svcStopNone: '这个服务不是你起的，桌宠不会去停它',
         speakProbe: '试一句',
         speakProbing: '探测中…',
         speakOk: '合成服务正常',
@@ -365,6 +381,22 @@ window.__ModuleLoader__.load({
         speakRepliesHint: 'Synthesis takes seconds (≈3 s/sentence on GPU); the bubble shows text first',
         ttsUrl: 'TTS service URL',
         speechMaxChars: 'Max characters per utterance',
+        ttsResident: 'Keep the voice model resident',
+        ttsResidentHint: 'Resident: load once and stay in VRAM — every synthesis starts instantly (uses VRAM). Off: unload when idle to free VRAM, but the first synthesis of each session waits for model load',
+        ttsIdleStopSec: 'Unload after idle (seconds, 0 = never)',
+        svcStart: 'Start service',
+        svcStop: 'Stop & free VRAM',
+        svcState: 'TTS service',
+        svcOurs: 'running (started by the pet)',
+        svcExternal: 'running (started by you — the pet will not stop it)',
+        svcDown: 'not running',
+        svcResidentOn: 'resident',
+        svcUnknown: 'TTS service: unknown',
+        svcLaunch: 'Launch command',
+        svcStartOk: 'Service ready',
+        svcStartFail: 'Start failed',
+        svcStopOk: 'Stopped, VRAM freed',
+        svcStopNone: 'That service was not started by the pet',
         speakProbe: 'Try one',
         speakProbing: 'Probing…',
         speakOk: 'TTS service OK',
@@ -1185,6 +1217,38 @@ window.__ModuleLoader__.load({
       }
 
       /**
+       * 启动/停止合成服务进程（"常驻"开关的手动入口）。
+       *
+       * 为什么要手动入口：常驻决定"要不要一直占着显存"，
+       * 用户应该能**立刻**要它起来或释放，而不是等空闲超时。
+       */
+      const controlService = action => {
+        const fn = runtime.controlTtsService
+        if (typeof fn !== 'function') {
+          setSpeakNote('服务控制不可用（宿主未装配）')
+          return
+        }
+        setSpeakBusy(true)
+        setSpeakNote(null)
+        Promise.resolve(fn(action))
+          .then(r => {
+            if (r === null || r === undefined) { setSpeakNote('无响应'); return }
+            if (action === 'stop') {
+              setSpeakNote(r.stopped === true ? t('svcStopOk') : (r.note ?? t('svcStopNone')))
+            } else {
+              setSpeakNote(r.ok === true
+                ? `${t('svcStartOk')}${r.backend ? ` · ${r.backend}` : ''}`
+                : `${t('svcStartFail')}：${r.reason ?? 'unknown'}`)
+            }
+            if (r.service !== undefined || r.ready !== undefined) {
+              Promise.resolve(runtime.loadSpeechStatus?.()).then(v => { if (v) setSpeakStatus(v) }).catch(() => {})
+            }
+          })
+          .catch(e => setSpeakNote(`服务操作异常：${e?.message ?? e}`))
+          .finally(() => setSpeakBusy(false))
+      }
+
+      /**
        * 探测合成服务（子插件）是否在跑，并试合成一句。
        *
        * 为什么必须有这个按钮：子插件是**独立进程**，用户看不出它到底起没起。
@@ -1617,8 +1681,61 @@ window.__ModuleLoader__.load({
             className: 'zf-pet-settings__btn',
             disabled: speakBusy,
             onClick: () => probeTts()
-          }, speakBusy ? t('speakProbing') : t('speakProbe'))
+          }, speakBusy ? t('speakProbing') : t('speakProbe')),
+          h('button', {
+            key: 'svcUp',
+            className: 'zf-pet-settings__btn',
+            disabled: speakBusy,
+            onClick: () => controlService('start')
+          }, t('svcStart')),
+          h('button', {
+            key: 'svcDown',
+            className: 'zf-pet-settings__btn',
+            disabled: speakBusy,
+            onClick: () => controlService('stop')
+          }, t('svcStop'))
         ]),
+        // ── 常驻开关（用户点名要的）──────────────────────────────────────
+        //
+        // 背景：合成服务启动要加载模型，CUDA 下更慢（要把模型搬进显存），
+        // 而且加载完长期占着显存。所以"常驻 vs 用完释放"必须让用户选。
+        h(Toggle, {
+          key: 'ttsResident',
+          label: t('ttsResident'),
+          hint: t('ttsResidentHint'),
+          value: settings.ttsResident,
+          onChange: v => set({ ttsResident: v })
+        }),
+        settings.ttsResident
+          ? null
+          : h('label', { key: 'idleStop', className: 'zf-pet-row' }, [
+              h('span', { key: 'l', className: 'zf-pet-row__label' }, t('ttsIdleStopSec')),
+              h('input', {
+                key: 'i',
+                className: 'zf-pet-settings__input',
+                type: 'number',
+                min: 0,
+                max: 86400,
+                defaultValue: String(settings.ttsIdleStopSec ?? 300),
+                onBlur: e => set({ ttsIdleStopSec: Number(e.target.value) })
+              })
+            ]),
+        h('p', { key: 'svcState', className: 'zf-pet-settings__note' },
+          speakStatus?.service === undefined || speakStatus.service === null
+            ? t('svcUnknown')
+            : `${t('svcState')}：${speakStatus.service.ready
+                ? (speakStatus.service.ours ? t('svcOurs') : t('svcExternal'))
+                : t('svcDown')}` +
+              (speakStatus.service.backend ? ` · ${speakStatus.service.backend}` : '') +
+              (speakStatus.service.pid ? ` · pid ${speakStatus.service.pid}` : '') +
+              (speakStatus.service.resident ? ` · ${t('svcResidentOn')}` : '') +
+              (speakStatus.service.lastError ? ` · ⚠ ${speakStatus.service.lastError}` : '')),
+        // 启动命令解析结果：用户能看到桌宠**到底会执行什么**
+        //（自动探测猜错时，一眼就能看出该改哪个设置）。
+        speakStatus?.launch === undefined || speakStatus.launch === null
+          ? null
+          : h('p', { key: 'svcLaunch', className: 'zf-pet-settings__note' },
+              `${t('svcLaunch')}：${(speakStatus.launch.argv ?? []).join(' ')}`),
         speakNote === null
           ? null
           : h('p', { key: 'speakNote', className: 'zf-pet-settings__note' }, speakNote),
@@ -2342,6 +2459,10 @@ window.__ModuleLoader__.load({
         },
         probeTts () {
           return api('POST', '/speech/probe', {})
+        },
+        /** 合成服务进程控制（常驻开关的手动入口）。 */
+        controlTtsService (action) {
+          return api('POST', '/speech/service', { action })
         },
         /** 长期记忆（v3，跨会话共享）：读全文 / 整体替换。 */
         loadMemory () {

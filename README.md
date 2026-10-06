@@ -349,7 +349,11 @@ working(90) > waiting(80) > thinking(70) > error(60)
   （[`dsh-zhuang-fangyi-voice`](../dsh-zhuang-fangyi-voice)，HTTP `POST /tts`），
   把回复**清洗成可朗读文本**（去代码块/链接/markdown/emoji）后合成播放。
   异步：气泡先显示文字、语音好了再播；服务不在就**退回固定台词**，聊天不受影响。
-  设置页有「试一句」按钮直接验证子插件通没通。见 `docs/语音子插件对接.md`。
+  设置页有「试一句」按钮直接验证子插件通没通。
+  **常驻开关**：torch+CUDA 加载模型慢且长期占显存 —— 可选「常驻」
+  （启动一次后一直留着，合成即刻开始）或「非常驻」（空闲后自动释放显存）；
+  另有手动「启动 / 停止并释放」按钮。桌宠**只停自己起的**进程：
+  你自己在终端起的服务，它只连不杀。见 `docs/语音子插件对接.md`。
 - **跨会话共享的长期记忆**：`$DSH_HOME/zhuang-fangyi-pet/memory.md`，
   以 `zf-pet:memory` section 注入到**每个**聊天会话 —— 换会话、重开会话都不会失忆。
   每次回复后可用宿主默认模型**自动提炼** 0~3 条值得长期记住的事
@@ -392,11 +396,12 @@ node tools/test-pet-interactions.mjs # 互动防刷三道闸（27 项）
 node tools/test-pet-chat.mjs         # 加法人设 + 写入安全 + 回复解析（50 项）
 node tools/test-pet-memory.mjs       # 长期记忆：解析/裁剪/文件 IO（21 项）
 node tools/test-pet-tts.mjs          # 动态语音：清洗/WAV 解析/客户端容错（40 项）
+node tools/test-pet-tts-service.mjs  # 合成服务监管：常驻/释放/只停自己起的（28 项）
 node tools/test-pet-native-e2e.mjs   # 真起 exe、真连宿主的集成测试（12 项）
 bin\dsh-zhuang-fangyi-pet.exe --selftest --dark 0   # exe 自检（173 项）
 ```
 
-十一套共 **654 项断言** + exe 自检 **173 项**，无框架依赖（纯 `node:assert`）。
+十二套共 **684 项断言** + exe 自检 **178 项**，无框架依赖（纯 `node:assert`）。
 端到端那套用**真实** `apply()` + **真实** `pet.json` + 真读 SSE 帧，
 验证「宿主事件 → 状态机 → 推送」整条链路；
 `native-e2e` 那套更进一步 —— 用真实 `index.js` 起宿主、经 `ctx.subprocess`

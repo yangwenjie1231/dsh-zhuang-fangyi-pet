@@ -65,6 +65,9 @@ import {
 import {
   createTtsClient, wavDurationMs, DEFAULT_TTS_URL, DEFAULT_MAX_SPEECH_CHARS
 } from './src/pet/tts.js'
+import {
+  createTtsSupervisor, buildServeCommand, HEALTH_POLL_MS as TTS_HEALTH_POLL_MS
+} from './src/pet/tts-service.js'
 
 /** 插件标识（Loader 行 id、token 层 source 共用）。 */
 export const name = 'zhuang-fangyi-pet'
@@ -955,6 +958,121 @@ export function apply (ctx, config) {
     return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_MAX_SPEECH_CHARS
   }
 
+  // ── 合成服务进程监管（"语音模型常驻"开关）────────────────────────────────
+  //
+  // 用户点名的需求："每次特别是使用 CUDA 的时候，加载模型会占更多的时间。
+  // 可以加一个是否让语音模型常驻的选项。"
+  //
+  // 于是这里托管它的**进程生命周期**（见 `src/pet/tts-service.js`）：
+  //   · 常驻 → 一直活着，挂了自动拉起；
+  //   · 非常驻 → 需要时才起，空闲后自动停掉释放显存；
+  //   · **只停自己起的** —— 用户自己在终端起的服务碰都不碰。
+
+  /** 从设置里的 URL 反推端口（起服务要与它一致，否则连不上自己起的服务）。 */
+  const portFromUrl = url => {
+    const m = /^https?:\/\/[^/]*?:(\d+)/i.exec(String(url ?? ''))
+    if (m !== null) {
+      const n = Number(m[1])
+      if (Number.isFinite(n) && n > 0 && n < 65536) return n
+    }
+    return 8765
+  }
+
+  const firstExisting = list => {
+    for (const p of list) {
+      try { if (p !== '' && fs.existsSync(p)) return p } catch { /* 继续找 */ }
+    }
+    return null
+  }
+
+  const homeDir = () => { try { return os.homedir() } catch { return '' } }
+
+  /** 找 python：优先已知的 torch 环境（本机实测那份有 cu128 torch）。 */
+  const detectPython = () => {
+    const hit = firstExisting([
+      path.join(homeDir(), 'miniconda3', 'envs', 'voice', 'python.exe'),
+      path.join(homeDir(), 'anaconda3', 'envs', 'voice', 'python.exe'),
+      path.join(homeDir(), 'miniconda3', 'python.exe')
+    ])
+    // 都找不到 → 交给 PATH 上的 python（子插件用 onnx 后端时够用）。
+    return hit ?? 'python'
+  }
+
+  /** 找合成子插件仓库目录。 */
+  const detectRepoDir = () => firstExisting([
+    'D:\\A\\dsh-zhuang-fangyi-voice',
+    path.join(HERE, '..', 'dsh-zhuang-fangyi-voice'),
+    path.join(homeDir(), 'dsh-zhuang-fangyi-voice')
+  ])
+
+  /** 找 GPT-SoVITS 检出目录（torch 后端需要）。 */
+  const detectGsvRoot = repoDir => firstExisting([
+    path.join(repoDir, 'third_party', 'GPT-SoVITS'),
+    'D:\\A\\voiceclone\\GPT-SoVITS'
+  ])
+
+  /**
+   * 解析启动参数（设置优先，其次自动探测）。
+   *
+   * 自动探测的意义：让用户**不必先配四项设置**就能跑起来。
+   * 探测不到就返回 null → 不托管进程（只连已运行的服务），并如实记日志。
+   */
+  const resolveLaunch = () => {
+    const cfg = settings.get()
+    const python = String(cfg.ttsPython ?? '').trim() || detectPython()
+    const repoDir = String(cfg.ttsRepoDir ?? '').trim() || detectRepoDir()
+    if (python === null || repoDir === null) return null
+    const backend = String(cfg.ttsBackend ?? '').trim()
+    return buildServeCommand({
+      python,
+      repoDir,
+      backend,
+      // gsvRoot：torch 后端需要；探测不到就不传（交给子插件自己找）。
+      gsvRoot: detectGsvRoot(repoDir),
+      port: portFromUrl(String(cfg.ttsUrl ?? '').trim() || DEFAULT_TTS_URL)
+    })
+  }
+
+  const supervisor = createTtsSupervisor({
+    spawn: spec => {
+      let sub = null
+      try {
+        sub = typeof ctx.get === 'function' ? ctx.get('subprocess') : undefined
+      } catch { sub = null }
+      if (sub === null || sub === undefined || typeof sub.spawn !== 'function') {
+        throw new Error('宿主未提供 ctx.subprocess，无法托管合成服务进程')
+      }
+      return sub.spawn(spec)
+    },
+    health: () => tts().health(),
+    logger
+  })
+
+  /** 把当前设置推给监管器（设置改了立刻生效）。 */
+  const syncTtsService = () => {
+    const cfg = settings.get()
+    supervisor.configure({
+      resident: cfg.ttsResident === true,
+      idleStopSec: Number(cfg.ttsIdleStopSec) || 0,
+      launch: resolveLaunch()
+    })
+  }
+  syncTtsService()
+
+  // 周期检查：常驻时服务死了就拉起；非常驻时空闲够了就停掉释放显存。
+  ctx.effect(() => {
+    const timer = setInterval(() => {
+      void supervisor.tick().catch(() => {})
+    }, TTS_HEALTH_POLL_MS)
+    timer.unref?.()
+    return () => {
+      clearInterval(timer)
+      // 插件卸载 → 收掉我们自己起的服务（`ctx.subprocess` 也会兜底终止，
+      // 但显式停一次更干脆，日志里也能看出是"我们停的"）。
+      try { supervisor.stop() } catch { /* 已退出 */ }
+    }
+  }, 'zhuang-fangyi-pet: tts service supervisor')
+
   /**
    * 念一句回复（fire-and-forget）。
    *
@@ -983,6 +1101,11 @@ export function apply (ctx, config) {
           } catch { fromCache = false }
         }
         if (!fromCache) {
+          // ⭐ "需要时才启动"：非常驻模式下服务可能没在跑 —— 先确保它起来。
+          // 有启动命令时 ensure() 会起进程并等它加载完模型（CUDA 下可能几十秒）；
+          // 没命令就只探测，探测不到直接退回固定台词。
+          // 全程在 fire-and-forget 的异步块里，chat 不受任何影响。
+          await supervisor.ensure()
           const r = await client.synthesize(text)
           if (r === null) {
             // 服务没起 / 超时 / 返回垃圾 —— 退回固定台词（exe 侧会播 chat/reply）。
@@ -1581,6 +1704,23 @@ export function apply (ctx, config) {
   })
   ctx.effect(() => () => offSettings(), 'zhuang-fangyi-pet: settings subscription')
 
+  // 设置里改了常驻/空闲时间/启动路径/地址 → 立刻推给监管器（不等重启）。
+  //
+  // ⚠️ `settings.subscribe` 的回调**不带参数**（就是"变了"的通知），
+  // 所以要靠 `syncTtsService()` 每次重算一遍 —— 它自己会读最新设置。
+  // 第一版这里写成了 `settings.onChange((next, prev) => ...)`（不存在的 API），
+  // 是凭空发明的接口。
+  const offTtsSettings = settings.subscribe(() => {
+    try {
+      syncTtsService()
+      // 从"常驻"改成"非常驻"时立刻评估一次：不必等 15 秒轮询才释放显存。
+      void supervisor.tick().catch(() => {})
+    } catch (error) {
+      logger.warn?.(`zhuang-fangyi-pet: 合成服务监管同步失败：${error?.message ?? error}`)
+    }
+  })
+  ctx.effect(() => () => offTtsSettings(), 'zhuang-fangyi-pet: tts settings subscription')
+
   // ── 事件桥：根 Context 收全部 scoped 事件（见 events.js 文件头）──────────
   //
   // ⚠️ **聊天正文走这条桥的回调**，不是另开一个 `ctx.on`。
@@ -2061,6 +2201,38 @@ export function apply (ctx, config) {
           return null
         }
       },
+      /**
+       * 进程控制（设置页的"启动/停止"按钮）。
+       *
+       * `start` = 起进程并等它就绪（会真的等模型加载完）；`stop` = 停掉
+       * **我们自己起的**（用户自己起的那份绝不终止）；`status` = 只读快照。
+       */
+      service: async action => {
+        if (action === 'status') return { ok: true, ...supervisor.status() }
+        if (action === 'stop') {
+          const stopped = supervisor.stop()
+          return {
+            ok: true,
+            stopped,
+            // 没停成有两种可能，如实区分（用户看日志时能分清）
+            note: stopped ? null : (supervisor.status().ours ? '停止失败' : '这个服务不是你起的，桌宠不会去停它'),
+            ...supervisor.status()
+          }
+        }
+        const before = supervisor.status()
+        const ready = await supervisor.ensure()
+        const after = supervisor.status()
+        return {
+          ok: ready,
+          reason: ready
+            ? null
+            : (after.launchable
+                ? (after.lastError ?? '启动超时或进程没能就绪')
+                : '没有可用的启动命令（请在设置里填 python 与子插件目录）'),
+          startedNow: before.ours !== after.ours || after.startedAt !== before.startedAt,
+          ...after
+        }
+      },
       /** 给设置页/诊断用：当前状态（开没开、服务地址、已缓存几条）。 */
       status: () => {
         let cached = 0
@@ -2074,7 +2246,14 @@ export function apply (ctx, config) {
           cached,
           latest: speechLatest === null
             ? null
-            : { name: speechLatest.name, durationMs: speechLatest.durationMs, text: speechLatest.text }
+            : { name: speechLatest.name, durationMs: speechLatest.durationMs, text: speechLatest.text },
+          /** 进程监管状态（常驻/谁起的/pid/空闲多久/上次错误）。 */
+          service: supervisor.status(),
+          /** 解析出来的启动命令（诊断用：用户能看到桌宠到底会执行什么）。 */
+          launch: (() => {
+            const l = resolveLaunch()
+            return l === null ? null : { argv: l.argv, cwd: l.cwd }
+          })()
         }
       },
       /**

@@ -600,6 +600,43 @@ export function createHandler (deps) {
         return
       }
 
+      // ── 合成服务进程控制（"常驻"开关的手动入口）─────────────────────────
+      //
+      // `POST /pet/speech/service {action:'start'|'stop'|'status'}`
+      //
+      // 为什么需要手动入口：常驻模式决定的是"要不要一直占着显存"，
+      // 用户应该能**立刻**要它起来或释放，而不是等空闲超时。
+      //
+      // ⚠️ 动作走**白名单**（与番茄钟/互动同一纪律：绝不把用户串透传到内部）。
+      // ⚠️ 这个分支必须排在 `/speech/<name>` 之前 —— 否则 `service` 会被
+      // 当成"要取名为 service 的语音"（与 `/speech/probe` 同一个坑）。
+      if (route === '/speech/service') {
+        if (deps.speech === undefined || deps.speech === null ||
+            typeof deps.speech.service !== 'function') {
+          sendJson(res, 503, { error: 'unavailable', reason: '宿主未装配服务监管' })
+          return
+        }
+        if (req.method !== 'POST') {
+          sendJson(res, 405, { error: 'method not allowed' })
+          return
+        }
+        let parsed
+        try {
+          parsed = JSON.parse(await readBody(req))
+        } catch {
+          sendJson(res, 400, { error: 'invalid json' })
+          return
+        }
+        const action = String(parsed?.action ?? '')
+        if (action !== 'start' && action !== 'stop' && action !== 'status') {
+          sendJson(res, 400, { error: 'bad action', allowed: ['start', 'stop', 'status'] })
+          return
+        }
+        const result = await deps.speech.service(action)
+        sendJson(res, 200, result)
+        return
+      }
+
       // ── 动态语音字节（契约 §3 新增）───────────────────────────────────
       //
       // `GET /pet/speech/<name>` → audio/wav

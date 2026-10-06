@@ -98,6 +98,9 @@ export const POMODORO_ROUNDS_MIN = 2
 export const POMODORO_ROUNDS_MAX = 12
 
 /** 设置结构版本。v1 为首个版本。 */
+/** 推理后端白名单（'' = 用子插件默认）。 */
+export const TT_BACKENDS = ['', 'torch', 'onnx']
+
 export const SETTINGS_VERSION = 1
 
 /** 默认设置。 */
@@ -234,7 +237,29 @@ export function defaultSettings () {
      * 而合成耗时与长度成正比（onnx 后端 6 秒音频要 37 秒），
      * 越长越不可能及时 —— 60 字 ≈ 15 秒音频，已经是可接受的体验上限。
      */
-    speechMaxChars: 60
+    speechMaxChars: 60,
+    /**
+     * **让语音模型常驻**（用户点名要的开关）。
+     *
+     * 背景：合成服务启动时要加载模型。onnx 约 10 秒；**torch+CUDA 要把
+     * GPT/SoVITS/BERT/HuBERT 搬进显存，更慢，而且加载完长期占着显存**。
+     *
+     *   · `true`  —— 桌宠托管它一直活着：启动一次，之后每次合成**立刻开始**；
+     *                挂了自动拉起。代价是显存一直被占。
+     *   · `false` —— 需要时才启动，空闲 `ttsIdleStopSec` 秒后自动停掉释放显存。
+     *                代价是每次会话第一次合成要等模型加载。
+     *
+     * ⚠️ 桌宠**只停自己起的进程**：用户自己在终端起的服务，我们只连不杀。
+     */
+    ttsResident: false,
+    /** 非常驻模式下，空闲多少秒后停掉服务释放显存（0 = 永不自动停）。 */
+    ttsIdleStopSec: 300,
+    /** 启动合成服务用的 python（留空 = 自动探测）。 */
+    ttsPython: '',
+    /** 合成子插件仓库目录（留空 = 自动探测）。 */
+    ttsRepoDir: '',
+    /** 推理后端：'' = 用子插件默认；`torch`（快，占显存）/ `onnx`（慢，省显存）。 */
+    ttsBackend: ''
   }
 }
 
@@ -275,7 +300,7 @@ export function normalizeSettings (input) {
   for (const key of ['clickThrough', 'topmost', 'bubble', 'bubbleImages',
     'hint', 'statusAlways', 'notifyComplete', 'attentionReminder',
     'pomodoro', 'pomodoroAutoNext', 'pomodoroNotify', 'pomodoroCountdown',
-    'voice', 'chatEnabled', 'memoryAuto', 'speakReplies']) {
+    'voice', 'chatEnabled', 'memoryAuto', 'speakReplies', 'ttsResident']) {
     if (typeof input[key] === 'boolean') out[key] = input[key]
   }
 
@@ -303,6 +328,13 @@ export function normalizeSettings (input) {
   }
   // 朗读长度上限：夹在 10~300 字。太短没意义（一个词），太长合成等不起。
   out.speechMaxChars = clamp(input.speechMaxChars, 10, 300, base.speechMaxChars)
+  // 空闲释放时间：0 = 不自动停；上限一天（再长就没有"释放显存"的意义了）。
+  out.ttsIdleStopSec = clamp(input.ttsIdleStopSec, 0, 86400, base.ttsIdleStopSec)
+  // 启动服务用的路径与后端。长度限住，后端只认两个值。
+  for (const key of ['ttsPython', 'ttsRepoDir']) {
+    if (typeof input[key] === 'string' && input[key].length <= 300) out[key] = input[key].trim()
+  }
+  if (TT_BACKENDS.includes(input.ttsBackend)) out.ttsBackend = input.ttsBackend
 
   out.x = optionalInt(input.x, base.x)
   out.y = optionalInt(input.y, base.y)
