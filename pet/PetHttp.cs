@@ -738,6 +738,75 @@ namespace DshZhuangFangyiPet
                      "{\"voice\":" + (on ? "true" : "false") + "}");
         }
 
+        // ── v9：互动 ──────────────────────────────────────────────────────────
+
+        /// <summary>允许的互动动作（**唯一真相**，与 Host 的 `INTERACT_KINDS` 同集合）。</summary>
+        internal static readonly string[] InteractKinds =
+            new string[] { "pet-head", "feed", "praise", "click" };
+
+        /// <summary>动作名是否合法。纯函数（自检直接断言，不必起服务）。</summary>
+        internal static bool IsKnownInteractKind(string kind)
+        {
+            if (string.IsNullOrEmpty(kind)) return false;
+            for (int i = 0; i < InteractKinds.Length; i++)
+            {
+                if (string.Equals(InteractKinds[i], kind, StringComparison.Ordinal)) return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// 记一次互动（POST /pet/interact）。
+        ///
+        /// **动作名必须在 exe 侧就是常量**，且只从这里发出 —— 绝不把界面上的
+        /// 字符串直接拼进请求体（宿主侧也有白名单，两层都要有）。
+        /// </summary>
+        public void PostInteract(string kind)
+        {
+            if (!IsKnownInteractKind(kind)) return;
+            PostJson("/api/zhuang-fangyi/pet/interact", "{\"kind\":\"" + kind + "\"}");
+        }
+
+        /// <summary>
+        /// 拉互动动作表（GET /pet/interact）→ 回调（线程池线程上被调，UI 侧要自己切回来）。
+        ///
+        /// **菜单项由 Host 给**（不在 exe 里硬编码）：加一个互动只改
+        /// `interactions.js`，exe 不用重新编译。
+        /// </summary>
+        public void GetInteractMenu(Action<PetInteractMenu, string> done)
+        {
+            if (done == null) return;
+            if (_disposed) { done(null, "http 已释放"); return; }
+            string url = _base + "/api/zhuang-fangyi/pet/interact";
+            string token = _token;
+            ThreadPool.QueueUserWorkItem(delegate(object _)
+            {
+                try
+                {
+                    HttpWebRequest req = (HttpWebRequest)WebRequest.Create(url);
+                    req.Method = "GET";
+                    req.Timeout = 10000;
+                    req.ReadWriteTimeout = 10000;
+                    req.Proxy = null;
+                    req.KeepAlive = false;
+                    req.Headers["Authorization"] = "Bearer " + token;
+                    using (HttpWebResponse resp = (HttpWebResponse)req.GetResponse())
+                    {
+                        using (Stream st = resp.GetResponseStream())
+                        {
+                            string body = new UTF8Encoding(false).GetString(ReadAll(st, 256 * 1024));
+                            PetInteractMenu m = PetInteractMenu.Parse(body);
+                            done(m, m == null ? "响应不是合法菜单" : null);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    done(null, PetLog.Describe(ex));
+                }
+            });
+        }
+
         /// <summary>
         /// 契约 §3 新增：GET /pet/settings → {"settings":{…}}。
         /// 原生 exe 目前不用它（位置走 POST /pet/position），但保留读取入口，

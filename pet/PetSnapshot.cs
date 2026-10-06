@@ -202,6 +202,17 @@ namespace DshZhuangFangyiPet
         public PetAttentionInfo Attention;
         /// <summary>契约 §2 v7（additive）：番茄钟块。块缺失 = null（旧 Host）。</summary>
         public PetPomodoroInfo Pomodoro;
+        /// <summary>契约 §2 v9（additive）：好感度块。块缺失 = null（旧 Host）。</summary>
+        public PetAffectionInfo Affection;
+        /// <summary>
+        /// 契约 §2 v9（additive）：最近一次互动（一次性信号）。
+        ///
+        /// exe 靠 `seq` 判"这是新的一次"从而**恰好播一次**语音。
+        /// 用递增序号而不是时间戳：同一毫秒两次互动时间戳相同，会漏掉第二次。
+        /// </summary>
+        public long InteractSeq;
+        public string InteractKind;
+        public string InteractVoice;
         public List<PetSessionInfo> Sessions = new List<PetSessionInfo>();
         public bool NativeAvailable = true;
         public string NativeError;
@@ -366,6 +377,20 @@ namespace DshZhuangFangyiPet
                 // `show` 缺省跟随 enabled（旧 Host 若只给 enabled 也能工作）。
                 pi.Show = pomo.Get("show") != null ? pomo.Bool("show", pi.Enabled) : pi.Enabled;
                 s.Pomodoro = pi;
+            }
+
+            // 契约 §2 v9（additive）：好感度 + 最近一次互动。
+            PetJson.JVal aff = root.Get("affection");
+            if (aff != null && aff.IsObj)
+            {
+                s.Affection = PetAffectionInfo.Parse(aff);
+            }
+            PetJson.JVal act = root.Get("interact");
+            if (act != null && act.IsObj)
+            {
+                s.InteractSeq = (long)act.Num("seq", 0);
+                s.InteractKind = act.Str("kind", null);
+                s.InteractVoice = act.Str("voice", null);
             }
 
             PetJson.JVal sess = root.Get("sessions");

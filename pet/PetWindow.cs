@@ -706,8 +706,65 @@ namespace DshZhuangFangyiPet
 
             _dragging = true;
             _dragOffsetDip = p;
+            // v9：记下按下时的**屏幕坐标与时刻**，用来区分"点击"与"拖动"。
+            // 判据是"位移够小 **且** 时间够短"，两个都要 —— 只看位移的话，
+            // 慢慢拖 3 像素也会被当成点击；只看时间的话，快速拖一大段也是"点击"。
+            _pressAt = DateTime.UtcNow;
+            try { _pressScreen = PointToScreen(p); } catch { _pressScreen = new Point(double.NaN, double.NaN); }
+            _movedSincePress = false;
             try { CaptureMouse(); } catch { }
             e.Handled = true;
+        }
+
+        // ------------------------------------------------------------------
+        // v9：单击（与拖动区分）
+        // ------------------------------------------------------------------
+
+        /// <summary>按下时刻（判断"是不是点击"用）。</summary>
+        private DateTime _pressAt = DateTime.MinValue;
+        /// <summary>按下时的屏幕坐标。</summary>
+        private Point _pressScreen = new Point(double.NaN, double.NaN);
+        /// <summary>按下之后是否移动超过阈值（超过就不是点击）。</summary>
+        private bool _movedSincePress;
+
+        /// <summary>
+        /// 单击判定的两个阈值（**单位：物理像素 / 毫秒**）。
+        ///
+        /// 为什么是 4px：手在按键时几乎必然有 1~2px 的抖动，
+        /// 阈值太小会把"点一下"判成"拖了一下"（用户会觉得点了没反应）。
+        /// 4px 在 150% DPI 下约 2.7 DIP，足够容纳抖动而不误判真拖动。
+        ///
+        /// 为什么是 300ms：超过这个时长的按住更可能是"想拖但没动"或
+        /// "长按"，不该触发互动（那会让"按住看它反应"变成刷互动的路子）。
+        /// </summary>
+        internal const double ClickMaxMovePx = 4.0;
+        internal const int ClickMaxMs = 300;
+
+        /// <summary>
+        /// 判定一次按下-抬起是否算"单击"。**纯函数**（自检直接断言，
+        /// 不必真的模拟鼠标 —— 那在无头自检里做不到）。
+        ///
+        /// ⚠️ `double.IsNaN` 那行**不是冗余的**。
+        /// 我一度以为它是（"NaN 参与比较都是 false，`<= 4` 本身就拒了"），
+        /// 但那只对**当前**的写法成立。回退验证证明：把它删掉、同时把比较
+        /// 写成 `!(dist > 4)`（一个看起来很自然的等价变形），NaN 就会**通过**
+        /// —— 自检立刻失败 2 条。
+        ///
+        /// 所以这行的真正作用是把"算不出坐标时保守处理"这条**语义**写死，
+        /// 而不是依赖某个具体比较运算符的 NaN 行为。
+        /// `+Inf`/`-Inf` 同理：距离算出来是 Inf，`<= 4` 为 false，也走拒绝。
+        /// </summary>
+        internal static bool IsClickGesture(double dx, double dy, int elapsedMs)
+        {
+            if (elapsedMs < 0 || elapsedMs > ClickMaxMs) return false;
+            if (double.IsNaN(dx) || double.IsNaN(dy)) return false;
+            return Math.Sqrt(dx * dx + dy * dy) <= ClickMaxMovePx;
+        }
+
+        /// <summary>自检诊断用：直接跑一次判定。</summary>
+        internal static bool DiagIsClick(double dx, double dy, int ms)
+        {
+            return IsClickGesture(dx, dy, ms);
         }
 
         // ------------------------------------------------------------------
@@ -739,6 +796,13 @@ namespace DshZhuangFangyiPet
             try
             {
                 Point screen = PointToScreen(e.GetPosition(this));
+                // v9：记下"有没有真的移动过"（超过阈值就不算点击了）。
+                if (!_movedSincePress &&
+                    !double.IsNaN(_pressScreen.X) &&
+                    IsClickGesture(screen.X - _pressScreen.X, screen.Y - _pressScreen.Y, 0) == false)
+                {
+                    _movedSincePress = true;
+                }
                 double dpi = _hwnd == IntPtr.Zero ? 1.0 : PetNative.GetDpiForWindowSafe(_hwnd) / 96.0;
                 if (dpi <= 0) dpi = 1.0;
                 Left = screen.X / dpi - _dragOffsetDip.X;
@@ -755,8 +819,22 @@ namespace DshZhuangFangyiPet
         private void OnMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
         {
             if (!_dragging) return;
+            // v9：先判定"这是点击还是拖动"，**再**结束拖动。
+            // 顺序不能反：`EndDrag` 会清 `_dragging` 并 ReclampPosition，
+            // 而点击判定要用按下时的坐标（不受 Reclamp 影响，但逻辑上先判更清楚）。
+            bool isClick = false;
+            try
+            {
+                Point now = PointToScreen(e.GetPosition(this));
+                int elapsed = (int)(DateTime.UtcNow - _pressAt).TotalMilliseconds;
+                isClick = !_movedSincePress && IsClickGesture(
+                    now.X - _pressScreen.X, now.Y - _pressScreen.Y, elapsed);
+            }
+            catch { isClick = false; }
+
             EndDrag();
             e.Handled = true;
+            if (isClick) { try { ClickInvoked(); } catch { } }
         }
 
         private void EndDrag()
@@ -782,6 +860,13 @@ namespace DshZhuangFangyiPet
         public Action FocusDshRequested = delegate { };
         /// <summary>task-6：双击本体（行为由 snapshot.settings.doubleClick 决定，Program 装配）。</summary>
         public Action DoubleClickInvoked = delegate { };
+        /// <summary>
+        /// v9：**单击**本体（与拖动区分开）。
+        ///
+        /// Program 装配成"记一次互动"（`POST /pet/interact {kind:'click'}`）。
+        /// 判据见 `IsClickGesture`：位移 ≤4px **且** 时长 ≤300ms。
+        /// </summary>
+        public Action ClickInvoked = delegate { };
 
         // ------------------------------------------------------------------
         // 窗口消息

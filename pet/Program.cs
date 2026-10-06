@@ -315,6 +315,8 @@ namespace DshZhuangFangyiPet
             _win.OnDisplayChanged = OnDisplayChanged;
             _win.ScaleAdjusted = OnScaleAdjusted;       // task-6：滚轮缩放 → 去抖上报 + 托盘刷新
             _win.DoubleClickInvoked = OnPetDoubleClick; // task-6：双击行为由 settings.doubleClick 决定
+            // v9：单击（与拖动区分）→ 记一次互动。判据在 PetWindow.IsClickGesture。
+            _win.ClickInvoked = delegate { OnPetClicked(); };
             _win.SendButtonClicked = OnSendButtonClicked;  // task-7：✎ → 打开输入窗
             // 悬停事实 → 状态文字（`hint` 用）。与 ✎ 同一时机，不另起一套判定。
             _win.HoverChanged = delegate(bool over)
@@ -651,6 +653,9 @@ namespace DshZhuangFangyiPet
             // v8：语音（只在**变化**时出声 —— 见 SpeakForSnapshot 的说明）
             SpeakForSnapshot(snap);
 
+            // v9：好感度 + 互动语音
+            ApplyInteract(snap);
+
             // 状态文字：快照的 label 是**已本地化**的状态词（待机中/正在思考…）。
             // 先存进本体窗，再刷新标签（标签通过 VisibleLabel() 读它，单一真相）。
             _win.SetVisibleLabel(snap.Label);
@@ -942,6 +947,110 @@ namespace DshZhuangFangyiPet
             if (_voicePlayer != null) _voicePlayer.Enabled = on;
             if (!on && _voicePlayer != null) _voicePlayer.Stop();
             PetLog.Info("语音 → " + (on ? "开" : "关"));
+        }
+
+        // ------------------------------------------------------------------
+        // v9：互动与好感度
+        // ------------------------------------------------------------------
+
+        /// <summary>互动菜单（从 Host 拉的，含动作表与好感度）。</summary>
+        private PetInteractMenu _interactMenu;
+        /// <summary>最近处理过的互动序号（去重：同一个 seq 只播一次语音）。</summary>
+        private long _lastInteractSeq = -1;
+        /// <summary>当前好感度（快照里的）。</summary>
+        private PetAffectionInfo _affection;
+
+        /// <summary>
+        /// 单击桌宠 → 记一次互动。
+        ///
+        /// **只发请求，不本地改状态**：好感度与文案都由 Host 算（它是唯一真相）。
+        /// 本地乐观更新一旦与 Host 不一致（比如正好冷却中），界面就会说谎。
+        /// </summary>
+        private void OnPetClicked()
+        {
+            if (_http == null) return;
+            _http.PostInteract("click");
+            PetLog.Info("单击桌宠 → 互动 click");
+        }
+
+        /// <summary>右键菜单里的互动项被点。</summary>
+        private void OnInteractChosen(string kind)
+        {
+            if (_http == null) return;
+            _http.PostInteract(kind);
+            PetLog.Info("右键互动 → " + kind);
+        }
+
+        /// <summary>
+        /// 应用快照里的好感度 + 处理"最近一次互动"。
+        ///
+        /// 互动语音**由这里触发**（而不是单击时立刻播）：Host 才是"这次互动
+        /// 算不算数"的判定方（可能在冷却中）。等它把 `interact.seq` 推回来
+        /// 再播，语音与真实结果才一致。
+        /// </summary>
+        private void ApplyInteract(PetSnapshot snap)
+        {
+            if (snap == null) return;
+
+            // 好感度 diff（值没变零日志）。
+            if (!PetAffectionInfo.Same(snap.Affection, _affection))
+            {
+                _affection = snap.Affection;
+                if (_affection != null)
+                {
+                    PetLog.Info("好感度 → " + _affection.Points + " 分 / " +
+                                _affection.Label() +
+                                (_affection.NextMin > 0
+                                    ? ("（下一档 " + _affection.NextMin + "）")
+                                    : "（已满级）"));
+                }
+                _tray.Refresh();
+            }
+
+            // 互动信号：只在 seq **变化**时播一次。
+            // `_lastInteractSeq` 初值 -1：首次收到（seq 可能从 1 开始）也会播。
+            if (snap.InteractSeq > 0 && snap.InteractSeq != _lastInteractSeq)
+            {
+                _lastInteractSeq = snap.InteractSeq;
+                if (!string.IsNullOrEmpty(snap.InteractVoice))
+                {
+                    Speak(snap.InteractVoice);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 拉互动动作表（右键菜单用）。**异步**，失败就保持上一次的菜单
+        /// （不把菜单清空 —— 那会让用户右键时看到空菜单）。
+        /// </summary>
+        private void RefreshInteractMenu()
+        {
+            if (_http == null) return;
+            try
+            {
+                _http.GetInteractMenu(delegate(PetInteractMenu m, string err)
+                {
+                    if (m == null)
+                    {
+                        PetLog.Warn("互动菜单拉取失败（保持上一次）：" + (err ?? "未知原因"));
+                        return;
+                    }
+                    if (_ui != null && !_ui.CheckAccess())
+                    {
+                        _ui.BeginInvoke(DispatcherPriority.Normal, new Action(delegate
+                        {
+                            _interactMenu = m;
+                            _affection = m.Affection ?? _affection;
+                        }));
+                    }
+                    else
+                    {
+                        _interactMenu = m;
+                        _affection = m.Affection ?? _affection;
+                    }
+                });
+            }
+            catch (Exception ex) { PetLog.Warn("互动菜单刷新失败: " + PetLog.Describe(ex)); }
         }
 
         // ------------------------------------------------------------------
@@ -1469,14 +1578,91 @@ namespace DshZhuangFangyiPet
         }
         private void OnPetContextMenu(PetWindow w, MouseButtonEventArgs e)
         {
+            // 每次右键都刷一次互动动作表：菜单项由 Host 给（加互动不必重编译 exe），
+            // 且好感度档位会随互动变化，右键是最自然的"看看现在怎么样"的时机。
+            RefreshInteractMenu();
             if (_petMenu == null) _petMenu = BuildPetMenu();
+            // 好感度那一行是动态文本，每次打开都更新。
+            UpdateAffectionMenuItem();
             _petMenu.PlacementTarget = w;
             _petMenu.IsOpen = true;
+        }
+
+        /// <summary>右键菜单顶部的"好感度"行（只读展示）。</summary>
+        private MenuItem _miAffection;
+
+        /// <summary>刷新好感度那一行。没有数据时显示"未知"而不是空白。</summary>
+        private void UpdateAffectionMenuItem()
+        {
+            if (_miAffection == null) return;
+            try
+            {
+                PetAffectionInfo a = _affection;
+                if (a == null)
+                {
+                    _miAffection.Header = "好感度：—";
+                    return;
+                }
+                string tail = a.NextMin > 0
+                    ? ("（下一档 " + a.NextMin + "）")
+                    : "（已满级）";
+                _miAffection.Header = "好感度：" + a.Points.ToString(CultureInfo.InvariantCulture) +
+                                      " · " + a.Label() + tail;
+            }
+            catch { }
         }
 
         private ContextMenu BuildPetMenu()
         {
             ContextMenu m = new ContextMenu();
+
+            // ── v9：互动（用户点名"增加一些互动"）────────────────────────────
+            //
+            // 菜单项**由 Host 给**（`GET /pet/interact`），不在这里硬编码：
+            // 加一个互动动作只改 `src/pet/interactions.js`，exe 不用重新编译。
+            // 首次右键时若还没拉到，就退回内置的三个（保证菜单不会是空的）。
+            MenuItem interact = new MenuItem();
+            interact.Header = "互动(_I)";
+            PetInteractMenu menu = _interactMenu;
+            if (menu != null && menu.Kinds.Count > 0)
+            {
+                for (int i = 0; i < menu.Kinds.Count; i++)
+                {
+                    PetInteractKind k = menu.Kinds[i];
+                    // click 是"单击桌宠"那条路，不放进右键菜单（否则同一个动作
+                    // 有两个入口，用户会以为它们不一样）。
+                    if (k.Kind == "click") continue;
+                    string kind = k.Kind;
+                    MenuItem mi = new MenuItem();
+                    mi.Header = k.Label;
+                    mi.Click += delegate { OnInteractChosen(kind); };
+                    interact.Items.Add(mi);
+                }
+            }
+            if (interact.Items.Count == 0)
+            {
+                // 兜底：还没拉到菜单时给三个内置的（名字与 Host 侧一致）。
+                // **不显示"加载中"这种空洞** —— 用户右键是要做事，不是等。
+                string[] fallback = new string[] { "pet-head", "feed", "praise" };
+                string[] labels = new string[] { "摸摸头", "投喂", "夸奖" };
+                for (int i = 0; i < fallback.Length; i++)
+                {
+                    string kind = fallback[i];
+                    MenuItem mi = new MenuItem();
+                    mi.Header = labels[i];
+                    mi.Click += delegate { OnInteractChosen(kind); };
+                    interact.Items.Add(mi);
+                }
+            }
+            m.Items.Add(interact);
+
+            _miAffection = new MenuItem();
+            _miAffection.Header = "好感度：—";
+            _miAffection.IsEnabled = false;   // 纯展示
+            m.Items.Add(_miAffection);
+            UpdateAffectionMenuItem();
+
+            m.Items.Add(new Separator());
 
             MenuItem preview = new MenuItem();
             preview.Header = "表情预览(_E)";

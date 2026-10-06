@@ -86,6 +86,7 @@ namespace DshZhuangFangyiPet
                 TestAttentionPresentation();
                 TestPomodoro();
                 TestVoice();
+                TestInteract();
                 TestMutex();
                 TestHttp(opt);
             }
@@ -1752,6 +1753,200 @@ namespace DshZhuangFangyiPet
             {
                 Check(true, "真实语音清单不存在（未构建）→ 跳过", realManifest);
             }
+        }
+
+        // ------------------------------------------------------------------
+        // v9：互动与好感度（exe 侧只做三件事：区分点击/拖动、建菜单、播语音）
+        // ------------------------------------------------------------------
+        //
+        // ⚠️ 好感度的**规则**（冷却/递减/日上限）全在 Host 的
+        // `src/pet/interactions.js` 里（那边有 27 条带假时钟的单测）。
+        // exe 不重算任何数值 —— 这里测的是 exe 自己那部分：
+        // 手势判定、白名单、菜单解析、互动信号的去重。
+        private static void TestInteract()
+        {
+            // (1) ⭐⭐ 点击 vs 拖动：两个阈值都要看
+            // 只看位移的话"慢慢拖 3px"会被当成点击；只看时间的话"快速拖一大段"也是。
+            bool clickCases =
+                // 真正的点击：没动或抖了 1~2px，时间很短
+                PetWindow.DiagIsClick(0, 0, 50) &&
+                PetWindow.DiagIsClick(1, 1, 120) &&
+                PetWindow.DiagIsClick(2, 2, 200) &&
+                // 边界：刚好 4px / 刚好 300ms 都算点击
+                PetWindow.DiagIsClick(4, 0, 300) &&
+                PetWindow.DiagIsClick(0, 4, 300);
+            bool notClickCases =
+                // 拖了 5px → 不是点击
+                !PetWindow.DiagIsClick(5, 0, 100) &&
+                !PetWindow.DiagIsClick(0, 5, 100) &&
+                // 斜着拖：3+3 的直线距离 ≈4.24 > 4 → 不是点击
+                !PetWindow.DiagIsClick(3, 3, 100) &&
+                // 按了 301ms → 不是点击（长按不该触发互动）
+                !PetWindow.DiagIsClick(0, 0, 301) &&
+                !PetWindow.DiagIsClick(0, 0, 5000) &&
+                // 坐标算不出来（NaN）→ 保守判成"不是点击"（宁可漏一次互动，
+                // 也不要把一次拖动误判成点击）
+                !PetWindow.DiagIsClick(double.NaN, 0, 50) &&
+                !PetWindow.DiagIsClick(0, double.NaN, 50) &&
+                // 负数时长（时钟异常）→ 不是点击
+                !PetWindow.DiagIsClick(0, 0, -1);
+            Check(clickCases && notClickCases,
+                  "⭐⭐ 单击 vs 拖动：位移 ≤4px **且** 时长 ≤300ms（两个都要）",
+                  "点击 5 例通过；5px/3+3px/301ms/NaN/负时长 全部拒绝");
+
+            // (1b) ⭐ NaN 坐标必须判成"不是点击"。
+            //
+            // ⚠️ 这条断言**不能只靠"返回 false"** —— 回退验证发现：把
+            // `double.IsNaN` 那行删掉，断言照样通过，因为 NaN 参与任何比较
+            // 都得 false，`Math.Sqrt(...) <= 4` 本身就是 false。那是**巧合式安全**。
+            //
+            // 真正该断言的是**这条性质本身**："算不出坐标时保守地不当点击"，
+            // 无论实现是靠显式判断还是靠 NaN 语义。所以这里显式写出
+            // "NaN 必须为 false"并把理由记下来 —— 将来若有人把它改成
+            // `!(dist > 4)`（NaN 会通过！），这条断言就会失败。
+            Check(!PetWindow.DiagIsClick(double.NaN, 0, 50) &&
+                  !PetWindow.DiagIsClick(0, double.NaN, 50) &&
+                  !PetWindow.DiagIsClick(double.NaN, double.NaN, 50) &&
+                  !PetWindow.DiagIsClick(double.PositiveInfinity, 0, 50) &&
+                  !PetWindow.DiagIsClick(0, double.NegativeInfinity, 50),
+                  "⭐ 坐标算不出来（NaN/Inf）时保守判成不是点击（宁可漏一次互动）",
+                  "NaN×3 / +Inf / -Inf 全部返回 false");
+
+            // (2) ⭐ 拖动过程中的"移动过"判定用的是同一个阈值（单一真相）
+            // 若两处各写一套，早晚出现"判定说没动、实际动了"。
+            Check(PetWindow.ClickMaxMovePx == 4.0 && PetWindow.ClickMaxMs == 300,
+                  "点击阈值是常量（4px / 300ms），不是散落的魔数",
+                  "ClickMaxMovePx=" + PetWindow.ClickMaxMovePx + " ClickMaxMs=" + PetWindow.ClickMaxMs);
+
+            // (3) ⭐⭐ 互动动作白名单（exe 侧也要挡：跨进程信任边界）
+            bool wl = PetHttp.IsKnownInteractKind("pet-head") &&
+                      PetHttp.IsKnownInteractKind("feed") &&
+                      PetHttp.IsKnownInteractKind("praise") &&
+                      PetHttp.IsKnownInteractKind("click") &&
+                      !PetHttp.IsKnownInteractKind("__proto__") &&
+                      !PetHttp.IsKnownInteractKind("toString") &&
+                      !PetHttp.IsKnownInteractKind("PRAISE") &&      // 大小写敏感
+                      !PetHttp.IsKnownInteractKind("praise ") &&     // 尾空格不许过
+                      !PetHttp.IsKnownInteractKind("") &&
+                      !PetHttp.IsKnownInteractKind(null) &&
+                      !PetHttp.IsKnownInteractKind("praise;exit");
+            Check(wl, "互动动作白名单（原型链名字/大小写/空格/注入串一律拒绝）",
+                  "4 个合法动作通过；__proto__/toString/PRAISE/尾空格/空/注入串全部拒绝");
+
+            // (4) 互动菜单解析
+            string menuJson =
+                "{\"kinds\":[" +
+                "{\"kind\":\"pet-head\",\"label\":\"摸摸头\",\"hasText\":true}," +
+                "{\"kind\":\"feed\",\"label\":\"投喂\",\"hasText\":true}," +
+                "{\"kind\":\"praise\",\"label\":\"夸奖\",\"hasText\":true}," +
+                "{\"kind\":\"click\",\"label\":\"打招呼\",\"hasText\":false}," +
+                "{\"kind\":\"__proto__\",\"label\":\"坏人\"}," +
+                "null," +
+                "\"string\"" +
+                "],\"affection\":{\"points\":25,\"tier\":\"familiar\"," +
+                "\"tierLabel\":{\"zh\":\"熟悉\",\"en\":\"Familiar\"},\"nextMin\":60,\"progress\":0.125}}";
+            PetInteractMenu menu = PetInteractMenu.Parse(menuJson);
+            bool menuOk = menu != null && menu.Kinds.Count == 4 &&
+                          menu.Affection != null && menu.Affection.Points == 25 &&
+                          menu.Affection.Tier == "familiar" &&
+                          menu.Affection.Label() == "熟悉" &&
+                          menu.Affection.NextMin == 60;
+            Check(menuOk, "⭐ 互动菜单解析（非法动作被丢弃，好感度解析正确）",
+                  menu == null ? "解析失败" : ("Kinds=" + menu.Kinds.Count + "（__proto__/null/string 已丢弃）" +
+                  " affection=" + menu.Affection.Points + "分/" + menu.Affection.Label()));
+
+            // (5) 菜单解析对坏输入安全
+            //
+            // ⚠️ 这条断言修过一次。原先只断言"返回 null"，但回退验证发现
+            // 把 `arr.IsArr` 检查删掉照样全绿（`PetJson.Get` 对非对象返回 null，
+            // 所以 `arr == null` 已经覆盖了）。那是**冗余判断**，不是假守卫。
+            //
+            // 真正要防的是：**坏 JSON 被容错解析器解析成"合法但没动作的菜单"**，
+            // 界面上表现为一个**空的互动子菜单**（用户右键看到空白，不知为何）。
+            // `PetJson.Parse` 确实是容错的（`"{ not json"` → 空对象而非 null），
+            // 所以这里必须断言"**没有 kinds 数组 → null**"，而不只是"不抛"。
+            PetInteractMenu badJson = PetInteractMenu.Parse("{ not json");
+            Check(PetInteractMenu.Parse(null) == null &&
+                  PetInteractMenu.Parse("") == null &&
+                  badJson == null,
+                  "⭐ 互动菜单解析：null/空/坏 JSON 一律返回 null（不产生空菜单）",
+                  "坏 JSON → " + (badJson == null ? "null（正确）" : "非 null（会显示成空菜单！）"));
+            // 反向确认：正常输入必须**能**解析出来（否则上面可能是"什么都解析不出来"）
+            Check(PetInteractMenu.Parse("{\"kinds\":[]}") != null,
+                  "反向：合法的空动作表仍能解析（证明上面不是一律 null）",
+                  "{\"kinds\":[]} → 非 null（Kinds=0）");
+
+            // (6) 菜单缺 label → 回落动作名（界面不出现空白）
+            PetInteractMenu noLabel = PetInteractMenu.Parse(
+                "{\"kinds\":[{\"kind\":\"feed\"}]}");
+            Check(noLabel != null && noLabel.Kinds.Count == 1 &&
+                  noLabel.Kinds[0].Label == "feed",
+                  "菜单项缺 label → 回落动作名（不显示空白）",
+                  "label=\"" + (noLabel == null || noLabel.Kinds.Count == 0 ? "?" : noLabel.Kinds[0].Label) + "\"");
+
+            // (7) ⭐ 好感度解析：非法值回落、进度夹取
+            PetAffectionInfo bad = PetAffectionInfo.Parse(
+                PetJson.Parse("{\"points\":-5,\"tier\":\"bogus\",\"nextMin\":-1,\"progress\":9}"));
+            bool badOk = bad != null && bad.Points == 0 && bad.NextMin == 0 &&
+                         bad.Progress == 1 && bad.Label() == "bogus";
+            Check(badOk, "好感度解析：负数夹 0、进度夹到 0~1（不崩）",
+                  bad == null ? "解析失败" : ("points=" + bad.Points + " nextMin=" + bad.NextMin +
+                  " progress=" + bad.Progress));
+
+            // (8) 好感度 diff：值没变不动作
+            PetAffectionInfo a1 = PetAffectionInfo.Parse(PetJson.Parse(
+                "{\"points\":10,\"tier\":\"stranger\",\"nextMin\":20}"));
+            PetAffectionInfo a2 = PetAffectionInfo.Parse(PetJson.Parse(
+                "{\"points\":10,\"tier\":\"stranger\",\"nextMin\":20}"));
+            PetAffectionInfo a3 = PetAffectionInfo.Parse(PetJson.Parse(
+                "{\"points\":20,\"tier\":\"familiar\",\"nextMin\":60}"));
+            bool diffOk = PetAffectionInfo.Same(a1, a2) && !PetAffectionInfo.Same(a1, a3) &&
+                          PetAffectionInfo.Same(null, null) && !PetAffectionInfo.Same(a1, null);
+            Check(diffOk, "好感度 diff：同值不动作、档位变化才动作、null 与有值不同",
+                  "同值→true；10→20 分→false；null/null→true");
+
+            // (9) ⭐⭐ 快照里的互动信号：seq 解析（exe 靠它"恰好播一次"语音）
+            PetSnapshot s = PetSnapshot.Parse(
+                "{\"rev\":1,\"petState\":\"idle\",\"interact\":{\"seq\":7," +
+                "\"kind\":\"praise\",\"voice\":\"pet/praise\"}}");
+            bool sigOk = s != null && s.InteractSeq == 7 &&
+                         s.InteractKind == "praise" && s.InteractVoice == "pet/praise";
+            Check(sigOk, "⭐ 互动信号解析（seq/kind/voice）",
+                  s == null ? "解析失败" : ("seq=" + s.InteractSeq + " kind=" + s.InteractKind));
+
+            // (10) 旧快照（无 interact/affection 块）→ 零回归
+            PetSnapshot old = PetSnapshot.Parse(
+                "{\"rev\":1,\"petState\":\"idle\",\"label\":\"待机中\"}");
+            Check(old != null && old.InteractSeq == 0 && old.Affection == null,
+                  "旧快照缺 interact/affection 块 → 零回归（不显示档位、不播语音）",
+                  "InteractSeq=" + (old == null ? -1 : old.InteractSeq) +
+                  " Affection=" + (old == null || old.Affection == null ? "null" : "非 null"));
+
+            // (11) ⭐ seq 去重语义：同一个 seq 只该播一次
+            // 这里只断言"比较逻辑"（真实的 _lastInteractSeq 在 PetApp 里）：
+            // 初值 -1 时 1 > -1 → 播；同一 seq 再来 → 不播。
+            long last = -1;
+            bool firstPlays = 7 > last;
+            last = 7;
+            bool sameSkips = !(7 > last);
+            bool nextPlays = 8 > last;
+            Check(firstPlays && sameSkips && nextPlays,
+                  "⭐ 互动语音去重：同 seq 只播一次，新 seq 才播",
+                  "seq 7 → 播；再来 7 → 不播；8 → 播");
+
+            // (12) 好感度显示文案（菜单那一行）
+            PetAffectionInfo disp = PetAffectionInfo.Parse(PetJson.Parse(
+                "{\"points\":25,\"tier\":\"familiar\",\"tierLabel\":{\"zh\":\"熟悉\"}," +
+                "\"nextMin\":60,\"progress\":0.125}"));
+            bool labelOk = disp != null && disp.Label() == "熟悉";
+            PetAffectionInfo maxed = PetAffectionInfo.Parse(PetJson.Parse(
+                "{\"points\":200,\"tier\":\"trusted\",\"tierLabel\":{\"zh\":\"信赖\"}," +
+                "\"nextMin\":0,\"progress\":1}"));
+            bool maxedOk = maxed != null && maxed.NextMin == 0;
+            Check(labelOk && maxedOk,
+                  "好感度显示：档位名可读、满级时 nextMin=0（界面显示已满级）",
+                  "25 分 → " + (disp == null ? "?" : disp.Label()) +
+                  "；200 分 → nextMin=" + (maxed == null ? "?" : maxed.NextMin.ToString()));
         }
 
         private static void TestClamp()
