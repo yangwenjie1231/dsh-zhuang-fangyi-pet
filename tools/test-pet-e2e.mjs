@@ -828,6 +828,386 @@ await ok('⭐⭐ 所有 tools/*.ps1 都是 UTF-8 **带 BOM**（PS 5.1 否则按 
   }
 })
 
+/* ── ⭐⭐ 动态语音：AI 回答 → 合成 → 交付给 exe ──────────────────────────
+ *
+ * 子插件（`dsh-zhuang-fangyi-voice`）还没写完，所以这里起一个**假合成服务**
+ * 复刻它的对外契约（`/health` + `/tts` → audio/wav）。
+ *
+ * 这条测试的价值：它是唯一能端到端验证"回答被念出来"的手段 ——
+ * 从聊天回复事件，到合成、落盘、快照交付、字节可取，整条链路。
+ * ──────────────────────────────────────────────────────────────────────── */
+
+/** 造一段最小合法 WAV（32kHz 单声道 16-bit，1 秒静音）。 */
+function fakeWav (samples = 32000) {
+  const dataLen = samples * 2
+  const b = Buffer.alloc(44 + dataLen)
+  b.write('RIFF', 0, 'ascii'); b.writeUInt32LE(36 + dataLen, 4); b.write('WAVE', 8, 'ascii')
+  b.write('fmt ', 12, 'ascii'); b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20)
+  b.writeUInt16LE(1, 22); b.writeUInt32LE(32000, 24); b.writeUInt32LE(64000, 28)
+  b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34)
+  b.write('data', 36, 'ascii'); b.writeUInt32LE(dataLen, 40)
+  return b
+}
+
+await ok('⭐⭐ AI 回答 → 合成 → 快照交付 → 字节可取（整条链路）', async () => {
+  fs.rmSync(path.join(tmpHome, 'zhuang-fangyi-pet', 'chat.json'), { force: true })
+  const chatHome = fs.mkdtempSync(path.join(os.tmpdir(), 'zf-tts-e2e-'))
+  // ① 假合成服务：复刻子插件的契约
+  const ttsCalls = []
+  const ttsServer = http.createServer((req, res) => {
+    const chunks = []
+    req.on('data', c => chunks.push(c))
+    req.on('end', () => {
+      const url = (req.url ?? '').split('?')[0]
+      if (url === '/health') {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, service: 'zfh-voice', backend: 'onnx', ready: true }))
+        return
+      }
+      if (url === '/tts') {
+        const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+        ttsCalls.push(body.text)
+        const wav = fakeWav()
+        res.writeHead(200, { 'content-type': 'audio/wav', 'content-length': String(wav.length) })
+        res.end(wav)
+        return
+      }
+      res.writeHead(404); res.end('{}')
+    })
+  })
+  await new Promise(r => ttsServer.listen(0, '127.0.0.1', r))
+  const ttsPort = ttsServer.address().port
+
+  const local = makeCtx(makeWebServer())
+  local.provide('sessionController', {
+    async list () { return { items: [] } },
+    async create () { return { sessionId: 'chat-tts-1' } },
+    async prompt (req, signal) { signal.throwIfAborted(); return { accepted: true } }
+  })
+  const petIndex = await import(`file://${path.join(ROOT, 'index.js').replace(/\\/g, '/')}`)
+  petIndex.apply(toCordisLike(local, ['webServer']), {})
+  const ws = local.__services.get('webServer')
+  await ws.listen()
+  const base = `http://127.0.0.1:${ws.port}`
+  // ② 打开动态语音 + 语音总开关，指向假服务
+  await fetch(`${base}/api/zhuang-fangyi/pet/settings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: {
+      chatWorkspace: path.join(chatHome, 'ws'),
+      speakReplies: true,
+      voice: true,
+      ttsUrl: `http://127.0.0.1:${ttsPort}`
+    } })
+  })
+  // ③ 真发一条消息建立会话
+  const sent = await fetch(`${base}/api/zhuang-fangyi/pet/chat`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text: '在吗？' })
+  })
+  assert.equal(sent.status, 200, `发消息应 200，实际 ${sent.status}`)
+  // ④ 派发回复事件（带 markdown —— 验证清洗真的生效）
+  local.emit('session/event', { id: 'chat-tts-1' }, {
+    type: 'assistant/message',
+    seq: 9100,
+    time: Date.now(),
+    data: {
+      turn: 1,
+      step: 1,
+      message: {
+        id: 'msg-tts-1',
+        role: 'assistant',
+        content: [{ type: 'text', text: '**好了**，我看过 `index.js` 了。' }],
+        source: { kind: 'model', provider: 'e2e', model: 'e2e' }
+      },
+      stream: []
+    }
+  })
+  // ⑤ 等合成完成（fire-and-forget）
+  const deadline = Date.now() + 8000
+  let snap = null
+  while (Date.now() < deadline) {
+    snap = await (await fetch(`${base}/api/zhuang-fangyi/pet/state`)).json()
+    if (snap.speak !== null && snap.speak !== undefined) break
+    await new Promise(r => setTimeout(r, 50))
+  }
+  assert.ok(ttsCalls.length >= 1, `应调用过合成服务，实际 ${ttsCalls.length} 次`)
+  // ⭐ 清洗必须生效：念的是"好了，我看过 index.js 了。"而不是带星号反引号的原文
+  const spoken = ttsCalls[ttsCalls.length - 1]
+  assert.ok(!spoken.includes('**'), `不该念出星号：${spoken}`)
+  assert.ok(!spoken.includes('`'), `不该念出反引号：${spoken}`)
+  assert.ok(spoken.includes('好了') && spoken.includes('index.js'),
+    `应保留文字内容，实际 ${JSON.stringify(spoken)}`)
+  // ⭐ 快照里出现 speak 块（exe 靠它去取字节）
+  assert.ok(snap.speak !== null && snap.speak !== undefined, '快照应带 speak 块')
+  assert.equal(typeof snap.speak.name, 'string')
+  assert.match(snap.speak.name, /^[0-9a-f]{16}$/, 'name 应是缓存键形状')
+  assert.equal(snap.speak.durationMs, 1000, '时长应从 WAV 头解析出 1000ms')
+  // ⭐⭐ 按 name 取字节：这就是 exe 播放前做的事
+  const audio = await fetch(`${base}/api/zhuang-fangyi/pet/speech/${snap.speak.name}`)
+  assert.equal(audio.status, 200, `取语音应 200，实际 ${audio.status}`)
+  assert.equal(audio.headers.get('content-type'), 'audio/wav')
+  const bytes = Buffer.from(await audio.arrayBuffer())
+  assert.equal(bytes.toString('ascii', 0, 4), 'RIFF', '应是 WAV 字节')
+  assert.equal(bytes.length, 44 + 32000 * 2, '字节数应与合成产物一致')
+  // ⑥ 状态端点
+  const st = await (await fetch(`${base}/api/zhuang-fangyi/pet/speech`)).json()
+  assert.equal(st.enabled, true, '状态应报已开启')
+  assert.ok(st.cached >= 1, `应至少缓存 1 条，实际 ${st.cached}`)
+  await ws.close()
+  for (const d of local.__effects) if (typeof d === 'function') assert.doesNotThrow(() => d())
+  await new Promise(r => ttsServer.close(r))
+})
+
+await ok('⭐⭐ 合成服务不在 → 气泡照常、不交付语音（绝不因语音挂掉）', async () => {
+  fs.rmSync(path.join(tmpHome, 'zhuang-fangyi-pet', 'chat.json'), { force: true })
+  const chatHome = fs.mkdtempSync(path.join(os.tmpdir(), 'zf-tts-down-'))
+  const local = makeCtx(makeWebServer())
+  local.provide('sessionController', {
+    async list () { return { items: [] } },
+    async create () { return { sessionId: 'chat-tts-2' } },
+    async prompt (req, signal) { signal.throwIfAborted(); return { accepted: true } }
+  })
+  const petIndex = await import(`file://${path.join(ROOT, 'index.js').replace(/\\/g, '/')}`)
+  petIndex.apply(toCordisLike(local, ['webServer']), {})
+  const ws = local.__services.get('webServer')
+  await ws.listen()
+  const base = `http://127.0.0.1:${ws.port}`
+  // 指向一个**没人监听**的端口
+  await fetch(`${base}/api/zhuang-fangyi/pet/settings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: {
+      chatWorkspace: path.join(chatHome, 'ws'),
+      speakReplies: true,
+      voice: true,
+      ttsUrl: 'http://127.0.0.1:9'       // 保留端口，必然连不上
+    } })
+  })
+  await fetch(`${base}/api/zhuang-fangyi/pet/chat`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text: '在吗？' })
+  })
+  local.emit('session/event', { id: 'chat-tts-2' }, {
+    type: 'assistant/message', seq: 9200, time: Date.now(),
+    data: {
+      turn: 1, step: 1,
+      message: {
+        id: 'msg-tts-2', role: 'assistant',
+        content: [{ type: 'text', text: '服务没起的时候我也要能回话。' }],
+        source: { kind: 'model', provider: 'e2e', model: 'e2e' }
+      },
+      stream: []
+    }
+  })
+  // 气泡必须照常出现（语音失败不该影响聊天）
+  const deadline = Date.now() + 5000
+  let snap = null
+  while (Date.now() < deadline) {
+    snap = await (await fetch(`${base}/api/zhuang-fangyi/pet/state`)).json()
+    if (snap.bubble !== null && snap.bubble !== undefined) break
+    await new Promise(r => setTimeout(r, 50))
+  }
+  assert.ok(snap.bubble?.text?.includes('服务没起'), '气泡必须照常显示回复')
+  // ⚠️ 必须先等合成路径**走完**再断言 speak —— 否则测的是竞态：
+  // 气泡是同步出现的，而合成是异步的；一拿到气泡就断言的话，
+  // 失败路径可能还没执行完，于是"硬交付垃圾"这种 bug 也能蒙过去
+  //（回退验证实测确认漏过）。
+  await new Promise(r => setTimeout(r, 1200))
+  const after = await (await fetch(`${base}/api/zhuang-fangyi/pet/state`)).json()
+  assert.ok(after.speak === null || after.speak === undefined,
+    `合成失败时不该交付语音，实际 ${JSON.stringify(after.speak)}`)
+  await ws.close()
+  for (const d of local.__effects) if (typeof d === 'function') assert.doesNotThrow(() => d())
+})
+
+await ok('⭐⭐ 语音总开关关着时**不合成**（白等几秒还没人播）', async () => {
+  fs.rmSync(path.join(tmpHome, 'zhuang-fangyi-pet', 'chat.json'), { force: true })
+  const chatHome = fs.mkdtempSync(path.join(os.tmpdir(), 'zf-tts-mute-'))
+  const ttsCalls = []
+  const ttsServer = http.createServer((req, res) => {
+    const chunks = []
+    req.on('data', c => chunks.push(c))
+    req.on('end', () => {
+      if ((req.url ?? '').startsWith('/health')) {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, backend: 'onnx' }))
+        return
+      }
+      ttsCalls.push('called')
+      const wav = fakeWav(100)
+      res.writeHead(200, { 'content-type': 'audio/wav' })
+      res.end(wav)
+    })
+  })
+  await new Promise(r => ttsServer.listen(0, '127.0.0.1', r))
+  const local = makeCtx(makeWebServer())
+  local.provide('sessionController', {
+    async list () { return { items: [] } },
+    async create () { return { sessionId: 'chat-tts-3' } },
+    async prompt (req, signal) { signal.throwIfAborted(); return { accepted: true } }
+  })
+  const petIndex = await import(`file://${path.join(ROOT, 'index.js').replace(/\\/g, '/')}`)
+  petIndex.apply(toCordisLike(local, ['webServer']), {})
+  const ws = local.__services.get('webServer')
+  await ws.listen()
+  const base = `http://127.0.0.1:${ws.port}`
+  await fetch(`${base}/api/zhuang-fangyi/pet/settings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: {
+      chatWorkspace: path.join(chatHome, 'ws'),
+      speakReplies: true,      // 开了"念回答"
+      voice: false,            // 但语音总开关关着
+      ttsUrl: `http://127.0.0.1:${ttsServer.address().port}`
+    } })
+  })
+  await fetch(`${base}/api/zhuang-fangyi/pet/chat`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text: '在吗？' })
+  })
+  local.emit('session/event', { id: 'chat-tts-3' }, {
+    type: 'assistant/message', seq: 9300, time: Date.now(),
+    data: {
+      turn: 1, step: 1,
+      message: {
+        id: 'msg-tts-3', role: 'assistant',
+        content: [{ type: 'text', text: '语音关着的时候别白干活。' }],
+        source: { kind: 'model', provider: 'e2e', model: 'e2e' }
+      },
+      stream: []
+    }
+  })
+  await new Promise(r => setTimeout(r, 600))
+  assert.equal(ttsCalls.length, 0,
+    `语音总开关关着时不该调用合成服务（合成完也没人播），实际调用 ${ttsCalls.length} 次`)
+  const snap = await (await fetch(`${base}/api/zhuang-fangyi/pet/state`)).json()
+  assert.ok(snap.speak === null || snap.speak === undefined, '不该交付语音')
+  await ws.close()
+  for (const d of local.__effects) if (typeof d === 'function') assert.doesNotThrow(() => d())
+  await new Promise(r => ttsServer.close(r))
+})
+
+await ok('⭐⭐ 语音名白名单在**真实装配**里生效（非法形状即使文件存在也不给）', async () => {
+  // 为什么这么测：光请求一个"不存在的非法名"永远 404 —— 那测不出白名单
+  //（文件本来就不存在）。**必须种一个非法形状的真实文件**：
+  //   · 有白名单 → 404（名字形状不合法，压根不拼路径）
+  //   · 没白名单 → 200（文件真的在那儿）
+  // 这才是决定性的。
+  const chatHome = fs.mkdtempSync(path.join(os.tmpdir(), 'zf-tts-trav-'))
+  const speechDir = path.join(tmpHome, 'zhuang-fangyi-pet', 'speech')
+  fs.mkdirSync(speechDir, { recursive: true })
+  const planted = ['ABC1234567890abc.wav', 'abc.wav', '..wav']
+  for (const f of planted) fs.writeFileSync(path.join(speechDir, f), fakeWav(100))
+  const local = makeCtx(makeWebServer())
+  const petIndex = await import(`file://${path.join(ROOT, 'index.js').replace(/\\/g, '/')}`)
+  petIndex.apply(toCordisLike(local, ['webServer']), {})
+  const ws = local.__services.get('webServer')
+  await ws.listen()
+  const base = `http://127.0.0.1:${ws.port}`
+  await fetch(`${base}/api/zhuang-fangyi/pet/settings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: { chatWorkspace: path.join(chatHome, 'ws') } })
+  })
+  for (const name of ['ABC1234567890abc', 'abc', '..']) {
+    const res = await fetch(`${base}/api/zhuang-fangyi/pet/speech/${name}`)
+    assert.equal(res.status, 404,
+      `${name} 形状非法但文件确实存在 —— 有白名单就该 404，实际 ${res.status}`)
+  }
+  // 反向：合法的 16 位十六进制名，若文件存在则必须能取到
+  //（证明上面不是"一律 404"的假绿）。
+  const legal = '0123456789abcdef'
+  fs.writeFileSync(path.join(speechDir, `${legal}.wav`), fakeWav(50))
+  const okRes = await fetch(`${base}/api/zhuang-fangyi/pet/speech/${legal}`)
+  assert.equal(okRes.status, 200, `合法名应能取到（实际 ${okRes.status}）`)
+  assert.equal(Buffer.from(await okRes.arrayBuffer()).toString('ascii', 0, 4), 'RIFF')
+  for (const f of [...planted, `${legal}.wav`]) {
+    fs.rmSync(path.join(speechDir, f), { force: true })
+  }
+  await ws.close()
+  for (const d of local.__effects) if (typeof d === 'function') assert.doesNotThrow(() => d())
+})
+
+await ok('⭐⭐ speakReplies 关着时**不合成**（默认就是关的）', async () => {
+  fs.rmSync(path.join(tmpHome, 'zhuang-fangyi-pet', 'chat.json'), { force: true })
+  const chatHome = fs.mkdtempSync(path.join(os.tmpdir(), 'zf-tts-off-'))
+  const ttsCalls = []
+  const ttsServer = http.createServer((req, res) => {
+    req.on('data', () => {})
+    req.on('end', () => {
+      if ((req.url ?? '').startsWith('/health')) {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, backend: 'onnx' }))
+        return
+      }
+      ttsCalls.push('called')
+      res.writeHead(200, { 'content-type': 'audio/wav' })
+      res.end(fakeWav(100))
+    })
+  })
+  await new Promise(r => ttsServer.listen(0, '127.0.0.1', r))
+  const local = makeCtx(makeWebServer())
+  local.provide('sessionController', {
+    async list () { return { items: [] } },
+    async create () { return { sessionId: 'chat-tts-4' } },
+    async prompt (req, signal) { signal.throwIfAborted(); return { accepted: true } }
+  })
+  const petIndex = await import(`file://${path.join(ROOT, 'index.js').replace(/\\/g, '/')}`)
+  petIndex.apply(toCordisLike(local, ['webServer']), {})
+  const ws = local.__services.get('webServer')
+  await ws.listen()
+  const base = `http://127.0.0.1:${ws.port}`
+  await fetch(`${base}/api/zhuang-fangyi/pet/settings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: {
+      chatWorkspace: path.join(chatHome, 'ws'),
+      voice: true,
+      speakReplies: false,     // ← 默认值
+      ttsUrl: `http://127.0.0.1:${ttsServer.address().port}`
+    } })
+  })
+  await fetch(`${base}/api/zhuang-fangyi/pet/chat`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text: '在吗？' })
+  })
+  local.emit('session/event', { id: 'chat-tts-4' }, {
+    type: 'assistant/message', seq: 9400, time: Date.now(),
+    data: {
+      turn: 1, step: 1,
+      message: {
+        id: 'msg-tts-4', role: 'assistant',
+        content: [{ type: 'text', text: '开关关着就别合成。' }],
+        source: { kind: 'model', provider: 'e2e', model: 'e2e' }
+      },
+      stream: []
+    }
+  })
+  await new Promise(r => setTimeout(r, 700))
+  assert.equal(ttsCalls.length, 0,
+    `speakReplies=false 时不该调用合成服务，实际 ${ttsCalls.length} 次`)
+  await ws.close()
+  for (const d of local.__effects) if (typeof d === 'function') assert.doesNotThrow(() => d())
+  await new Promise(r => ttsServer.close(r))
+})
+
+await ok('⭐ 探测端点：服务连不上时如实报错（不假装成功）', async () => {
+  const chatHome = fs.mkdtempSync(path.join(os.tmpdir(), 'zf-tts-probe-'))
+  const local = makeCtx(makeWebServer())
+  const petIndex = await import(`file://${path.join(ROOT, 'index.js').replace(/\\/g, '/')}`)
+  petIndex.apply(toCordisLike(local, ['webServer']), {})
+  const ws = local.__services.get('webServer')
+  await ws.listen()
+  const base = `http://127.0.0.1:${ws.port}`
+  await fetch(`${base}/api/zhuang-fangyi/pet/settings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: { chatWorkspace: path.join(chatHome, 'ws'), ttsUrl: 'http://127.0.0.1:9' } })
+  })
+  const res = await fetch(`${base}/api/zhuang-fangyi/pet/speech/probe`, { method: 'POST' })
+  assert.equal(res.status, 200, '探测自身应 200（失败信息在 body 里）')
+  const body = await res.json()
+  assert.equal(body.ok, false, '连不上时应 ok=false')
+  assert.ok(typeof body.reason === 'string' && body.reason.length > 0, '必须给出原因')
+  await ws.close()
+  for (const d of local.__effects) if (typeof d === 'function') assert.doesNotThrow(() => d())
+})
+
 /* ── 画廊（读操作，无副作用）────────────────────────────────────────────── */
 
 await ok('⭐ 快照 settings 块带 hint/statusAlways（原生窗状态显示的依据，契约 §2 v6）', async () => {

@@ -1604,6 +1604,106 @@ await okAsync('记忆路由也受令牌/围栏保护（跨站请求被拒）', a
 await new Promise(resolve => memServer.close(resolve))
 
 /* ══════════════════════════════════════════════════════════════════════════
+ * 5g. 动态语音路由（契约 §3 新增，AI 回答的合成音频）
+ * ═════════════════════════════════════════════════════════════════════════ */
+section('5g. 动态语音路由（/pet/speech）')
+
+{
+  const wav = Buffer.alloc(64)
+  wav.write('RIFF', 0, 'ascii')
+  wav.write('WAVE', 8, 'ascii')
+  const seen = []
+  const speechHandler = createHandler({
+    snapshot,
+    atlas: () => atlas,
+    artDir,
+    token: TOKEN,
+    hub,
+    logger: { warn () {}, debug () {}, info () {} },
+    connection: () => undefined,
+    onPosition: () => {},
+    onCommand: () => ({}),
+    speech: {
+      read: name => {
+        // ⚠️ 桩必须**复刻真实实现的约束**（index.js 的 deps.speech.read）：
+        // 名字只允许 16 位小写十六进制，其余一律 null。桩里若不校验，
+        // "非法名字被挡下"这条断言测的就是桩的宽容，而不是真实防线
+        //（第一版就是这么写错的 —— 断言报"非法名字产生了读取"）。
+        if (typeof name !== 'string' || !/^[0-9a-f]{16}$/.test(name)) return null
+        seen.push(name)
+        // 只有这一个合法名字有内容（模拟真实缓存目录里恰好这一条）
+        return name === 'a1b2c3d4e5f60718' ? wav : null
+      }
+    }
+  })
+  const srv = http.createServer((req, res) => {
+    speechHandler(req, res).catch(() => { if (!res.headersSent) res.writeHead(500); res.end() })
+  })
+  await new Promise(resolve => srv.listen(0, '127.0.0.1', resolve))
+  const base = `http://127.0.0.1:${srv.address().port}`
+
+  await okAsync('GET /pet/speech/<合法名> → audio/wav 字节', async () => {
+    const res = await fetch(`${base}${ROUTE_PREFIX}/speech/a1b2c3d4e5f60718`, { headers: auth() })
+    assert.equal(res.status, 200, `状态码 ${res.status}`)
+    assert.equal(res.headers.get('content-type'), 'audio/wav')
+    assert.equal(Number(res.headers.get('content-length')), wav.length)
+    const buf = Buffer.from(await res.arrayBuffer())
+    assert.equal(buf.length, wav.length)
+    assert.equal(buf.toString('ascii', 0, 4), 'RIFF', '应原样返回 WAV 字节')
+  })
+
+  await okAsync('未知名字 → 404（不是 500，也不是空 200）', async () => {
+    const res = await fetch(`${base}${ROUTE_PREFIX}/speech/ffffffffffffffff`, { headers: auth() })
+    assert.equal(res.status, 404)
+    assert.equal(JSON.parse(await res.text()).error, 'no-such-speech')
+  })
+
+  await okAsync('⭐⭐ 非法名字一律 404（穿越/大写/短名都读不到东西）', async () => {
+    // 名字只允许 16 位小写十六进制，校验在 Host 的 `deps.speech.read` 里
+    //（与 `/pet/voice/` 同一纪律 —— 那里踩过 `..` 穿越）。
+    seen.length = 0
+    for (const evil of ['..%2F..%2Findex.js', 'abc', 'ABC1234567890abc', '%2e%2e%2fsecret']) {
+      const res = await fetch(`${base}${ROUTE_PREFIX}/speech/${evil}`, { headers: auth() })
+      assert.equal(res.status, 404, `${evil} 应被拒（实际 ${res.status}）`)
+    }
+    assert.deepEqual(seen, [], `非法名字不该被真的读取，实际：${JSON.stringify(seen)}`)
+  })
+
+  await okAsync('非 GET → 405', async () => {
+    const res = await fetch(`${base}${ROUTE_PREFIX}/speech/a1b2c3d4e5f60718`, {
+      method: 'POST', headers: auth({ 'content-type': 'application/json' }), body: '{}'
+    })
+    assert.equal(res.status, 405)
+  })
+
+  await okAsync('未装配动态语音 → 503（不假装成功）', async () => {
+    const bare = createHandler({
+      snapshot, atlas: () => atlas, artDir, token: TOKEN, hub,
+      logger: { warn () {}, debug () {}, info () {} },
+      connection: () => undefined, onPosition: () => {}, onCommand: () => ({})
+    })
+    const s2 = http.createServer((req, res) => {
+      bare(req, res).catch(() => { if (!res.headersSent) res.writeHead(500); res.end() })
+    })
+    await new Promise(resolve => s2.listen(0, '127.0.0.1', resolve))
+    const b2 = `http://127.0.0.1:${s2.address().port}`
+    const res = await fetch(`${b2}${ROUTE_PREFIX}/speech/a1b2c3d4e5f60718`, { headers: auth() })
+    assert.equal(res.status, 503)
+    assert.equal(JSON.parse(await res.text()).error, 'unavailable')
+    await new Promise(resolve => s2.close(resolve))
+  })
+
+  await okAsync('语音路由同样受令牌/围栏保护', async () => {
+    const res = await fetch(`${base}${ROUTE_PREFIX}/speech/a1b2c3d4e5f60718`, {
+      headers: { 'sec-fetch-site': 'cross-site' }
+    })
+    assert.equal(res.status, 403, `跨站请求应 403，实际 ${res.status}`)
+  })
+
+  await new Promise(resolve => srv.close(resolve))
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
  * 6. 端口自发现与 exe 定位
  * ═════════════════════════════════════════════════════════════════════════ */
 section('6. 端口自发现与 exe 定位')

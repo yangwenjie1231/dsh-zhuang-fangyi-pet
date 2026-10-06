@@ -221,6 +221,21 @@ window.__ModuleLoader__.load({
         sharedEmpty: '还没有共享背景（当前风格是自包含的）',
         sharedUsed: '当前风格已拼接',
         sharedFiles: '份',
+        speakTitle: '念出回答（动态语音）',
+        speakHint: '需要合成子插件在跑（默认 127.0.0.1:8765）。连不上时自动退回固定台词，聊天不受影响',
+        speakReplies: '把 AI 的回答念出来',
+        speakRepliesHint: '合成需要几秒（GPU 约 3 秒/句），气泡会先显示文字',
+        ttsUrl: '合成服务地址',
+        speechMaxChars: '每次朗读字数上限',
+        speakProbe: '试一句',
+        speakProbing: '探测中…',
+        speakOk: '合成服务正常',
+        speakFail: '合成服务不可用',
+        speakPlayed: '已播放',
+        speakStatus: '动态语音',
+        speakCached: '已缓存',
+        on: '开',
+        off: '关',
         memoryTitle: '长期记忆（跨会话共享）',
         memoryHint: '所有聊天会话共享这份记忆；换会话、重开会话都不会忘',
         memoryAuto: '自动记住值得长期保留的事',
@@ -344,6 +359,21 @@ window.__ModuleLoader__.load({
         sharedEmpty: 'No shared background yet (current style is self-contained)',
         sharedUsed: 'Current style composes',
         sharedFiles: 'file(s)',
+        speakTitle: 'Speak the reply (dynamic TTS)',
+        speakHint: 'Requires the synthesis sub-plugin (default 127.0.0.1:8765). Falls back to fixed lines when unreachable; chat is unaffected',
+        speakReplies: 'Speak AI replies aloud',
+        speakRepliesHint: 'Synthesis takes seconds (≈3 s/sentence on GPU); the bubble shows text first',
+        ttsUrl: 'TTS service URL',
+        speechMaxChars: 'Max characters per utterance',
+        speakProbe: 'Try one',
+        speakProbing: 'Probing…',
+        speakOk: 'TTS service OK',
+        speakFail: 'TTS service unavailable',
+        speakPlayed: 'played',
+        speakStatus: 'Dynamic speech',
+        speakCached: 'cached',
+        on: 'on',
+        off: 'off',
         memoryTitle: 'Long-term memory (shared across sessions)',
         memoryHint: 'Every chat session shares this memory; switching or reopening a session keeps it',
         memoryAuto: 'Automatically remember durable facts',
@@ -1083,6 +1113,10 @@ window.__ModuleLoader__.load({
       const [memoryNote, setMemoryNote] = useState(null)
       /** 记忆草稿用 ref：每敲一个字都变，不该触发整页重渲染。 */
       const memoryDraftRef = useRef('')
+      /** 动态语音（TTS）状态与探测结果。 */
+      const [speakStatus, setSpeakStatus] = useState(null)
+      const [speakBusy, setSpeakBusy] = useState(false)
+      const [speakNote, setSpeakNote] = useState(null)
       /** 草稿用 ref 而不是 state：它每敲一个字都变，不该触发重渲染。 */
       const chatDraftRef = useRef('')
       const chatDraft = chatDraftRef.current
@@ -1150,6 +1184,37 @@ window.__ModuleLoader__.load({
           .finally(() => setMemoryBusy(false))
       }
 
+      /**
+       * 探测合成服务（子插件）是否在跑，并试合成一句。
+       *
+       * 为什么必须有这个按钮：子插件是**独立进程**，用户看不出它到底起没起。
+       * 而"开了开关却没声音"是最难自查的状态 —— 探测把原因直接写出来
+       *（连不上 / 超时 / 合成失败），比让用户猜强得多。
+       */
+      const probeTts = () => {
+        const fn = runtime.probeTts
+        if (typeof fn !== 'function') {
+          setSpeakNote('探测不可用（宿主未装配）')
+          return
+        }
+        setSpeakBusy(true)
+        setSpeakNote(null)
+        Promise.resolve(fn())
+          .then(r => {
+            if (r === null || r === undefined) { setSpeakNote('探测失败（无响应）'); return }
+            if (r.ok === true) {
+              setSpeakNote(`${t('speakOk')}：${r.backend ?? '?'}` +
+                (r.elapsedMs != null ? ` · ${r.elapsedMs} ms` : '') +
+                (r.played === true ? ` · ${t('speakPlayed')}` : ''))
+            } else {
+              setSpeakNote(`${t('speakFail')}：${r.reason ?? 'unknown'}`)
+            }
+            if (r.status !== undefined) setSpeakStatus(r.status)
+          })
+          .catch(e => setSpeakNote(`探测异常：${e?.message ?? e}`))
+          .finally(() => setSpeakBusy(false))
+      }
+
       const sendChatMessage = () => {        const text = chatDraftRef.current
         if (typeof text !== 'string' || text.trim() === '') return
         const fn = runtime.sendChat
@@ -1186,6 +1251,9 @@ window.__ModuleLoader__.load({
         }
         if (typeof runtime.loadChatStatus === 'function') {
           Promise.resolve(runtime.loadChatStatus()).then(v => { if (alive) setChatStatus(v) }).catch(() => {})
+        }
+        if (typeof runtime.loadSpeechStatus === 'function') {
+          Promise.resolve(runtime.loadSpeechStatus()).then(v => { if (alive) setSpeakStatus(v) }).catch(() => {})
         }
         if (typeof runtime.loadMemory === 'function') {
           Promise.resolve(runtime.loadMemory())
@@ -1508,6 +1576,59 @@ window.__ModuleLoader__.load({
             ]),
 
         h('h3', { key: 'g8', className: 'zf-pet-settings__group' }, t('groupChat')),
+
+        // ── 动态语音（念出 AI 的回答，v3）──────────────────────────────────
+        h('h4', { key: 'speakTitle', className: 'zf-pet-settings__sub' }, t('speakTitle')),
+        h('p', { key: 'speakHint', className: 'zf-pet-settings__note' }, t('speakHint')),
+        h(Toggle, {
+          key: 'speakReplies',
+          label: t('speakReplies'),
+          hint: t('speakRepliesHint'),
+          value: settings.speakReplies,
+          onChange: v => set({ speakReplies: v })
+        }),
+        h('label', { key: 'ttsUrl', className: 'zf-pet-row' }, [
+          h('span', { key: 'l', className: 'zf-pet-row__label' }, t('ttsUrl')),
+          h('input', {
+            key: 'i',
+            className: 'zf-pet-settings__input',
+            type: 'text',
+            defaultValue: settings.ttsUrl ?? '',
+            spellCheck: false,
+            placeholder: 'http://127.0.0.1:8765',
+            onBlur: e => set({ ttsUrl: e.target.value.trim() })
+          })
+        ]),
+        h('label', { key: 'speechMax', className: 'zf-pet-row' }, [
+          h('span', { key: 'l', className: 'zf-pet-row__label' }, t('speechMaxChars')),
+          h('input', {
+            key: 'i',
+            className: 'zf-pet-settings__input',
+            type: 'number',
+            min: 10,
+            max: 300,
+            defaultValue: String(settings.speechMaxChars ?? 60),
+            onBlur: e => set({ speechMaxChars: Number(e.target.value) })
+          })
+        ]),
+        h('div', { key: 'speakBtns', className: 'zf-pet-settings__btns' }, [
+          h('button', {
+            key: 'probe',
+            className: 'zf-pet-settings__btn',
+            disabled: speakBusy,
+            onClick: () => probeTts()
+          }, speakBusy ? t('speakProbing') : t('speakProbe'))
+        ]),
+        speakNote === null
+          ? null
+          : h('p', { key: 'speakNote', className: 'zf-pet-settings__note' }, speakNote),
+        speakStatus === null
+          ? null
+          : h('p', { key: 'speakStatus', className: 'zf-pet-settings__note' },
+              `${t('speakStatus')}：${speakStatus.enabled ? t('on') : t('off')}` +
+              ` · ${speakStatus.url ?? '—'}` +
+              ` · ${t('speakCached')} ${speakStatus.cached ?? 0}`),
+
         h(Toggle, {
           key: 'chatEnabled',
           label: t('chatEnabled'),
@@ -2214,6 +2335,13 @@ window.__ModuleLoader__.load({
         },
         sendChat (text) {
           return api('POST', '/chat', { text })
+        },
+        /** 动态语音（TTS）：状态 / 探测（试合成一句并播出来）。 */
+        loadSpeechStatus () {
+          return api('GET', '/speech')
+        },
+        probeTts () {
+          return api('POST', '/speech/probe', {})
         },
         /** 长期记忆（v3，跨会话共享）：读全文 / 整体替换。 */
         loadMemory () {

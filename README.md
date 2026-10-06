@@ -345,6 +345,11 @@ working(90) > waiting(80) > thinking(70) > error(60)
   - 切换 = 把组合后的文本作为系统提示词 section 挂到聊天会话上。
   ⚠️ **绝不覆盖你手写的 `AGENTS.md`**：判据是"插件标记必须在第一行"，
   没有标记就说明那是你的文件，插件会拒绝并如实报错。
+- **念出 AI 的回答（动态语音）**：接独立的合成子插件
+  （[`dsh-zhuang-fangyi-voice`](../dsh-zhuang-fangyi-voice)，HTTP `POST /tts`），
+  把回复**清洗成可朗读文本**（去代码块/链接/markdown/emoji）后合成播放。
+  异步：气泡先显示文字、语音好了再播；服务不在就**退回固定台词**，聊天不受影响。
+  设置页有「试一句」按钮直接验证子插件通没通。见 `docs/语音子插件对接.md`。
 - **跨会话共享的长期记忆**：`$DSH_HOME/zhuang-fangyi-pet/memory.md`，
   以 `zf-pet:memory` section 注入到**每个**聊天会话 —— 换会话、重开会话都不会失忆。
   每次回复后可用宿主默认模型**自动提炼** 0~3 条值得长期记住的事
@@ -386,11 +391,12 @@ node tools/test-pet-voice.mjs        # 语音白名单 + 清单/磁盘一致性�
 node tools/test-pet-interactions.mjs # 互动防刷三道闸（27 项）
 node tools/test-pet-chat.mjs         # 加法人设 + 写入安全 + 回复解析（50 项）
 node tools/test-pet-memory.mjs       # 长期记忆：解析/裁剪/文件 IO（21 项）
+node tools/test-pet-tts.mjs          # 动态语音：清洗/WAV 解析/客户端容错（40 项）
 node tools/test-pet-native-e2e.mjs   # 真起 exe、真连宿主的集成测试（12 项）
 bin\dsh-zhuang-fangyi-pet.exe --selftest --dark 0   # exe 自检（173 项）
 ```
 
-十套共 **593 项断言** + exe 自检 **173 项**，无框架依赖（纯 `node:assert`）。
+十一套共 **654 项断言** + exe 自检 **173 项**，无框架依赖（纯 `node:assert`）。
 端到端那套用**真实** `apply()` + **真实** `pet.json` + 真读 SSE 帧，
 验证「宿主事件 → 状态机 → 推送」整条链路；
 `native-e2e` 那套更进一步 —— 用真实 `index.js` 起宿主、经 `ctx.subprocess`

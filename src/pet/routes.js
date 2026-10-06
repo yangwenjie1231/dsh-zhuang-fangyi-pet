@@ -315,7 +315,9 @@ export function createHandler (deps) {
           clients: deps.hub.size,
           atlas: atlasReport(deps.atlas()),
           state: deps.snapshot(),
-          diag: deps.diagnostics?.() ?? null
+          diag: deps.diagnostics?.() ?? null,
+          // 动态语音状态（子插件通没通 —— 用户一眼可见，不用去翻设置页）
+          speech: deps.speech?.status?.() ?? null
         })
         return
       }
@@ -558,6 +560,76 @@ export function createHandler (deps) {
           return
         }
         sendJson(res, 405, { error: 'method not allowed' })
+        return
+      }
+
+      // ── 动态语音：状态与探测（契约 §3 新增）───────────────────────────
+      //
+      // `GET  /pet/speech`        → 状态（开关/地址/已缓存几条/最近一条）
+      // `POST /pet/speech/probe`  → 真去合成一句并播放（设置页"试一句"）
+      //
+      // ⚠️ **必须排在下面的 `/speech/<name>` 前缀分支之前** ——
+      // 否则 `/speech/probe` 会先被当成"要取名为 probe 的语音"，
+      // 结果是 404，而且看起来像"服务没起"（其实是路由顺序错了）。
+      //
+      // 探测为什么必须有：合成服务是**独立进程**，用户看不出它起没起；
+      // 而"开了开关却没声音"是最难自查的状态。探测把原因直接写出来。
+      if (route === '/speech') {
+        if (deps.speech === undefined || deps.speech === null) {
+          sendJson(res, 503, { error: 'unavailable', reason: '宿主未装配动态语音' })
+          return
+        }
+        if (req.method !== 'GET') {
+          sendJson(res, 405, { error: 'method not allowed' })
+          return
+        }
+        sendJson(res, 200, deps.speech.status())
+        return
+      }
+      if (route === '/speech/probe') {
+        if (deps.speech === undefined || deps.speech === null) {
+          sendJson(res, 503, { error: 'unavailable', reason: '宿主未装配动态语音' })
+          return
+        }
+        if (req.method !== 'POST') {
+          sendJson(res, 405, { error: 'method not allowed' })
+          return
+        }
+        const r = await deps.speech.probe()
+        sendJson(res, 200, r)
+        return
+      }
+
+      // ── 动态语音字节（契约 §3 新增）───────────────────────────────────
+      //
+      // `GET /pet/speech/<name>` → audio/wav
+      //
+      // 与 `/pet/voice/<name>` 同一纪律：名字走**白名单**（这里是 16 位十六
+      // 进制缓存键），绝不把用户串拼进路径。语音由 host 合成后落在
+      // `$DSH_HOME/zhuang-fangyi-pet/speech/`。
+      if (route.startsWith('/speech/')) {
+        if (deps.speech === undefined || deps.speech === null) {
+          sendJson(res, 503, { error: 'unavailable', reason: '宿主未装配动态语音' })
+          return
+        }
+        if (req.method !== 'GET') {
+          sendJson(res, 405, { error: 'method not allowed' })
+          return
+        }
+        const name = route.slice('/speech/'.length)
+        const hit = deps.speech.read(name)
+        if (hit === null) {
+          sendJson(res, 404, { error: 'no-such-speech' })
+          return
+        }
+        res.writeHead(200, {
+          'content-type': 'audio/wav',
+          'content-length': String(hit.length),
+          // 合成结果按文本哈希命名 → 内容永不变 → 可长缓存。
+          'cache-control': 'private, max-age=86400',
+          'x-content-type-options': 'nosniff'
+        })
+        res.end(hit)
         return
       }
 

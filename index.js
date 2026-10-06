@@ -62,6 +62,9 @@ import {
   memoryExtractionPrompt, parseMemoryFacts, mergeMemory,
   readMemoryFile, writeMemoryFile, ensureMemoryFile, MEMORY_CAP_BYTES
 } from './src/pet/memory.js'
+import {
+  createTtsClient, wavDurationMs, DEFAULT_TTS_URL, DEFAULT_MAX_SPEECH_CHARS
+} from './src/pet/tts.js'
 
 /** 插件标识（Loader 行 id、token 层 source 共用）。 */
 export const name = 'zhuang-fangyi-pet'
@@ -894,6 +897,122 @@ export function apply (ctx, config) {
    */
   let lastChatSent = null
 
+  // ── 动态语音（TTS）：把 AI 的回答念出来 ───────────────────────────────────
+  //
+  // 接线对象是**独立的子插件** `dsh-zhuang-fangyi-voice`（HTTP 服务，
+  // 见 `src/pet/tts.js` 文件头的契约）。它还在开发中，所以这里全程:
+  //   · **可选**：服务不在就退回固定台词（`chat/reply`），聊天照常；
+  //   · **异步**：合成慢（torch ≈3s、onnx ≈37s），绝不阻塞气泡；
+  //   · **可关**：设置里 `speakReplies` 默认关 —— 桌宠突然把长回复念出来
+  //     是强打扰，用户主动开才生效。
+  //
+  // 交付给 exe 的方式与互动语音同一套：写进 `speech/` 目录 → 快照带
+  // `speak: {seq, name}` → exe 按 seq 变化去 `/pet/speech/<name>` 取字节播放。
+
+  /** 动态语音缓存目录（WAV）。 */
+  const SPEECH_DIR = path.join(dataDir, 'speech')
+
+  /** 语音交付序号（exe 靠它去重：同一个 seq 只播一次）。 */
+  let speechSeq = 0
+  /** 最近一次交付的语音（进快照）。 */
+  let speechLatest = null
+  /**
+   * 合成代际：每来一条新回复就 +1。
+   *
+   * 为什么需要它：合成要几秒，而用户可能连发几条。没有代际的话，
+   * 先发的那句合成完会**盖住**后发的 —— 听起来就是"念了上一句"。
+   */
+  let speechGeneration = 0
+
+  const ensureSpeechDir = () => {
+    try {
+      fs.mkdirSync(SPEECH_DIR, { recursive: true })
+      return true
+    } catch (error) {
+      logger.warn?.(`zhuang-fangyi-pet: 语音缓存目录创建失败：${error?.message ?? error}`)
+      return false
+    }
+  }
+
+  /** 惰性创建 TTS 客户端（设置改了要能换 URL）。 */
+  let ttsClient = null
+  let ttsClientUrl = null
+  const tts = () => {
+    const url = String(settings.get().ttsUrl ?? '').trim() || DEFAULT_TTS_URL
+    if (ttsClient === null || ttsClientUrl !== url) {
+      ttsClient = createTtsClient({
+        baseUrl: url,
+        maxChars: speechMaxChars(),
+        logger
+      })
+      ttsClientUrl = url
+    }
+    return ttsClient
+  }
+
+  const speechMaxChars = () => {
+    const n = Number(settings.get().speechMaxChars)
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_MAX_SPEECH_CHARS
+  }
+
+  /**
+   * 念一句回复（fire-and-forget）。
+   *
+   * @param {string} rawReply - **原始回复文本**（markdown，函数内部会清洗）
+   */
+  const speakReply = rawReply => {
+    if (settings.get().speakReplies !== true) return
+    // 语音总开关关着时不用合成 —— 合成完也没人播（还白等几秒）。
+    if (settings.get().voice !== true) return
+    const client = tts()
+    // ⭐ 清洗：markdown 直接念会念出"星号星号"、代码、URL。
+    const text = client.sanitize(rawReply)
+    if (text === null) return   // 全是代码之类 —— 没东西可念，不硬念
+    const gen = ++speechGeneration
+    void (async () => {
+      try {
+        if (!ensureSpeechDir()) return
+        const key = client.cacheKey(text)
+        const file = path.join(SPEECH_DIR, `${key}.wav`)
+        let durationMs = 0
+        let fromCache = false
+        if (fs.existsSync(file)) {
+          try {
+            durationMs = wavDurationMs(fs.readFileSync(file))
+            fromCache = true
+          } catch { fromCache = false }
+        }
+        if (!fromCache) {
+          const r = await client.synthesize(text)
+          if (r === null) {
+            // 服务没起 / 超时 / 返回垃圾 —— 退回固定台词（exe 侧会播 chat/reply）。
+            boot('动态语音合成不可用 → 退回固定台词')
+            return
+          }
+          try {
+            fs.writeFileSync(file, r.bytes)
+          } catch (error) {
+            logger.warn?.(`zhuang-fangyi-pet: 语音写入失败：${error?.message ?? error}`)
+            return
+          }
+          durationMs = r.durationMs
+        }
+        // ⭐ 代际检查：这条已经不是最新的了 → 丢掉（别盖住更新的那句）。
+        if (gen !== speechGeneration) {
+          boot('动态语音已过期（有更新的回复）→ 丢弃')
+          return
+        }
+        // 交付：seq 递增 → exe 看到变化就去取。
+        speechSeq += 1
+        speechLatest = { seq: speechSeq, name: key, durationMs, text }
+        boot(`动态语音就绪（${fromCache ? '缓存' : '新合成'}，${durationMs}ms）：${text.slice(0, 24)}`)
+        hub.broadcast(withSettings(machine.snapshot()))
+      } catch (error) {
+        logger.warn?.(`zhuang-fangyi-pet: 动态语音失败（已忽略）：${error?.message ?? error}`)
+      }
+    })()
+  }
+
   /**
    * 自动提炼记忆（**跨会话共享**）：把这一轮里值得长期记住的事追加到 `memory.md`。
    *
@@ -1365,6 +1484,14 @@ export function apply (ctx, config) {
      * 时间戳相同，exe 会漏掉第二次。递增序号不会。
      */
     interact: lastInteract,
+    /**
+     * 动态语音（合成出来的回答语音）—— exe 靠 `seq` 判"这是新的一句"。
+     *
+     * 与 `interact` 同一模式：seq 递增而不是时间戳（同一毫秒两次不会漏）。
+     * `name` 是缓存键，exe 去 `/pet/speech/<name>` 取 WAV。
+     * 没开动态语音 / 还没合成好时是 null —— exe 保持沉默，退回固定台词。
+     */
+    speak: speechLatest,
     // 会话列表：给"发送到哪个对话"的选择器用（见 `sessionChoices`）。
     sessions: sessionChoices(snap),
     // 能力位：两半边的 ✎ 入口都靠它决定显不显示（**不做没入口的错误**）。
@@ -1526,6 +1653,12 @@ export function apply (ctx, config) {
         durationMs: 12000
       })
       boot(`聊天回复进气泡（${line.length} 字）`)
+      // ⭐ 动态语音：把**回复正文**合成出来念（子插件提供合成服务）。
+      //
+      // 这是"回答通过语音合成念出来"的入口。取的是**原始回复**（不是被
+      // 气泡截断的 `line`）—— 语音该念完整句子，气泡才受长度限制。
+      // fire-and-forget：合成慢（torch ≈3s/句，onnx ≈37s/句），绝不能阻塞气泡。
+      speakReply(text)
       // 记忆提炼：拿"用户那句 + 这句回复"去提炼值得长期记住的事。
       // fire-and-forget —— 绝不让它拖慢气泡显示。
       const sent = lastChatSent
@@ -1907,6 +2040,106 @@ export function apply (ctx, config) {
       reload: () => {
         personas = loadPersonas(PERSONAS_DIR, logger)
         return personaReport(personas, currentPersona())
+      }
+    },
+    /**
+     * 动态语音字节（`/pet/speech/<name>`）。
+     *
+     * 读盘而不是留在内存：语音可能几百 KB，常驻内存不值得；
+     * 而它就在本地磁盘上，读一次比一次 HTTP 往返便宜。
+     * ⚠️ 名字**只允许** 16 位十六进制（缓存键形状）—— 这是路径拼接的
+     * 白名单防线，与 `/pet/voice/` 同一纪律（那里踩过 `..` 穿越）。
+     */
+    speech: {
+      read: name => {
+        if (typeof name !== 'string' || !/^[0-9a-f]{16}$/.test(name)) return null
+        try {
+          const file = path.join(dataDir, 'speech', `${name}.wav`)
+          const buf = fs.readFileSync(file)
+          return buf.length > 0 ? buf : null
+        } catch {
+          return null
+        }
+      },
+      /** 给设置页/诊断用：当前状态（开没开、服务地址、已缓存几条）。 */
+      status: () => {
+        let cached = 0
+        try {
+          cached = fs.readdirSync(path.join(dataDir, 'speech')).filter(f => f.endsWith('.wav')).length
+        } catch { cached = 0 }
+        return {
+          enabled: settings.get().speakReplies === true,
+          url: String(settings.get().ttsUrl ?? '') || DEFAULT_TTS_URL,
+          maxChars: speechMaxChars(),
+          cached,
+          latest: speechLatest === null
+            ? null
+            : { name: speechLatest.name, durationMs: speechLatest.durationMs, text: speechLatest.text }
+        }
+      },
+      /**
+       * 探测合成服务：真合成一句、真播出来。
+       *
+       * 这是唯一能回答"开关开了为什么没声音"的手段 —— 它把失败原因
+       *（连不上 / 超时 / 返回非 WAV）直接带回设置页，而不是让用户猜。
+       */
+      probe: async () => {
+        const client = tts()
+        const started = Date.now()
+        const h = await client.health()
+        const status = {
+          enabled: settings.get().speakReplies === true,
+          url: client.baseUrl,
+          maxChars: speechMaxChars(),
+          cached: (() => {
+            try {
+              return fs.readdirSync(path.join(dataDir, 'speech')).filter(f => f.endsWith('.wav')).length
+            } catch { return 0 }
+          })()
+        }
+        if (h === null) {
+          return {
+            ok: false,
+            reason: `连不上合成服务（${client.baseUrl}）—— 子插件起了吗？`,
+            elapsedMs: Date.now() - started,
+            status
+          }
+        }
+        // 真合成一句固定的短句（不占用用户回复的缓存键）。
+        const probeText = '嗯，我在呢。'
+        const r = await client.synthesize(probeText)
+        if (r === null) {
+          return {
+            ok: false,
+            backend: h.backend,
+            reason: '服务在跑，但合成失败（看子插件日志）',
+            elapsedMs: Date.now() - started,
+            status
+          }
+        }
+        // 存进缓存并交付给 exe 播一次（用户点"试一句"就该听到声音）。
+        let played = false
+        try {
+          if (ensureSpeechDir()) {
+            const key = client.cacheKey(probeText)
+            fs.writeFileSync(path.join(SPEECH_DIR, `${key}.wav`), r.bytes)
+            speechSeq += 1
+            speechLatest = { seq: speechSeq, name: key, durationMs: r.durationMs, text: probeText }
+            hub.broadcast(withSettings(machine.snapshot()))
+            played = true
+            boot('动态语音探测成功，已交付播放')
+          }
+        } catch (error) {
+          logger.warn?.(`zhuang-fangyi-pet: 探测语音写入失败：${error?.message ?? error}`)
+        }
+        return {
+          ok: true,
+          backend: h.backend,
+          elapsedMs: Date.now() - started,
+          durationMs: r.durationMs,
+          played,
+          status: { ...status, cached: status.cached + (played ? 1 : 0) }
+        }
       }
     },
     /**

@@ -475,6 +475,26 @@ namespace DshZhuangFangyiPet
         }
 
         /// <summary>
+        /// 拉**动态语音**字节（`GET /pet/speech/&lt;name&gt;`，AI 回答的合成音频）。
+        ///
+        /// 与固定台词不同：这批是运行时合成出来的，名字是 16 位十六进制缓存键。
+        /// 超时给 15 秒 —— 字节就在本地磁盘上（Host 合成后落盘），不需要更久。
+        /// 拿不到就返回 null（exe 保持沉默，绝不出错）。
+        /// </summary>
+        public byte[] GetSpeechBytes(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return null;
+            try
+            {
+                byte[] b;
+                int code = GetRaw("/api/zhuang-fangyi/pet/speech/" + Uri.EscapeDataString(name), 15000, out b);
+                if (code != 200 || b == null || b.Length == 0) return null;
+                return b;
+            }
+            catch { return null; }
+        }
+
+        /// <summary>
         /// 拉语音清单（`GET /pet/voices`）。失败返回 null（= 没有语音可用）。
         ///
         /// exe 用它知道"有哪些台词、多长、对应什么事件"，从而：

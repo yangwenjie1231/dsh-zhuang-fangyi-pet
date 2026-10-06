@@ -214,7 +214,27 @@ export function defaultSettings () {
      * 默认**开**：用户点名要"不同会话能共享 memory"，不自动记就等于没有。
      * 关掉后仍可手动编辑记忆（设置页或直接改文件）。
      */
-    memoryAuto: true
+    memoryAuto: true,
+    /**
+     * **念出 AI 的回答**（动态语音合成）。
+     *
+     * 需要独立的合成子插件在跑（`dsh-zhuang-fangyi-voice`，默认
+     * `http://127.0.0.1:8765`）。服务不在时自动退回固定台词，聊天不受影响。
+     *
+     * 默认**关**：把整段回复念出来是强打扰（而且合成要几秒），
+     * 用户主动开才生效 —— 与 `voice` 同一考虑。
+     */
+    speakReplies: false,
+    /** 合成服务地址。 */
+    ttsUrl: 'http://127.0.0.1:8765',
+    /**
+     * 单句朗读的字符上限（清洗后截断）。
+     *
+     * 为什么默认只有 60：气泡里已经有全文了，语音只是"陪一句"。
+     * 而合成耗时与长度成正比（onnx 后端 6 秒音频要 37 秒），
+     * 越长越不可能及时 —— 60 字 ≈ 15 秒音频，已经是可接受的体验上限。
+     */
+    speechMaxChars: 60
   }
 }
 
@@ -255,7 +275,7 @@ export function normalizeSettings (input) {
   for (const key of ['clickThrough', 'topmost', 'bubble', 'bubbleImages',
     'hint', 'statusAlways', 'notifyComplete', 'attentionReminder',
     'pomodoro', 'pomodoroAutoNext', 'pomodoroNotify', 'pomodoroCountdown',
-    'voice', 'chatEnabled', 'memoryAuto']) {
+    'voice', 'chatEnabled', 'memoryAuto', 'speakReplies']) {
     if (typeof input[key] === 'boolean') out[key] = input[key]
   }
 
@@ -274,6 +294,15 @@ export function normalizeSettings (input) {
     if (w === '') out.chatWorkspace = ''
     else if (w.length <= 260) out.chatWorkspace = w
   }
+  if (typeof input.ttsUrl === 'string') {
+    const u = input.ttsUrl.trim()
+    // 只接受 http/https：这是个**网络地址**，别的协议（file:/data:）不该进设置 ——
+    // 它会被 fetch 直接使用，放开等于给了一个任意协议入口。
+    if (u === '') out.ttsUrl = ''
+    else if (u.length <= 300 && /^https?:\/\//i.test(u)) out.ttsUrl = u
+  }
+  // 朗读长度上限：夹在 10~300 字。太短没意义（一个词），太长合成等不起。
+  out.speechMaxChars = clamp(input.speechMaxChars, 10, 300, base.speechMaxChars)
 
   out.x = optionalInt(input.x, base.x)
   out.y = optionalInt(input.y, base.y)

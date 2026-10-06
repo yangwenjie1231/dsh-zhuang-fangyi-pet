@@ -1674,10 +1674,48 @@ namespace DshZhuangFangyiPet
                   "清单里的非法条目被丢弃（第二层防线，不只靠 Host）",
                   "6 条输入 → 保留 " + dirty.Count + " 条");
 
-            // (7) ⭐⭐ 播放器：开关关掉时**不播**（默认静音）
+            // (8) ⭐ 动态语音：快照解析与去重语义
+            //
+            // 这批音频是 Host 运行时合成的（子插件 TTS），名字是缓存键。
+            // 两条要害：
+            //   ① 旧 Host 没这个块 → 全 0/null，exe 不发请求也不出声（零回归）；
+            //   ② 去重按 name 而不是 seq —— Host 重启后 seq 归零，
+            //      按 name 去重才不会把同一句重复念一遍。
+            PetSnapshot noSpeak = PetSnapshot.Parse("{\"petState\":\"idle\"}");
+            Check(noSpeak != null && noSpeak.SpeakSeq == 0 &&
+                  string.IsNullOrEmpty(noSpeak.SpeakName),
+                  "旧快照缺 speak 块 → 零回归（不发请求、不出声）",
+                  "SpeakSeq=" + (noSpeak == null ? -1 : noSpeak.SpeakSeq));
+
+            PetSnapshot withSpeak = PetSnapshot.Parse(
+                "{\"petState\":\"listening\",\"speak\":{\"seq\":7,\"name\":\"a1b2c3d4e5f60718\"," +
+                "\"durationMs\":2400,\"text\":\"做完了，你看看。\"}}");
+            Check(withSpeak != null && withSpeak.SpeakSeq == 7 &&
+                  withSpeak.SpeakName == "a1b2c3d4e5f60718" && withSpeak.SpeakDurationMs == 2400,
+                  "speak 块解析：seq/name/durationMs 都读对",
+                  "seq=" + (withSpeak == null ? -1 : withSpeak.SpeakSeq) +
+                  " name=" + (withSpeak == null ? "null" : withSpeak.SpeakName));
+
+            PetSnapshot badSpeak = PetSnapshot.Parse(
+                "{\"speak\":{\"seq\":\"NaN\",\"name\":null,\"durationMs\":-5}}");
+            Check(badSpeak != null && badSpeak.SpeakSeq == 0 &&
+                  string.IsNullOrEmpty(badSpeak.SpeakName),
+                  "speak 块非法值不崩（seq 非数字→0，name null→null）",
+                  "seq=" + (badSpeak == null ? -1 : badSpeak.SpeakSeq));
+
+            // 动态语音的名字形状（Host 侧的读取路由也按这个白名单挡）
+            bool speechNameShape = System.Text.RegularExpressions.Regex.IsMatch(
+                "a1b2c3d4e5f60718", "^[0-9a-f]{16}$") &&
+                !System.Text.RegularExpressions.Regex.IsMatch("A1B2C3D4E5F60718", "^[0-9a-f]{16}$") &&
+                !System.Text.RegularExpressions.Regex.IsMatch("../evil", "^[0-9a-f]{16}$");
+            Check(speechNameShape,
+                  "⭐ 动态语音名形状：16 位小写十六进制（穿越/大写/短名都不匹配）",
+                  "a1b2…匹配；A1B2…/../evil 不匹配");
+
             string cacheDir = Path.Combine(Path.GetTempPath(), "zf-voice-selftest");
             try { if (!Directory.Exists(cacheDir)) Directory.CreateDirectory(cacheDir); } catch { }
             PetVoicePlayer player = new PetVoicePlayer(null, cacheDir);
+            // (7) ⭐⭐ 播放器：开关关掉时**不播**（默认静音）
             byte[] fakeMp3 = new byte[256];
             fakeMp3[0] = 0xFF; fakeMp3[1] = 0xFB;   // 帧同步头（内容不重要，不真解码）
 

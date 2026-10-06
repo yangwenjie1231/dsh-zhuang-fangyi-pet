@@ -663,6 +663,7 @@ namespace DshZhuangFangyiPet
             // v8：语音（只在**变化**时出声 —— 见 SpeakForSnapshot 的说明）
             SpeakForSnapshot(snap);
             SpeakForSessionSet(snap);   // v2：新会话出现时招呼一声
+            ApplySpeech(snap);          // v3：AI 回答的合成语音
 
             // v9：好感度 + 互动语音
             ApplyInteract(snap);
@@ -1041,6 +1042,51 @@ namespace DshZhuangFangyiPet
 
         /// <summary>上一帧见过的会话集合（判定"新会话出现"）。</summary>
         private HashSet<string> _knownSessionIds;
+
+        /// <summary>最近播过的动态语音 name（去重：同一个 name 只播一次）。</summary>
+        private string _lastSpeakName;
+
+        /// <summary>
+        /// 动态语音（AI 回答的合成音频）→ 播放。
+        ///
+        /// 与固定台词的区别：这批音频是 Host **运行时合成**的（子插件提供 TTS），
+        /// 名字是缓存键，字节要去 `/pet/speech/&lt;name&gt;` 取。
+        ///
+        /// ⚠️ 去重按 **name** 而不是 seq：Host 重启后 seq 会归零，
+        /// 而同一句话的 name 是稳定的（文本哈希）—— 按 name 去重不会
+        /// 在重启后把同一句重复念一遍。
+        /// </summary>
+        private void ApplySpeech(PetSnapshot snap)
+        {
+            if (snap == null || string.IsNullOrEmpty(snap.SpeakName)) return;
+            if (snap.SpeakName == _lastSpeakName) return;
+            if (!_voiceOn || _voicePlayer == null) return;
+            try
+            {
+                byte[] bytes = _http == null ? null : _http.GetSpeechBytes(snap.SpeakName);
+                if (bytes == null || bytes.Length == 0)
+                {
+                    // 拿不到不算错：可能合成刚过期被 Host 清了缓存，或网络抖动。
+                    PetLog.Warn("动态语音取不到字节（已忽略）: " + snap.SpeakName);
+                    _lastSpeakName = snap.SpeakName;   // 记下，避免每帧重试
+                    return;
+                }
+                // `Play` 的时长参数是 int（毫秒），快照里是 long —— 显式收窄并夹住
+                //（超过 24 天会溢出 int，虽然不现实，但夹一下比留着溢出好）。
+                int ms = snap.SpeakDurationMs > 0
+                    ? (int)Math.Min(snap.SpeakDurationMs, int.MaxValue)
+                    : 0;
+                if (_voicePlayer.Play(bytes, "speech", ms))
+                {
+                    _lastSpeakName = snap.SpeakName;
+                    PetLog.Info("动态语音播放: " + snap.SpeakName + "（" + ms + "ms）");
+                }
+            }
+            catch (Exception ex)
+            {
+                PetLog.Warn("动态语音播放失败（已忽略）: " + PetLog.Describe(ex));
+            }
+        }
 
         /// <summary>语音开关（设置页/托盘）。关掉时立刻停掉正在播的。</summary>
         private void SetVoiceEnabled(bool on)

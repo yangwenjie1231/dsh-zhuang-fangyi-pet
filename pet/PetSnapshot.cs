@@ -237,6 +237,16 @@ namespace DshZhuangFangyiPet
         public long InteractSeq;
         public string InteractKind;
         public string InteractVoice;
+        /// <summary>
+        /// 动态语音（AI 回答的合成音频）：`seq` 递增，exe 据此**恰好播一次**。
+        ///
+        /// `name` 是缓存键，去 `/pet/speech/<name>` 取 WAV 字节。
+        /// 与 `interact` 同一模式（seq 去重而不是时间戳 —— 同一毫秒两句话不会漏）。
+        /// 没开动态语音 / 还没合成好时为 null → exe 保持沉默，退回固定台词。
+        /// </summary>
+        public long SpeakSeq;
+        public string SpeakName;
+        public long SpeakDurationMs;
         public List<PetSessionInfo> Sessions = new List<PetSessionInfo>();
         public bool NativeAvailable = true;
         public string NativeError;
@@ -428,6 +438,16 @@ namespace DshZhuangFangyiPet
                 s.InteractSeq = (long)act.Num("seq", 0);
                 s.InteractKind = act.Str("kind", null);
                 s.InteractVoice = act.Str("voice", null);
+            }
+
+            // 动态语音（AI 回答的合成音频）。旧 Host 没这个块 → 全 0，
+            // exe 不发请求也不出声（与"没开动态语音"行为一致）。
+            PetJson.JVal spk = root.Get("speak");
+            if (spk != null && spk.IsObj)
+            {
+                s.SpeakSeq = (long)spk.Num("seq", 0);
+                s.SpeakName = spk.Str("name", null);
+                s.SpeakDurationMs = (long)spk.Num("durationMs", 0);
             }
 
             PetJson.JVal sess = root.Get("sessions");
