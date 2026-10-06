@@ -722,18 +722,33 @@ export function apply (ctx, config) {
       requestId: `zf-pet-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
       // ⚠️ **`mode` 是必填**，不是可选。
       //
-      // 曾经这里写的是"不传 mode ⇒ 走 `agent.followup`（排队）"—— **那是错的**，
-      // 真机上表现为**发送必 502**。上游 `dsh-api-session-controller` 的 zod schema
-      // （`typert.host.js` 实测）是：
+      // 曾经这里写的是"不传 mode ⇒ 走 `agent.followup`（排队）"—— **那是错的**。
+      // 上游 `dsh-api-session-controller` 的 zod schema（`typert.host.js` 实测）是：
       //
       //     'mode': z.union([z.literal("queue"), z.literal("steer")]).readonly(),
       //
-      // **没有 `.optional()`** —— 少这个字段直接校验失败，被路由的兜底分支
-      // 映射成 502 `send-failed`。DSH 自己的客户端也永远显式传 mode。
-      //
+      // **没有 `.optional()`**，少这个字段直接校验失败。
       // `'queue'` = 排在当前回合之后（就是我们要的"排队、不打断"）。
       mode: 'queue'
-    })
+    },
+    // ⚠️ **第二个参数 `signal` 也是必填** —— 这是真机上"发送必 502"的**第二个**
+    // 原因，比 `mode` 更隐蔽（上一次我只修了 `mode` 就以为好了，结果还是 502）。
+    //
+    // 上游把 `prompt` 注册为 `cancellation: { parameter: 'signal' }`
+    // （`typert.host.js` 的描述符实测）。网关按这个描述符取**第 2 个实参**
+    // 并直接调 `signal.throwIfAborted()` —— 少传就是：
+    //
+    //     TypeError: Cannot read properties of undefined (reading 'throwIfAborted')
+    //
+    // 这句抛在 `prompt()` 内部，被路由的兜底分支包成 502 `send-failed`，
+    // 于是屏幕上只剩"发送失败（HTTP 502）"。
+    //
+    // 必须是**真 `AbortSignal`**（不能是 undefined，也不能是普通对象）：
+    // 网关要调它的 `throwIfAborted` 并加 `abort` 监听。
+    //
+    // 用"永不 abort"的信号是有意的：投递本身很快，"排队不打断"由
+    // `mode: 'queue'` 保证，取消权不属于我们 —— 真要中断那是用户在 DSH 里操作。
+    new AbortController().signal)
   }
 
   /**

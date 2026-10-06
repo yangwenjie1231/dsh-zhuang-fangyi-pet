@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -539,26 +540,108 @@ namespace DshZhuangFangyiPet
                 if (s != null) { try { s(); } catch { } }
                 return;
             }
-            // 失败：窗口不关、输入不清，就地报错
+            // 失败：窗口不关、输入不清，就地报错。
+            //
+            // ⚠️ **同时写日志**：原先失败只在界面上显示一句，日志里一个字都没有 ——
+            // 结果"发送失败"变成了只能靠猜的现象。诊断信息必须落盘，
+            // 否则用户描述问题时（"就一句发送失败"）谁都无法定位。
+            string reason = DescribeSendError(status, body);
+            PetLog.Warn("send 失败 status=" + status.ToString(CultureInfo.InvariantCulture) +
+                        " body=" + (body ?? "(null)") + " → 显示为：" + reason);
             _hint.Foreground = new SolidColorBrush(Colors.IndianRed);
-            _hint.Text = DescribeSendError(status, body);
+            _hint.Text = reason;
             _box.Focus();
         }
 
         /// <summary>纯函数：把 /pet/send 的失败响应翻成给用户看的一句话（SelfTest 断言）。</summary>
+        /// <remarks>
+        /// ⚠️ **必须把宿主给的原因带上**，这是被真机事故逼出来的。
+        ///
+        /// 原先 502 只返回 `"发送失败（HTTP 502）"`，把响应体里的 `message`
+        /// **整段丢掉** —— 于是用户只看到一句"发送失败"，**无从判断为什么**，
+        /// 而排查的人也拿不到任何线索（exe 的 PostSend 又不写日志）。
+        ///
+        /// 真实代价：一个"漏传 `signal` 实参"的 bug 因此拖了两轮才定位 ——
+        /// 宿主明明在响应体里回了
+        /// `Cannot read properties of undefined (reading 'throwIfAborted')`，
+        /// 却被这一行吞掉了。**兜底文案不该吃掉原始原因。**
+        /// </remarks>
         public static string DescribeSendError(int status, string body)
         {
-            if (status == 0) return "发不出去（连不上宿主）";
-            if (status == 401 || status == 403) return "鉴权失败，请重开桌宠";
-            if (status == 409) return "没有正在进行的会话";
-            if (status == 503) return "宿主暂时不能收消息";
+            // 先从响应体里取出可读原因（Host 的形状是
+            // `{"error":"send-failed","message":"…"}` 或 `{"error":"…","reason":"…"}`）。
+            string detail = ExtractReason(body);
+            string suffix = string.IsNullOrEmpty(detail) ? "" : "：" + detail;
+            if (status == 0) return "发不出去（连不上宿主）" + suffix;
+            if (status == 401 || status == 403) return "鉴权失败，请重开桌宠" + suffix;
+            if (status == 409) return "没有正在进行的会话" + suffix;
+            if (status == 503) return "宿主暂时不能收消息" + suffix;
             if (status == 400)
             {
                 if (!string.IsNullOrEmpty(body) && body.IndexOf("too-long", StringComparison.Ordinal) >= 0)
                     return "太长了（上限 " + PetHttp.SendTextMax.ToString(CultureInfo.InvariantCulture) + " 字）";
-                return "内容不合法";
+                return "内容不合法" + suffix;
             }
-            return "发送失败（HTTP " + status.ToString(CultureInfo.InvariantCulture) + "）";
+            return "发送失败（HTTP " + status.ToString(CultureInfo.InvariantCulture) + "）" + suffix;
+        }
+
+        /// <summary>
+        /// 从 `/pet/send` 的响应体里抠出人类可读的原因。
+        ///
+        /// 优先级：`message`（502 用）→ `reason`（503 用）→ `error`（兜底）。
+        /// 纯手工扫描而**不引 JSON 库**：这里只要一个字符串，且必须
+        /// **绝不抛异常**（诊断路径上的代码自己崩掉是最糟的）。
+        /// 解析不出来就返回 null，由调用方退回通用文案。
+        /// </summary>
+        public static string ExtractReason(string body)
+        {
+            if (string.IsNullOrEmpty(body)) return null;
+            string v = ExtractJsonString(body, "message") ?? ExtractJsonString(body, "reason");
+            // `error` 是机器码（no-session / unavailable…），只在没有更可读的字段时用。
+            if (string.IsNullOrEmpty(v)) v = ExtractJsonString(body, "error");
+            return v;
+        }
+
+        /// <summary>取 JSON 对象里某个字符串字段的值；找不到返回 null。绝不打乱引号/转义。</summary>
+        private static string ExtractJsonString(string json, string key)
+        {
+            string needle = "\"" + key + "\"";
+            int i = json.IndexOf(needle, StringComparison.Ordinal);
+            while (i >= 0)
+            {
+                int c = json.IndexOf(':', i + needle.Length);
+                if (c < 0) return null;
+                int q = json.IndexOf('"', c + 1);
+                if (q < 0) return null;
+                // 冒号与引号之间只允许空白，否则说明匹配到的是**值**里出现的同名字串。
+                bool onlySpace = true;
+                for (int k = c + 1; k < q; k++)
+                {
+                    if (!char.IsWhiteSpace(json[k])) { onlySpace = false; break; }
+                }
+                if (onlySpace)
+                {
+                    StringBuilder sb = new StringBuilder();
+                    for (int k = q + 1; k < json.Length; k++)
+                    {
+                        char ch = json[k];
+                        if (ch == '\\' && k + 1 < json.Length)
+                        {
+                            char nx = json[k + 1];
+                            if (nx == 'n') sb.Append('\n');
+                            else if (nx == 't') sb.Append('\t');
+                            else sb.Append(nx);   // \" \\ \/ \uXXXX 的常见情形
+                            k++;
+                            continue;
+                        }
+                        if (ch == '"') return sb.ToString();
+                        sb.Append(ch);
+                    }
+                    return null;
+                }
+                i = json.IndexOf(needle, i + needle.Length, StringComparison.Ordinal);
+            }
+            return null;
         }
 
         private void CloseSelf()

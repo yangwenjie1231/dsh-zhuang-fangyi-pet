@@ -305,24 +305,33 @@ await ok('⭐ 有 sessionController 时：list() 的标题进快照，指定会�
       }
     },
     /**
-     * ⭐ 桩**必须校验 `mode`**，否则测不出真机上的 502。
+     * ⭐ 桩必须复刻**上游的真实契约**，否则测不出真机上的 502。
      *
-     * 上游 `dsh-api-session-controller` 的 zod schema（`typert.host.js` 实测）：
-     *     'mode': z.union([z.literal("queue"), z.literal("steer")]).readonly(),
-     * **没有 `.optional()`** —— 少这个字段直接校验失败。
+     * 上游 `dsh-api-session-controller`（`typert.host.js` 实测）有**两条**约束：
      *
-     * 之前这个桩是 `async prompt (req) { prompts.push(req); return {accepted:true} }`，
-     * 什么都不检查，于是"漏传 mode"在测试里**永远绿**，真机上却必 502。
-     * 复刻校验是唯一能让这条断言有意义的方式。
+     *   1. zod schema：`'mode': z.union([z.literal("queue"), z.literal("steer")])`
+     *      —— **没有 `.optional()`**，少字段直接校验失败。
+     *   2. 描述符：`cancellation: { parameter: 'signal' }` —— 网关按它取
+     *      **第 2 个实参**并直接调 `signal.throwIfAborted()`。少传就是
+     *      `TypeError: Cannot read properties of undefined (reading 'throwIfAborted')`。
+     *
+     * 这两条都是真机上实测踩过的 502 根因，而且**第二个更隐蔽**：
+     * 第一次只修了 `mode`，自检/单测全绿，真机仍然 502。
+     *
+     * 之前这个桩是 `async prompt (req) { prompts.push(req); return {accepted:true} }`
+     * —— 什么都不检查，于是这两种漏传在测试里**永远绿**。
+     * 复刻校验（尤其是 `signal.throwIfAborted()` 这句）是唯一能让断言有意义的方式。
      */
-    async prompt (req) {
+    async prompt (req, signal) {
       if (req?.mode !== 'queue' && req?.mode !== 'steer') {
         throw new Error(
           `RemoteError gateway/bad-request: prompt.mode 必须是 'queue' 或 'steer'，` +
           `实际 ${JSON.stringify(req?.mode)}（上游 schema 无 .optional()）`
         )
       }
-      prompts.push(req)
+      // 复刻网关对 signal 的使用：**不判空、直接调** —— 少传就抛 TypeError。
+      signal.throwIfAborted()
+      prompts.push({ ...req, __signal: signal })
       return { accepted: true }
     }
   })
@@ -388,6 +397,12 @@ await ok('⭐ 有 sessionController 时：list() 的标题进快照，指定会�
   // ⭐ `mode` 必填（上游 zod schema 无 `.optional()`）。漏了它真机必 502 ——
   // 用户实测报的就是"发送提示 502"。这里断言**值**也断言**存在**。
   assert.equal(prompts[0].mode, 'queue', 'mode 必须是 queue（排队、不打断当前回合）')
+  // ⭐ `signal` 必填（描述符 `cancellation: { parameter: 'signal' }`）。这是 502 的
+  // **第二个**根因：少传 → `undefined.throwIfAborted()` → 被包成 502。
+  // 断言它是**真 AbortSignal**，不是 undefined、也不是普通对象。
+  assert.ok(prompts[0].__signal instanceof AbortSignal,
+    `prompt 的第 2 个实参必须是真 AbortSignal，实际 ${typeof prompts[0].__signal}`)
+  assert.equal(prompts[0].__signal.aborted, false, '信号不应处于已取消状态')
   // requestId 是去重键，必须每次都不同（否则第二次发送会被当成重试而丢弃）
   assert.ok(typeof prompts[0].requestId === 'string' && prompts[0].requestId !== '',
     'requestId 必须存在（Host 用它去重）')

@@ -1152,6 +1152,40 @@ namespace DshZhuangFangyiPet
                          PetInput.DescribeSendError(503, "{}").IndexOf("宿主", StringComparison.Ordinal) >= 0 &&
                          PetInput.DescribeSendError(418, "{}").IndexOf("418", StringComparison.Ordinal) >= 0;
             Check(errOk, "send 失败文案映射（0/400/409/503/其它）", "网络失败/超长/无会话/不可用/未知码各有一句话");
+
+            // (5b) ⭐ **必须把宿主给的原因带上** —— 这一条是被真机事故逼出来的。
+            //
+            // 原先 502 只显示"发送失败（HTTP 502）"，把响应体里的 message 整段丢掉，
+            // 于是"漏传 signal"的 bug 拖了两轮才定位：宿主明明回了
+            // "Cannot read properties of undefined (reading 'throwIfAborted')"，
+            // 却被那一行吞掉。**兜底文案不该吃掉原始原因。**
+            string b502 = "{\"error\":\"send-failed\",\"message\":\"Cannot read properties of undefined (reading 'throwIfAborted')\"}";
+            string r502 = PetInput.DescribeSendError(502, b502);
+            bool keepReason = r502.IndexOf("throwIfAborted", StringComparison.Ordinal) >= 0 &&
+                              r502.IndexOf("502", StringComparison.Ordinal) >= 0;
+            Check(keepReason, "⭐ 502 文案带上宿主给的原因（不再只显示「发送失败」）",
+                  "502 →「发送失败（HTTP 502）：Cannot read properties of undefined…」");
+
+            // (5c) 503 用 `reason` 字段（形状与 502 的 `message` 不同）
+            bool keepReason503 = PetInput.DescribeSendError(
+                503, "{\"error\":\"unavailable\",\"reason\":\"宿主未装配 sessionController 服务\"}")
+                .IndexOf("sessionController", StringComparison.Ordinal) >= 0;
+            Check(keepReason503, "503 文案带上 reason 字段", "503 → 宿主未装配 sessionController 服务");
+
+            // (5d) 诊断路径**绝不能自己崩**：畸形 / 空 / 非 JSON body 一律安全回落
+            bool diagSafe =
+                PetInput.ExtractReason(null) == null &&
+                PetInput.ExtractReason("") == null &&
+                PetInput.ExtractReason("not json at all") == null &&
+                PetInput.ExtractReason("{\"message\":}") == null &&
+                PetInput.ExtractReason("{\"message\":\"unterminated") == null &&
+                PetInput.DescribeSendError(502, "{oops").IndexOf("发送失败", StringComparison.Ordinal) >= 0;
+            Check(diagSafe, "解析畸形响应体不抛错（诊断路径自己绝不能崩）",
+                  "null/空/非 JSON/缺值/未闭合引号 → 返回 null 并退回通用文案");
+
+            // (5e) 转义与字段优先级：`message` 优先于 `reason`，`\n` 还原成换行
+            bool reasonEscOk = PetInput.ExtractReason("{\"reason\":\"次要\",\"message\":\"主\\n原因\"}") == "主\n原因";
+            Check(reasonEscOk, "字段优先级与 JSON 转义（message > reason；\\n 还原）", "取到「主⏎原因」");
         }
 
         /// <summary>
