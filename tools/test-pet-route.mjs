@@ -33,6 +33,11 @@ import {
 } from '../src/pet/routes.js'
 import { createHub } from '../src/pet/hub.js'
 import { createPomodoro } from '../src/pet/pomodoro.js'
+import { loadVoice, resolveVoice } from '../src/pet/voice.js'
+import { fileURLToPath } from 'node:url'
+
+/** 包根（测试要读真实产物目录）。 */
+const ROOT_DIR = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 import { normalizeAtlas, loadAtlas } from '../src/pet/atlas.js'
 import { baseUrlOf, locateExe, EXE_NAME } from '../src/pet/launcher.js'
 
@@ -952,6 +957,152 @@ await okAsync('番茄钟路由也受令牌/围栏保护（无令牌的跨站请�
 })
 
 await new Promise(resolve => pomoServer.close(resolve))
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * 5c. 语音路由（契约 §3 新增）
+ * ═════════════════════════════════════════════════════════════════════════ */
+section('5c. 语音路由（/pet/voice/<name>）')
+
+// 用**真实**的 voice.js + 真实产物目录：桩只能验证"路由转发了"，
+// 而这里真正会出错的是"白名单没接上"与"路径校验被绕过"。
+const realVoiceDir = path.join(ROOT_DIR, 'art', 'voice')
+const realVoice = loadVoice(realVoiceDir)
+const voiceHandler = createHandler({
+  snapshot,
+  atlas: () => atlas,
+  artDir,
+  token: TOKEN,
+  hub,
+  logger: { warn () {}, debug () {}, info () {} },
+  connection: () => undefined,
+  onPosition: () => {},
+  onCommand: () => ({}),
+  getSettings: () => settingsValue,
+  setSettings: next => next,
+  resolveVoice: name => resolveVoice(realVoiceDir, name, realVoice),
+  voiceManifest: () => ({
+    version: realVoice.version,
+    generatedAt: realVoice.generatedAt,
+    count: realVoice.count,
+    lines: realVoice.lines
+  })
+})
+const voiceServer = http.createServer((req, res) => {
+  voiceHandler(req, res).catch(() => { if (!res.headersSent) res.writeHead(500); res.end() })
+})
+await new Promise(resolve => voiceServer.listen(0, '127.0.0.1', resolve))
+const VOICE_BASE = `http://127.0.0.1:${voiceServer.address().port}`
+
+await okAsync('GET /voices 返回清单（条数/时长/事件）', async () => {
+  const res = await fetch(`${VOICE_BASE}${ROUTE_PREFIX}/voices`, { headers: auth() })
+  assert.equal(res.status, 200)
+  const body = JSON.parse(await res.text())
+  assert.ok(body.count > 0, `清单应有条目，实际 ${body.count}`)
+  assert.equal(body.lines.length, body.count)
+  for (const l of body.lines) {
+    assert.equal(typeof l.name, 'string')
+    assert.equal(typeof l.durationMs, 'number')
+    assert.ok(l.durationMs > 0, `${l.name} 时长应 > 0`)
+  }
+})
+
+await okAsync('⭐⭐ 白名单内的语音能取到真 mp3 字节', async () => {
+  const names = realVoice.lines.slice(0, 3).map(l => l.name)
+  assert.ok(names.length > 0, '清单为空，无法验证')
+  for (const name of names) {
+    const res = await fetch(`${VOICE_BASE}${ROUTE_PREFIX}/voice/${encodeURIComponent(name)}`, {
+      headers: auth()
+    })
+    assert.equal(res.status, 200, `${name} 应 200，实际 ${res.status}`)
+    assert.equal(res.headers.get('content-type'), 'audio/mpeg')
+    const buf = Buffer.from(await res.arrayBuffer())
+    assert.ok(buf.length > 100, `${name} 字节数过小：${buf.length}`)
+    // MP3 头：ID3 或帧同步
+    const isId3 = buf[0] === 0x49 && buf[1] === 0x44 && buf[2] === 0x33
+    const isFrame = buf[0] === 0xFF && (buf[1] & 0xE0) === 0xE0
+    assert.ok(isId3 || isFrame, `${name} 不是 MP3（头 ${buf.slice(0, 3).toString('hex')}）`)
+  }
+})
+
+await okAsync('⭐⭐ 清单外的名字一律 404（含各种穿越写法）', async () => {
+  // 这一节是安全面的核心：只要这些拿不到东西，就没有任意文件读取。
+  for (const evil of [
+    'nope', 'index', '../index.js', '..%2F..%2Findex.js',
+    '%2e%2e%2f%2e%2e%2findex.js', '....//index.js',
+    'C:\\Windows\\win.ini', '/etc/passwd', '.', '..',
+    'voice.json', 'wake.mp3', 'WAKE'
+  ]) {
+    const res = await fetch(`${VOICE_BASE}${ROUTE_PREFIX}/voice/${evil}`, { headers: auth() })
+    assert.equal(res.status, 404, `${evil} 应 404，实际 ${res.status}`)
+    const text = await res.text()
+    assert.ok(!text.includes('root:'), `${evil} 泄漏了系统文件内容！`)
+  }
+})
+
+await okAsync('⭐ 正向确认：白名单确实在工作（否则上面的 404 是空的）', async () => {
+  // 没有这一条，"全部 404"可能只是因为**什么都取不到**（比如清单没加载）。
+  const name = realVoice.lines[0].name
+  const res = await fetch(`${VOICE_BASE}${ROUTE_PREFIX}/voice/${encodeURIComponent(name)}`, {
+    headers: auth()
+  })
+  assert.equal(res.status, 200, `清单第一条 ${name} 必须能取到`)
+})
+
+await okAsync('未装配语音时 /voices 返回空清单、/voice/x 返回 404（不崩）', async () => {
+  const bare = createHandler({
+    snapshot,
+    atlas: () => atlas,
+    artDir,
+    token: TOKEN,
+    hub,
+    logger: { warn () {}, debug () {}, info () {} },
+    connection: () => undefined,
+    onPosition: () => {},
+    onCommand: () => ({})
+    // 故意不传 resolveVoice / voiceManifest
+  })
+  const srv = http.createServer((req, res) => {
+    bare(req, res).catch(() => { if (!res.headersSent) res.writeHead(500); res.end() })
+  })
+  await new Promise(resolve => srv.listen(0, '127.0.0.1', resolve))
+  const base = `http://127.0.0.1:${srv.address().port}`
+  const m = await fetch(`${base}${ROUTE_PREFIX}/voices`, { headers: auth() })
+  assert.equal(m.status, 200)
+  assert.equal(JSON.parse(await m.text()).count, 0)
+  const v = await fetch(`${base}${ROUTE_PREFIX}/voice/wake`, { headers: auth() })
+  assert.equal(v.status, 404)
+  await new Promise(resolve => srv.close(resolve))
+})
+
+await okAsync('⭐ 语音路由只接受 GET（写方法不许读文件）', async () => {
+  // 回退验证发现：原先只发了 GET，所以把 `req.method === 'GET'` 删掉
+  // 断言照样全绿 —— 那条条件从未被走到。真正要防的是**用写方法读文件**
+  //（某些代理/中间件对 POST 的处理路径不同，可能绕过缓存或审计）。
+  const name = realVoice.lines[0].name
+  for (const method of ['POST', 'PUT', 'DELETE', 'PATCH', 'HEAD']) {
+    const res = await fetch(`${VOICE_BASE}${ROUTE_PREFIX}/voice/${encodeURIComponent(name)}`, {
+      method,
+      headers: auth()
+    })
+    // HEAD 由 Node 的 fetch 特殊处理（无 body），但状态码仍应表明"不支持"。
+    assert.notEqual(res.status, 200,
+      `${method} /voice/<name> 不该成功，实际 ${res.status}`)
+  }
+  // 反向确认：GET 仍然可用（证明上面不是"所有方法都失败"）
+  const ok2 = await fetch(`${VOICE_BASE}${ROUTE_PREFIX}/voice/${encodeURIComponent(name)}`, {
+    headers: auth()
+  })
+  assert.equal(ok2.status, 200, 'GET 必须仍然可用')
+})
+
+await okAsync('语音路由也受令牌/围栏保护（跨站请求被拒）', async () => {
+  const res = await fetch(`${VOICE_BASE}${ROUTE_PREFIX}/voice/wake`, {
+    headers: { 'sec-fetch-site': 'cross-site' }
+  })
+  assert.equal(res.status, 403, `跨站请求应 403，实际 ${res.status}`)
+})
+
+await new Promise(resolve => voiceServer.close(resolve))
 
 /* ══════════════════════════════════════════════════════════════════════════
  * 6. 端口自发现与 exe 定位

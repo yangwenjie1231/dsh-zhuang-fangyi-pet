@@ -176,6 +176,9 @@ function readBody (req) {
  * @param {(command: string) => object} deps.onCommand - 命令处理
  * @param {object} [deps.pomodoro] - 番茄钟（`{snapshot(), control(action)}`）；
  *   缺失时 `/pet/pomodoro` 返回 503（**不许假装成功**）
+ * @param {(name: string) => string|null} [deps.resolveVoice] - 语音名 → 绝对路径
+ *   （**白名单查表**，不在清单里返回 null → 404）
+ * @param {() => object} [deps.voiceManifest] - 语音清单（`GET /pet/voices`）
  * @param {() => object} deps.getSettings - 取当前设置
  * @param {(next: object) => object} deps.setSettings - 覆盖设置（归一化后返回）
  * @param {() => object|undefined} deps.connection - 取 `connection` 服务
@@ -470,6 +473,63 @@ export function createHandler (deps) {
           return
         }
         sendJson(res, 405, { error: 'method not allowed' })
+        return
+      }
+
+      // ── 语音（契约 §3 新增）───────────────────────────────────────────
+      //
+      // `GET /pet/voice/<name>` → 播放用的 mp3 字节。
+      //
+      // ⚠️ **运行时绝不合成**：实测 GPT-SoVITS 冷启动 30.6 秒、热态 5 秒/句，
+      // 而桌宠要在一秒内回应点击 —— 运行时合成等于"按了没反应"。
+      // 台词是封闭集合，构建期已压成 mp3（见 `tools/build-voice.ps1`），
+      // 这里只做一件事：**查白名单，把文件流出去**。
+      //
+      // 白名单而非拼路径：`resolveVoice()` 只从清单里查表，路径不参与拼接；
+      // 清单里没有的 name 一律 404。比素材路由更严（那边还有 `../` 要挡）。
+      if (route.startsWith('/voice/') && req.method === 'GET') {
+        let name
+        try {
+          name = decodeURIComponent(route.slice('/voice/'.length))
+        } catch {
+          sendJson(res, 400, { error: 'bad encoding' })
+          return
+        }
+        const abs = deps.resolveVoice?.(name)
+        if (abs === null || abs === undefined) {
+          res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
+          res.end('not found')
+          return
+        }
+        let stat
+        try {
+          stat = fs.statSync(abs)
+        } catch {
+          res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
+          res.end('not found')
+          return
+        }
+        if (!stat.isFile()) {
+          res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
+          res.end('not found')
+          return
+        }
+        res.writeHead(200, {
+          'content-type': 'audio/mpeg',
+          'content-length': stat.size,
+          // 文件名随内容变化（重建语音包会换文件），可以长缓存。
+          'cache-control': 'public, max-age=604800, immutable'
+        })
+        fs.createReadStream(abs).pipe(res)
+        return
+      }
+
+      // ── 语音清单（`GET /pet/voices`）─────────────────────────────────
+      //
+      // exe 启动时拉一次，知道"有哪些台词、多长、对应哪个事件"。
+      // 清单本身不含文件内容，很小（~2KB）。
+      if (route === '/voices' && req.method === 'GET') {
+        sendJson(res, 200, deps.voiceManifest?.() ?? { count: 0, lines: [] })
         return
       }
 

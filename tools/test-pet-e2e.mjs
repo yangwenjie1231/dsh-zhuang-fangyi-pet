@@ -698,6 +698,56 @@ await ok('⭐ 已知 key 走专属池，且池内图都在清单里（映射不�
   assert.ok(checkedKeys >= 9, `应覆盖全部状态池，实际只查了 ${checkedKeys} 个 key`)
 })
 
+/* ── ⭐ 语音：真实装配下走运行路径 ────────────────────────────────────────
+ *
+ * 单测覆盖了 `voice.js` 的纯逻辑与白名单；这里补的是**接线**：
+ * `index.js` 有没有真的把 `resolveVoice`/`voiceManifest` 接上路由。
+ * 两者分开测是必要的 —— 模块全对但没接上，单测全绿而功能是死的。
+ * ──────────────────────────────────────────────────────────────────────── */
+
+await ok('⭐ GET /pet/voices 返回真实清单（接线到位）', async () => {
+  const r = await get('/api/zhuang-fangyi/pet/voices')
+  assert.equal(r.status, 200, `状态码 ${r.status}`)
+  const body = JSON.parse(r.body)
+  assert.ok(body.count > 0,
+    `清单为 0 条。若尚未构建语音包请跑 tools/build-voice.ps1；` +
+    '若是构建后仍为 0，说明 index.js 的接线断了。')
+  assert.equal(body.lines.length, body.count)
+})
+
+await ok('⭐⭐ 真实装配下白名单生效：清单内可取、清单外 404', async () => {
+  const manifest = JSON.parse((await get('/api/zhuang-fangyi/pet/voices')).body)
+  const name = manifest.lines[0].name
+
+  // 正向：清单第一条必须真能取到字节
+  const okRes = await fetch(`${ROUTE}/voice/${encodeURIComponent(name)}`)
+  assert.equal(okRes.status, 200, `${name} 应能取到`)
+  const buf = Buffer.from(await okRes.arrayBuffer())
+  assert.ok(buf.length > 100, `字节数过小：${buf.length}`)
+  const isId3 = buf[0] === 0x49 && buf[1] === 0x44 && buf[2] === 0x33
+  const isFrame = buf[0] === 0xFF && (buf[1] & 0xE0) === 0xE0
+  assert.ok(isId3 || isFrame, `${name} 不是 MP3`)
+
+  // 反向：清单外一律 404（含穿越写法）
+  for (const evil of ['../index.js', '%2e%2e%2findex.js', 'C:\\Windows\\win.ini',
+    '/etc/passwd', 'nope', 'voice.json']) {
+    const res = await fetch(`${ROUTE}/voice/${evil}`)
+    assert.equal(res.status, 404, `${evil} 应 404，实际 ${res.status}`)
+    const text = await res.text()
+    assert.ok(!text.includes('root:'), `${evil} 泄漏了系统文件！`)
+  }
+})
+
+await ok('⭐ /pet/diag 暴露语音状态（"到底装上没有"一眼可见）', async () => {
+  const r = await get('/api/zhuang-fangyi/pet/diag')
+  assert.equal(r.status, 200)
+  const body = JSON.parse(r.body)
+  assert.ok(body.diag.voice !== undefined, 'diag 应带 voice 块')
+  assert.equal(typeof body.diag.voice.available, 'boolean')
+  assert.equal(typeof body.diag.voice.count, 'number')
+  assert.ok(body.diag.voice.count > 0, '真实产物在仓库里，diag 应报出条数')
+})
+
 /* ══════════════════════════════════════════════════════════════════════════
  * 3. 端到端：宿主事件 → 状态 → SSE 推送
  * ══════════════════════════════════════════════════════════════════════════ */

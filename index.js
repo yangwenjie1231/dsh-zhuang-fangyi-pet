@@ -47,6 +47,7 @@ import { createHub } from './src/pet/hub.js'
 import { createHandler, newToken, ROUTE_PREFIX } from './src/pet/routes.js'
 import { createLauncher } from './src/pet/launcher.js'
 import { createPomodoro } from './src/pet/pomodoro.js'
+import { loadVoice, resolveVoice, voiceReport } from './src/pet/voice.js'
 
 /** 插件标识（Loader 行 id、token 层 source 共用）。 */
 export const name = 'zhuang-fangyi-pet'
@@ -56,6 +57,7 @@ export const inject = []
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ART_DIR = path.join(HERE, 'art', 'pet')
+const VOICE_DIR = path.join(HERE, 'art', 'voice')
 const DATA_DIR_NAME = 'zhuang-fangyi-pet'
 
 /**
@@ -261,6 +263,17 @@ export function apply (ctx, config) {
     atlas = loadAtlas(ART_DIR, logger)
     logger.info?.(`zhuang-fangyi-pet: 素材已重载（${atlasReport(atlas).files} 个文件）`)
     return atlas
+  }
+
+  // ── 语音包：只读白名单，**运行时绝不合成**（见 voice.js 文件头）──────────
+  //
+  // 缺失是正常情况（没跑过 `build-voice.ps1`）—— 只是"没有声音"，
+  // 不影响桌宠其它任何功能，所以 `loadVoice` 绝不抛。
+  let voice = loadVoice(VOICE_DIR, logger)
+  if (voice.count > 0) {
+    boot(`语音包已加载：${voice.count} 条`)
+  } else {
+    boot('语音包为空（未跑过 tools/build-voice.ps1，桌宠静音运行）')
   }
 
   // ── 一次性令牌：每次进程启动重新生成，不落盘 ─────────────────────────────
@@ -968,7 +981,9 @@ export function apply (ctx, config) {
       build: PLUGIN_BUILD,
       ...diagnostics,
       launcher: launcher.status,
-      nativeAvailable: machine.snapshot().nativeAvailable
+      nativeAvailable: machine.snapshot().nativeAvailable,
+      // 语音包状态：让"到底装上没有"一眼可见（缺失是正常的，不是错误）。
+      voice: voiceReport(voice)
     }),
     // `connection` 服务是可选的：拿不到就走结构围栏。
     connection: () => {
@@ -1012,6 +1027,14 @@ export function apply (ctx, config) {
       hub.broadcast(withSettings(machine.snapshot()))
       return applied
     },
+    /** 语音（契约 §3 新增）：白名单查表，**运行时绝不合成**。 */
+    resolveVoice: name => resolveVoice(VOICE_DIR, name, voice),
+    voiceManifest: () => ({
+      version: voice.version,
+      generatedAt: voice.generatedAt,
+      count: voice.count,
+      lines: voice.lines
+    }),
     /** 番茄钟状态存取（`/pet/pomodoro` 用；见 routes.js 的说明）。 */
     pomodoro: {
       snapshot: () => pomodoro.snapshot(Date.now()),
@@ -1039,6 +1062,10 @@ export function apply (ctx, config) {
       switch (command) {
         case 'reload-art':
           return atlasReport(reloadAtlas())
+        case 'reload-voice':
+          // 重建语音包后不必重启 DSH（与 reload-art 同一考虑）。
+          voice = loadVoice(VOICE_DIR, logger)
+          return voiceReport(voice)
         case 'quit':
           launcher.stop()
           return { stopped: true }
