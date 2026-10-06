@@ -1595,6 +1595,52 @@ namespace DshZhuangFangyiPet
             Check(m.PickForEvent("nope/event", 0) == null && m.PickForEvent(null, 0) == null,
                   "没有该事件的语音 → null（不抛）", "nope/event → null");
 
+            // (4b) ⭐⭐ v2：exe 会说的**每一个**事件，台词表里都必须有货。
+            //
+            // 为什么必须断言这条：`Speak()` 找不到语音时**静默返回 false**
+            //（那是正常的 —— 有些事件就是没有语音）。于是"改了事件名/删了台词"
+            // 这类错误在运行时**完全无声**：用户只会觉得"某些时候她不出声"，
+            // 永远定位不到。把清单与代码的契约钉在自检里。
+            string[] spokenEvents = new string[] {
+                "pet/wake", "pet/click", "agent/working", "agent/thinking",
+                "turn/complete", "agent/error", "attention/approval",
+                "attention/cleared", "pomodoro/start", "pomodoro/focus-end",
+                "pomodoro/break-end", "pomodoro/long-start", "pomodoro/long-end",
+                "pet/feed", "pet/praise", "pet/pet-head", "pet/sleeping",
+                "chat/reply", "session/start", "pet/idle-long"
+            };
+            string manifestJson = null;
+            try
+            {
+                string mp = Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
+                    "..", "art", "voice", "voice.json");
+                if (File.Exists(mp)) manifestJson = File.ReadAllText(mp, System.Text.Encoding.UTF8);
+                else
+                {
+                    string mp2 = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "art", "voice", "voice.json");
+                    if (File.Exists(mp2)) manifestJson = File.ReadAllText(mp2, System.Text.Encoding.UTF8);
+                }
+            }
+            catch { }
+            if (manifestJson != null)
+            {
+                PetVoiceManifest real = PetVoiceManifest.Parse(manifestJson);
+                List<string> gap = new List<string>();
+                for (int i = 0; i < spokenEvents.Length; i++)
+                {
+                    if (real.PickForEvent(spokenEvents[i], 0) == null) gap.Add(spokenEvents[i]);
+                }
+                Check(gap.Count == 0,
+                      "⭐⭐ 代码会说的每个事件，台词表里都有语音（无静默缺口）",
+                      gap.Count == 0
+                        ? "20 个事件全部有货（清单 " + real.Count + " 条）"
+                        : "缺：" + string.Join(", ", gap.ToArray()));
+            }
+            else
+            {
+                Check(true, "⭐ 代码事件覆盖（跳过：自检环境读不到 art/voice/voice.json）", "跳过");
+            }
+
             // (5) ⭐⭐ 名字白名单（exe 侧也要挡：清单是网络来的，是跨进程信任边界）
             bool safe = PetVoiceManifest.IsSafeVoiceName("click-1") &&
                         PetVoiceManifest.IsSafeVoiceName("pomodoro-focus-end") &&

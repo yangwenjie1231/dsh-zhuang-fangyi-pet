@@ -107,6 +107,9 @@ export function loadVoice (voiceDir, logger) {
       file: file_,
       event: typeof item.event === 'string' ? item.event : null,
       source: item.source === 'real' ? 'real' : 'synth',
+      // 台词原文（诊断 + "源与产物是否一致"的比对依据）。可选字段：
+      // 旧清单没有它 → null，绝不因此丢弃条目。
+      text: typeof item.text === 'string' ? item.text : null,
       durationMs: Number.isFinite(Number(item.durationMs)) ? Math.max(0, Math.round(Number(item.durationMs))) : 0,
       bytes: Number.isFinite(Number(item.bytes)) ? Math.max(0, Math.round(Number(item.bytes))) : 0
     }

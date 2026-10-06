@@ -128,14 +128,34 @@ function Convert-ToMp3([string]$src, [string]$dst) {
 # 19 条就是 10 分钟。批量调用只加载一次模型，之后每条约 5 秒。
 if ($synthLines.Count -gt 0) {
     $pending = @()
+    # ⭐ 已合成的 wav 直接复用（`art/voice-src/<name>.wav`）。
+    #
+    # 为什么：`tools/synth-voice.ps1` 是**改台词时的工作流**（抽文本 → 批量合成 →
+    # 落成按名字命名的 wav）。改一条台词就重跑整批合成是浪费（每次冷启动 30 秒+）。
+    # 有现成 wav 就直接转码 —— 与 real 来源同一套处理，只是源目录不同。
+    $srcWavDir = Join-Path $Root "art\voice-src"
+    $reuseWav = @{}
+    $needSynth = @()
     foreach ($l in $synthLines) {
         $target = Join-Path $OutDir "$($l.name).mp3"
         if ((-not $Force) -and (Test-Path $target)) {
             Info "跳过（已存在）：$($l.name)"
             continue
         }
-        $pending += $l
+        $pre = Join-Path $srcWavDir "$($l.name).wav"
+        if ((-not $Force) -and (Test-Path $pre)) {
+            $reuseWav[$l.name] = $pre
+            Info "复用已合成音频：$($l.name)"
+            continue
+        }
+        $needSynth += $l
     }
+    # ① 先转码现成的
+    foreach ($name in $reuseWav.Keys) {
+        Convert-ToMp3 $reuseWav[$name] (Join-Path $OutDir "$name.mp3")
+        Info "转码 OK $name  <- art/voice-src"
+    }
+    $pending = $needSynth
     if ($pending.Count -gt 0) {
         $txt = Join-Path $WorkDir "lines.txt"
         $outWav = Join-Path $WorkDir "wav"
@@ -241,6 +261,10 @@ foreach ($l in $spec.lines) {
         file       = $file
         event      = $l.event
         source     = $l.source
+        # 台词原文进清单：① 诊断时能一眼看出"这条到底念的是什么"；
+        # ② 测试能比对"源与产物是否一致"（改了台词忘了重建 → 听到旧词，
+        #    而名字与事件都对得上，只比名字测不出来）。
+        text       = $l.text
         durationMs = [int][math]::Round($dur * 1000)
         bytes      = [int]$size
     }

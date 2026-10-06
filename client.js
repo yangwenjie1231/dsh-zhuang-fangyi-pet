@@ -205,6 +205,8 @@ window.__ModuleLoader__.load({
         voiceHint: '点击、完成、出错、番茄钟到点时播一句。默认关闭 —— 突然出声容易吓人',
         voiceCount: '语音包',
         voiceCountHint: '用 tools/build-voice.ps1 生成；缺失时静音运行',
+        voiceLines: '台词一览',
+        voiceSynth: '合成',
         // ── 聊天与人设（v3）─────────────────────────────────────────────────
         groupChat: '聊天',
         chatEnabled: '允许在气泡里聊天',
@@ -326,6 +328,8 @@ window.__ModuleLoader__.load({
         voiceHint: 'Speaks on click, completion, errors and pomodoro phase ends. Off by default',
         voiceCount: 'Voice pack',
         voiceCountHint: 'Build it with tools/build-voice.ps1; runs silent when missing',
+        voiceLines: 'All lines',
+        voiceSynth: 'synth',
         // ── Chat & persona (v3) ─────────────────────────────────────────────
         groupChat: 'Chat',
         chatEnabled: 'Allow chatting from the bubble',
@@ -1492,6 +1496,16 @@ window.__ModuleLoader__.load({
           `${t('voiceCount')}：${voiceInfo === null
             ? t('voiceCountHint')
             : `${voiceInfo.count ?? 0} 条 / ${Math.round((voiceInfo.totalMs ?? 0) / 1000)}s`}`),
+        // 台词一览：用户有权知道"她都会说什么" —— 不看清单就只能靠撞。
+        (voiceInfo?.lines?.length ?? 0) === 0
+          ? null
+          : h('details', { key: 'voiceLines', className: 'zf-pet-details' }, [
+              h('summary', { key: 's' }, `${t('voiceLines')}（${voiceInfo.lines.length}）`),
+              h('ul', { key: 'ul', className: 'zf-pet-list' },
+                voiceInfo.lines.map(l => h('li', { key: l.name },
+                  `${l.event ?? '—'} · ${l.text ?? l.name}` +
+                  (l.source === 'synth' ? `（${t('voiceSynth')}）` : ''))))
+            ]),
 
         h('h3', { key: 'g8', className: 'zf-pet-settings__group' }, t('groupChat')),
         h(Toggle, {
@@ -1912,6 +1926,8 @@ window.__ModuleLoader__.load({
   font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
 }
 /* 共享背景文件列表 */
+.zf-pet-details{ margin:6px 0 0; font-size:11px; }
+.zf-pet-details summary{ cursor:pointer; color:var(--dsw-alias-label-secondary); }
 .zf-pet-list{
   margin:4px 0 0;padding-left:18px;font-size:11px;
   color:var(--dsw-alias-label-secondary);

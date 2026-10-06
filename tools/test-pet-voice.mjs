@@ -428,6 +428,89 @@ ok('⭐ 清单里每条都有非零时长（exe 靠它做"上一句没播完别�
   }
 })
 
+ok('⭐⭐ exe 会说的每个事件，台词表里都有语音（无静默缺口）', () => {
+  // 为什么必须有这条（v2 加的）：
+  // exe 的 `Speak()` 找不到语音时**静默返回 false** —— 那是正常设计
+  //（有些事件就是没有语音）。于是"改了事件名 / 删了台词"这类错误
+  // 在运行时**完全无声**：用户只会觉得"某些时候她不出声"，永远定位不到。
+  //
+  // 这份清单与 pet/Program.cs 的 Speak("...") 调用点一一对应，
+  // exe 自检里也有一份同样的断言（两侧都挡住）。
+  const spokenEvents = [
+    'pet/wake', 'pet/click', 'agent/working', 'agent/thinking',
+    'turn/complete', 'agent/error', 'attention/approval',
+    'attention/cleared', 'pomodoro/start', 'pomodoro/focus-end',
+    'pomodoro/break-end', 'pomodoro/long-start', 'pomodoro/long-end',
+    'pet/feed', 'pet/praise', 'pet/pet-head', 'pet/sleeping',
+    'chat/reply', 'session/start', 'pet/idle-long'
+  ]
+  const m = loadVoice(VOICE_DIR)
+  assert.ok(m.count > 0, '清单为空，无法验证')
+  const events = new Set(m.lines.map(l => l.event))
+  const gap = spokenEvents.filter(e => !events.has(e))
+  assert.deepEqual(gap, [],
+    `这些事件在代码里会被说、但台词表里没有：${gap.join(', ')} —— ` +
+    '运行时表现为"某些时候她不出声"且毫无报错')
+})
+
+ok('⭐ 台词表与清单一致（改了表没重新构建 → 立刻发现）', () => {
+  // `tools/voice-lines.json` 是源，`art/voice/voice.json` 是产物。
+  // 两者不一致的典型症状：改了台词、忘了跑 build-voice.ps1，
+  // 于是听感与预期不同却查不出原因。
+  const src = JSON.parse(fs.readFileSync(path.join(ROOT, 'tools', 'voice-lines.json'), 'utf8'))
+  const m = loadVoice(VOICE_DIR)
+  assert.ok(m.count > 0, '清单为空，无法验证')
+  const srcNames = src.lines.map(l => l.name).sort()
+  const outNames = m.lines.map(l => l.name).sort()
+  assert.deepEqual(outNames, srcNames,
+    '清单与 voice-lines.json 的名字集合不一致 —— 请重跑 tools/build-voice.ps1')
+  // 事件也要一致（改了 event 却忘了重建，症状是"语音在错误的时机响"）
+  const srcByName = new Map(src.lines.map(l => [l.name, l]))
+  for (const rec of m.lines) {
+    const s = srcByName.get(rec.name)
+    assert.equal(rec.event, s.event,
+      `${rec.name} 的事件不一致：清单 ${rec.event} vs 源 ${s.event}`)
+    // ⭐ 文本也要比：改了台词不重建，症状是"念的还是旧词"，
+    // 而名字与事件都对得上 —— 只比名字/事件**测不出**这种情况（实测漏过）。
+    assert.equal(rec.text, s.text,
+      `${rec.name} 的文本不一致（清单 ${JSON.stringify(rec.text)} vs 源 ${JSON.stringify(s.text)}）` +
+      ' —— 改了台词没重建产物，听到的会是旧词。请重跑 tools/build-voice.ps1')
+  }
+})
+
+ok('⭐⭐ 台词表里没有语义错位的组合（v1 踩过的坑，防回归）', () => {
+  // v1 的毛病：把官方**战斗**语音硬套到日常事件上。用户直接反馈"台词太奇怪"。
+  // 这里把踩过的具体错配钉成断言 —— 它们是"看起来能用、听着很怪"的那类错误，
+  // 单看代码永远发现不了。
+  const src = JSON.parse(fs.readFileSync(path.join(ROOT, 'tools', 'voice-lines.json'), 'utf8'))
+  const byEvent = new Map()
+  for (const l of src.lines) {
+    if (!byEvent.has(l.event)) byEvent.set(l.event, [])
+    byEvent.get(l.event).push(l)
+  }
+  // ① 出错时不能说"没事，不用管我"（负伤台词 —— 语义相反）
+  const errTexts = (byEvent.get('agent/error') ?? []).map(l => l.text)
+  assert.ok(!errTexts.some(t => t.includes('不用管我')),
+    '出错时不该说「没事，不用管我」（那是负伤台词，语义相反）')
+  // ② 回复**到达**时不能说"让我想想"（时序倒置：话都说完了）
+  const replyTexts = (byEvent.get('chat/reply') ?? []).map(l => l.text)
+  assert.ok(!replyTexts.some(t => t.includes('让我想想')),
+    '回复到达时不该说「让我想想」—— 那是思考时的台词，时序倒置')
+  // ③ "让我想想"应该在 agent/thinking 上
+  const thinkTexts = (byEvent.get('agent/thinking') ?? []).map(l => l.text)
+  assert.ok(thinkTexts.some(t => t.includes('让我想想')),
+    '「让我想想」应挂在 agent/thinking（思考时机）')
+  // ④ 完成时不能说作战胜利那类（"赢这一次"）
+  const doneTexts = (byEvent.get('turn/complete') ?? []).map(l => l.text)
+  assert.ok(!doneTexts.some(t => t.includes('赢这一次')),
+    '完成时不该说「赢这一次，其实不算很难」（作战胜利台词，与干活无关）')
+  // ⑤ 高频事件必须有多条轮换（只有一条会听腻）
+  for (const evt of ['pet/click', 'turn/complete', 'agent/error', 'chat/reply']) {
+    const n = (byEvent.get(evt) ?? []).length
+    assert.ok(n >= 2, `${evt} 只有 ${n} 条 —— 高频事件应有多条轮换`)
+  }
+})
+
 ok('⭐ 每条文件都是真 MP3（ID3 或帧同步头），不是被改名的别的东西', () => {
   const m = loadVoice(VOICE_DIR)
   assert.ok(m.count > 0, '清单为空，无法验证')

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Text;
@@ -661,6 +662,7 @@ namespace DshZhuangFangyiPet
 
             // v8：语音（只在**变化**时出声 —— 见 SpeakForSnapshot 的说明）
             SpeakForSnapshot(snap);
+            SpeakForSessionSet(snap);   // v2：新会话出现时招呼一声
 
             // v9：好感度 + 互动语音
             ApplyInteract(snap);
@@ -893,10 +895,21 @@ namespace DshZhuangFangyiPet
             try
             {
                 // ① attention（等你审批）优先级最高：它最需要被注意到。
-                if (snap.Attention != null && _lastVoiceState != "attention")
+                if (snap.Attention != null)
                 {
-                    _lastVoiceState = "attention";
-                    Speak("attention/approval");
+                    if (_lastVoiceState != "attention")
+                    {
+                        _lastVoiceState = "attention";
+                        Speak("attention/approval");
+                        return;
+                    }
+                }
+                else if (_lastVoiceState == "attention")
+                {
+                    // ⭐ 你处理完审批了 → 她接着干，有始有终（v2 新增）。
+                    // v1 完全没有这个时机：审批解决后桌宠一声不吭，像是卡住了。
+                    _lastVoiceState = null;
+                    Speak("attention/cleared");
                     return;
                 }
 
@@ -908,9 +921,14 @@ namespace DshZhuangFangyiPet
                     if (_lastPomoPhase != null && _lastPomoPhase != phaseKey)
                     {
                         string evt = null;
-                        if (p.Phase == "break" || p.Phase == "long-break")
+                        if (p.Phase == "long-break")
                         {
-                            // 专注刚结束 → 进休息
+                            // ⭐ 进入**长**休息（每 4 轮一次）—— v1 只覆盖了短休。
+                            evt = "pomodoro/long-start";
+                        }
+                        else if (p.Phase == "break")
+                        {
+                            // 专注刚结束 → 进短休
                             evt = "pomodoro/focus-end";
                         }
                         else if (p.Phase == "focus" && _lastPomoPhase != "focus:paused")
@@ -919,6 +937,11 @@ namespace DshZhuangFangyiPet
                             evt = _lastPomoPhase == "long-break"
                                 ? "pomodoro/long-end"
                                 : "pomodoro/break-end";
+                        }
+                        else if (p.Phase == "focus" && _lastPomoPhase == "focus:paused")
+                        {
+                            // 暂停后继续 —— 不吭声（用户自己按的，他知道）
+                            evt = null;
                         }
                         _lastPomoPhase = phaseKey;
                         if (evt != null) { Speak(evt); return; }
@@ -929,17 +952,48 @@ namespace DshZhuangFangyiPet
                     }
                 }
 
-                // ③ 普通状态变化（working / happy / error 等）。
+                // ③ 普通状态变化（working / happy / error / thinking 等）。
                 string st = snap.EffectiveState();
                 if (st != _lastVoiceState)
                 {
                     string prev = _lastVoiceState;
                     _lastVoiceState = st;
-                    // 只对**有意义**的几种出声：working 开始、完成、出错。
-                    // idle/thinking/waking 太频繁，出声会吵。
+                    // 只对**有意义**的几种出声：出错、完成、开始干活、开始思考。
+                    // idle/waking 太频繁，出声会吵。
                     if (st == "error") { Speak("agent/error"); return; }
                     if (st == "happy" && prev != "happy") { Speak("turn/complete"); return; }
                     if (st == "working" && (prev == "thinking" || prev == "idle")) { Speak("agent/working"); return; }
+                    // ⭐ 思考（v2 新增）：「让我想想……」的正确位置 ——
+                    // v1 把它放在**回复到达**时，时序倒置（话都说完了才说这句）。
+                    if (st == "thinking" && prev != "working") { Speak("agent/thinking"); return; }
+                }
+
+                // ④ ⭐ 长时间空闲（v2 新增，低频）：她"守不住闲"，闲久了会主动搭话。
+                //
+                // 为什么用**长时间静默**而不是状态变化：`idle` 是最常见的状态，
+                // 按状态触发会变成复读机。这里要求"连续空闲超过阈值"才说一次，
+                // 且说完记时间戳，避免重复。
+                if (st == "idle" && snap.Settings != null && snap.Settings.StatusAlways != null)
+                {
+                    // 只在真的闲了很久时出声（阈值取 20 分钟；测试可注入）
+                    //
+                    // ⚠️ 用 `Stopwatch.GetTimestamp()` 而**不是** `Environment.TickCount64`
+                    // —— 后者是 .NET Core API，.NET Framework 4.8 上编译不过
+                    //（实测 error CS0117: Environment 未包含 TickCount64 的定义）。
+                    long now = Stopwatch.GetTimestamp();
+                    if (_idleSinceMs == 0) _idleSinceMs = now;
+                    long idleFor = (long)((now - _idleSinceMs) * 1000.0 / Stopwatch.Frequency);
+                    long sinceTalk = (long)((now - _lastIdleTalkMs) * 1000.0 / Stopwatch.Frequency);
+                    if (idleFor > IdleTalkAfterMs && sinceTalk > IdleTalkAfterMs)
+                    {
+                        _lastIdleTalkMs = now;
+                        Speak("pet/idle-long");
+                        return;
+                    }
+                }
+                else
+                {
+                    _idleSinceMs = 0;
                 }
             }
             catch (Exception ex)
@@ -947,6 +1001,46 @@ namespace DshZhuangFangyiPet
                 PetLog.Warn("语音触发失败（已忽略）: " + PetLog.Describe(ex));
             }
         }
+
+        /// <summary>连续空闲多久后主动说一句（默认 20 分钟）。测试可改小。</summary>
+        public static long IdleTalkAfterMs = 20 * 60 * 1000L;
+        private long _idleSinceMs;
+        private long _lastIdleTalkMs;
+
+        /// <summary>
+        /// 会话集合变化 → 新会话出现时招呼一声（v2 新增）。
+        ///
+        /// 为什么单独一个方法：`SpeakForSnapshot` 只关心"当前状态"，
+        /// 而"出现了新会话"是**集合层面**的变化 —— 塞进状态机分支里会污染它。
+        /// </summary>
+        private void SpeakForSessionSet(PetSnapshot snap)
+        {
+            if (!_voiceOn || _voices == null || snap == null || snap.Sessions == null) return;
+            try
+            {
+                HashSet<string> now = new HashSet<string>();
+                for (int i = 0; i < snap.Sessions.Count; i++)
+                {
+                    PetSessionInfo si = snap.Sessions[i];
+                    if (si == null || string.IsNullOrEmpty(si.SessionId)) continue;
+                    if (si.SessionId == "unknown") continue;
+                    now.Add(si.SessionId);
+                }
+                // 首次填充不算"新增"（那是启动时把已有会话读进来）。
+                if (_knownSessionIds == null) { _knownSessionIds = now; return; }
+                bool appeared = false;
+                foreach (string id in now) { if (!_knownSessionIds.Contains(id)) { appeared = true; break; } }
+                _knownSessionIds = now;
+                if (appeared) Speak("session/start");
+            }
+            catch (Exception ex)
+            {
+                PetLog.Warn("会话语音触发失败（已忽略）: " + PetLog.Describe(ex));
+            }
+        }
+
+        /// <summary>上一帧见过的会话集合（判定"新会话出现"）。</summary>
+        private HashSet<string> _knownSessionIds;
 
         /// <summary>语音开关（设置页/托盘）。关掉时立刻停掉正在播的。</summary>
         private void SetVoiceEnabled(bool on)
