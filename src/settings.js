@@ -279,7 +279,11 @@ export function exeArgs (settings, runtime) {
     '--opacity', String(settings.opacity),
     '--topmost', settings.topmost ? '1' : '0',
     '--click-through', settings.clickThrough ? '1' : '0',
-    '--bubble', settings.bubble ? '1' : '0'
+    '--bubble', settings.bubble ? '1' : '0',
+    // v8：语音开关。**必须透传** —— exe 是独立进程，它自己不认 settings.json。
+    // 漏传的症状是"设置页开了语音但没声音"，而 Host 与 exe 各自的测试都是绿的
+    // （所以 `test-pet-native-e2e.mjs` 专门断言了这一个参数）。
+    '--voice', settings.voice ? '1' : '0'
   ]
   if (Number.isFinite(settings.x) && Number.isFinite(settings.y)) {
     args.push('--x', String(settings.x), '--y', String(settings.y))
