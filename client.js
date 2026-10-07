@@ -140,34 +140,28 @@ window.__ModuleLoader__.load({
       zh: {
         nav: '庄方宜桌宠',
         title: '庄方宜桌宠',
-        subtitle: '真的浮在桌面上的桌宠 · 表情随 agent 状态实时变化',
-        groupGeneral: '常规',
-        enabled: '启用桌宠',
+        subtitle: '真的浮在桌面上的桌宠 · 表情随 agent 状态实时变化',        enabled: '启用桌宠',
         mode: '显示方式',
         modeNative: '桌面窗口（推荐）',
         modeNativeHint: '真的浮在桌面上。窗口内悬浮只在它不可用时作为兜底出现',
         modeOverlay: '只用窗口内悬浮（功能较少，兼容用）',
-        modeOverlayHint: '仅在 DSH 窗口内显示。没有滚轮缩放/右键菜单/表情包画廊/托盘 —— 它只是兜底，不再补新功能',
+        modeOverlayHint: '只在 DSH 窗口内显示，功能少于桌面窗口',
         scale: '大小',
-        opacity: '不透明度',
-        groupWindow: '窗口',
-        topmost: '总在最前',
+        opacity: '不透明度',        topmost: '总在最前',
         clickThrough: '点击穿透',
         clickThroughHint: '开启后鼠标完全穿过桌宠（纯装饰）',
         groupBubble: '气泡',
         bubble: '显示气泡',
         bubbleImages: '气泡显示表情图',
         chatFontScale: '对话文字大小',
-        chatFontScaleHint: '只影响气泡里的对话正文，与上面「大小」（桌宠本体）无关 —— 桌宠可以调小、字照样读得清',
+        chatFontScaleHint: '只影响气泡里的对话正文，与桌宠大小无关',
         bubbleMs: '气泡显示时长',
         bubbleGapMs: '两条气泡最小间隔',
         bubbleGapHint: '调大可减少刷屏；0 = 不限',
         notifyComplete: 'AI 完成时弹提醒',
         notifyCompleteHint: '一回合并干净结束就强制弹一条（绕过上面的间隔）',
         attentionReminder: '审批/提问常亮提醒',
-        attentionReminderHint: 'AI 要授权或问你问题时，气泡一直亮着直到你处理完（不看上面的气泡时长）',
-        groupBehavior: '行为',
-        happyMs: '完成后的开心时长',
+        attentionReminderHint: '审批/提问时常亮，直到你处理完',        happyMs: '完成后的开心时长',
         sleepMs: '空闲多久后睡觉',
         doubleClick: '双击桌宠',
         doubleClickFocus: '打开 DSH 主窗口',
@@ -181,7 +175,7 @@ window.__ModuleLoader__.load({
         statusAlways: '桌宠下方常显状态',
         statusAlwaysHint: '开启后状态文字一直挂在桌宠下方，不用悬停',
         statusFontScale: '状态文字大小',
-        statusFontScaleHint: '只影响状态文字，与上面「大小」（桌宠本体）无关 —— 桌宠可以调小、字照样看清',
+        statusFontScaleHint: '只影响状态文字，与桌宠大小无关',
         // ── 番茄钟（v3）─────────────────────────────────────────────────────
         groupPomodoro: '番茄钟',
         pomodoro: '启用番茄钟',
@@ -214,10 +208,8 @@ window.__ModuleLoader__.load({
          */
         unitSec: '秒',
         unitMin: '分钟',
-        // ── 语音（v3）───────────────────────────────────────────────────────
-        groupVoice: '语音',
-        voice: '让庄方宜说话',
-        voiceHint: '点击、完成、出错、番茄钟到点时播一句。默认关闭 —— 突然出声容易吓人',
+        // ── 语音（v3）───────────────────────────────────────────────────────        voice: '让庄方宜说话',
+        voiceHint: '点击、完成、出错、番茄钟到点时播一句',
         voiceCount: '语音包',
         voiceCountHint: '用 tools/build-voice.ps1 生成；缺失时静音运行',
         voiceLines: '台词一览',
@@ -229,9 +221,7 @@ window.__ModuleLoader__.load({
         persona: '人设风格',
         personaHint: '语言风格。世界观与身份写在"共享背景"里，会自动拼在它前面',
         personaReload: '重新扫描人设目录',
-        personaDir: '人设目录',
-        personaDirHint: '把你的 .md 丢进这个目录，再点"重新扫描"',
-        sharedTitle: '共享背景（所有风格共用）',
+        personaDir: '人设目录',        sharedTitle: '共享背景（所有风格共用）',
         sharedHint: '这些人设文件会拼在每种风格前面 —— 改一次，所有风格一起变',
         sharedEmpty: '还没有共享背景（当前风格是自包含的）',
         sharedUsed: '当前风格已拼接',
@@ -292,9 +282,7 @@ window.__ModuleLoader__.load({
         memoryBytes: '字节',
         memoryFile: '记忆文件',
         chatWorkspace: '聊天工作区',
-        chatWorkspaceHint: '留空 = ~/Downloads/庄方宜',
-        chatOpen: '打开工作区目录',
-        chatStatus: '聊天状态',
+        chatWorkspaceHint: '留空 = ~/Downloads/庄方宜',        chatStatus: '聊天状态',
         chatWsOk: '已归入工作区',
         chatWsNone: '尚未归入工作区（下次发消息时会自动建并挂上）',
         chatSend: '发一条',
@@ -308,9 +296,7 @@ window.__ModuleLoader__.load({
         nativeOff: '桌面窗口不可用',
         fallbackNote: '当前使用窗口内悬浮（只在 DSH 窗口里可见）',
         reason: '原因',
-        reset: '重置位置',
-        resetDone: '已重置，重新拖动即可',
-        sendTitle: '发消息给庄方宜',
+        reset: '重置位置',        sendTitle: '发消息给庄方宜',
         sendPlaceholder: '说点什么…',
         sendTip: 'Enter 发送 · Esc 收起',
         sendTo: '发给',
@@ -320,9 +306,32 @@ window.__ModuleLoader__.load({
         activityNormal: '正常',
         activityPlayful: '调皮（爱说话、会主动冒头）',
         // ── 分组标题（v-next：按用户心智重排，不再按开发历史）────────────────
-        groupPet: '桌宠',
-        groupRoutine: '作息与外观',
-        groupAdvanced: '高级与诊断',
+        groupPet: '桌宠',        groupAdvanced: '高级与诊断',
+        // ── 页签与卡片标题（v4：一页 = 一类问题；每张卡片可折叠）───────────
+        //
+        // 为什么有页签：DSH 的设置导航只有一级（一个插件一个入口），
+        // 40 多个控件塞在一页里实测 2556px、要滚三屏。
+        tabAppearance: '外观',
+        tabBubble: '气泡',
+        tabBehavior: '行为',
+        tabVoice: '语音',
+        tabChat: '对话',
+        tabDiag: '诊断',        groupStatusText: '状态文字',
+        groupReminder: '提醒',
+        groupActivity: '活跃度',
+        groupVoiceLines: '固定台词',
+        groupSendMessage: '发消息',
+        groupPaths: '路径与会话',
+        // ── 卡片里**折叠**的长说明 ─────────────────────────────────────────
+        //
+        // 行内的说明一律压到一行（≤34 字）：原先 24 条说明散在正文里、
+        // 最长的一条 61 字占三行，把真正要调的控件淹了。
+        // 权衡、代价、边界这类"要知道但不必天天看"的，挪进卡片底部的
+        // 「说明」折叠块 —— 控件是主角，文档点开就有。
+        noteLabel: '说明',
+        notePet: '桌面窗口是真的浮在桌面上（支持滚轮缩放、右键菜单、表情包画廊、托盘图标）。窗口内悬浮只是兜底：只在 DSH 窗口里可见，也不再补新功能 —— 原生窗口不可用时会自动回落到它。',
+        noteBubble: '「对话文字大小」和「大小」（桌宠本体）是两件事：把桌宠调小是为了不占地，而气泡里的正文是要读的 —— 跟着一起缩就会小到看不清，所以单独可调。「审批/提问常亮」不看气泡时长：AI 在等你处理时会一直亮着。',
+        noteSpeak: '需要合成子插件在跑（默认 127.0.0.1:8765）；连不上会自动退回固定台词，聊天不受影响。整段回复都会念完，按句分段、边合成边播 ——「每段朗读字数」只决定多久开口：调小开口更快，调大合成次数更少。常驻：加载一次后一直留在显存里，每次合成立刻开始；关闭：空闲后释放显存，但每次会话第一次合成要等模型加载。',
         advancedHint: '出问题时才需要看：服务状态、启动命令、素材与会话信息',
         // ── 诊断区键名 ──────────────────────────────────────────────────────
         diagAssets: '素材',
@@ -338,34 +347,28 @@ window.__ModuleLoader__.load({
       en: {
         nav: 'Zhuang Fangyi Pet',
         title: 'Zhuang Fangyi Pet',
-        subtitle: 'A pet that floats on your desktop · reacts to agent state',
-        groupGeneral: 'General',
-        enabled: 'Enable pet',
+        subtitle: 'A pet that floats on your desktop · reacts to agent state',        enabled: 'Enable pet',
         mode: 'Display mode',
         modeNative: 'Desktop window (recommended)',
         modeNativeHint: 'Truly floats on your desktop. The in-window overlay appears only as a fallback when it is unavailable',
         modeOverlay: 'In-window overlay only (fewer features, compatibility)',
-        modeOverlayHint: 'Shows inside the DSH window only. No wheel zoom, right-click menu, emote gallery or tray — it is a fallback and gets no new features',
+        modeOverlayHint: 'Inside the DSH window only — fewer features',
         scale: 'Size',
-        opacity: 'Opacity',
-        groupWindow: 'Window',
-        topmost: 'Always on top',
+        opacity: 'Opacity',        topmost: 'Always on top',
         clickThrough: 'Click-through',
         clickThroughHint: 'Mouse passes fully through the pet (decoration only)',
         groupBubble: 'Bubble',
         bubble: 'Show bubbles',
         bubbleImages: 'Show expression images in bubbles',
         chatFontScale: 'Chat text size',
-        chatFontScaleHint: 'Affects the chat text inside bubbles only, not the pet size above — the pet can be small while the text stays readable',
+        chatFontScaleHint: 'Affects bubble chat text only, not the pet size',
         bubbleMs: 'Bubble duration',
         bubbleGapMs: 'Min gap between bubbles',
         bubbleGapHint: 'Raise it to reduce spam; 0 = unlimited',
         notifyComplete: 'Notify when AI finishes',
         notifyCompleteHint: 'Force a bubble on every clean turn end (bypasses the gap above)',
         attentionReminder: 'Sticky approval/question alert',
-        attentionReminderHint: 'Keeps the bubble lit until you approve or answer (ignores the bubble duration above)',
-        groupBehavior: 'Behavior',
-        happyMs: 'Happy duration after done',
+        attentionReminderHint: 'Stays lit until you approve or answer',        happyMs: 'Happy duration after done',
         sleepMs: 'Idle time before sleeping',
         doubleClick: 'Double-click pet',
         doubleClickFocus: 'Open DSH main window',
@@ -379,7 +382,7 @@ window.__ModuleLoader__.load({
         statusAlways: 'Always show status below pet',
         statusAlwaysHint: 'Keeps the status text visible without hovering',
         statusFontScale: 'Status text size',
-        statusFontScaleHint: 'Affects the status text only, not the pet size above — the pet can be small while the text stays readable',
+        statusFontScaleHint: 'Affects the status text only, not the pet size',
         // ── Pomodoro (v3) ───────────────────────────────────────────────────
         groupPomodoro: 'Pomodoro',
         pomodoro: 'Enable pomodoro',
@@ -403,10 +406,8 @@ window.__ModuleLoader__.load({
         rounds: 'rounds',
         unitSec: 's',
         unitMin: 'min',
-        // ── Voice (v3) ──────────────────────────────────────────────────────
-        groupVoice: 'Voice',
-        voice: 'Let her speak',
-        voiceHint: 'Speaks on click, completion, errors and pomodoro phase ends. Off by default',
+        // ── Voice (v3) ──────────────────────────────────────────────────────        voice: 'Let her speak',
+        voiceHint: 'Speaks on click, completion, errors and pomodoro phases',
         voiceCount: 'Voice pack',
         voiceCountHint: 'Build it with tools/build-voice.ps1; runs silent when missing',
         voiceLines: 'All lines',
@@ -418,9 +419,7 @@ window.__ModuleLoader__.load({
         persona: 'Persona style',
         personaHint: 'Language style. World & identity live in the shared background and are prepended automatically',
         personaReload: 'Rescan persona folder',
-        personaDir: 'Persona folder',
-        personaDirHint: 'Drop your .md files there, then hit rescan',
-        sharedTitle: 'Shared background (used by every style)',
+        personaDir: 'Persona folder',        sharedTitle: 'Shared background (used by every style)',
         sharedHint: 'These files are prepended to every style — edit once, all styles change',
         sharedEmpty: 'No shared background yet (current style is self-contained)',
         sharedUsed: 'Current style composes',
@@ -473,9 +472,7 @@ window.__ModuleLoader__.load({
         memoryBytes: 'bytes',
         memoryFile: 'Memory file',
         chatWorkspace: 'Chat workspace',
-        chatWorkspaceHint: 'Empty = ~/Downloads/庄方宜',
-        chatOpen: 'Open workspace folder',
-        chatStatus: 'Chat status',
+        chatWorkspaceHint: 'Empty = ~/Downloads/庄方宜',        chatStatus: 'Chat status',
         chatWsOk: 'Filed under workspace',
         chatWsNone: 'Not filed under a workspace yet (created on your next message)',
         chatSend: 'Send',
@@ -489,9 +486,7 @@ window.__ModuleLoader__.load({
         nativeOff: 'Desktop window unavailable',
         fallbackNote: 'Using in-window overlay (visible only inside DSH)',
         reason: 'Reason',
-        reset: 'Reset position',
-        resetDone: 'Reset. Drag it anywhere.',
-        sendTitle: 'Send a message',
+        reset: 'Reset position',        sendTitle: 'Send a message',
         sendPlaceholder: 'Say something…',
         sendTip: 'Enter to send · Esc to close',
         sendTo: 'To',
@@ -500,9 +495,25 @@ window.__ModuleLoader__.load({
         activityQuiet: 'Quiet (only important notices)',
         activityNormal: 'Normal',
         activityPlayful: 'Playful (chatty, pops up on its own)',
-        groupPet: 'Pet',
-        groupRoutine: 'Schedule & appearance',
-        groupAdvanced: 'Advanced & diagnostics',
+        groupPet: 'Pet',        groupAdvanced: 'Advanced & diagnostics',
+        // ── Tabs and card titles (v4: one page = one class of question) ─────
+        tabAppearance: 'Appearance',
+        tabBubble: 'Bubble',
+        tabBehavior: 'Behavior',
+        tabVoice: 'Voice',
+        tabChat: 'Chat',
+        tabDiag: 'Diagnostics',        groupStatusText: 'Status text',
+        groupReminder: 'Reminders',
+        groupActivity: 'Liveliness',
+        groupVoiceLines: 'Fixed lines',
+        groupSendMessage: 'Send a message',
+        groupPaths: 'Paths & session',
+        // ── Long explanations that live in a collapsed card footer ─────────
+        // Inline descriptions are capped at one line; trade-offs move here.
+        noteLabel: 'Details',
+        notePet: 'The desktop window truly floats on your desktop (wheel zoom, right-click menu, emote gallery, tray icon). The in-window overlay is a fallback only: visible inside DSH, and it gets no new features — it appears automatically when the native window is unavailable.',
+        noteBubble: 'Chat text size and pet size are separate: you shrink the pet to save space, but bubble text is meant to be read, so it stays adjustable on its own. The sticky approval alert ignores bubble duration — it stays lit while the AI waits for you.',
+        noteSpeak: 'Needs the synthesis sub-plugin (default 127.0.0.1:8765); when unreachable it falls back to fixed lines and chat is unaffected. The whole reply is always spoken, in sentence-sized segments synthesized while playing — the segment size only controls how soon the first audio starts. Resident: load once and stay in VRAM, instant synthesis. Off: free VRAM when idle, but the first synthesis of each session waits for the model to load.',
         advancedHint: 'Only needed when something is wrong: service state, launch command, assets and session info',
         diagAssets: 'Assets',
         diagStates: 'states covered',
@@ -742,6 +753,16 @@ window.__ModuleLoader__.load({
 
     /** 位置落 localStorage：这是纯前端偏好，不需要跨设备同步。 */
     const POS_KEY = 'zf-pet-position'
+
+    /**
+     * 设置页当前页签（v4）。
+     *
+     * 与位置同理：纯前端偏好，不回传宿主。记住它是因为设置页有六页，
+     * 每次都从「外观」开始意味着常改语音的人每次都要多点一下。
+     * 读写全程 try/catch —— 隐私模式下 localStorage 会抛异常，
+     * 而它只是"记住上次"，不该把整个设置页打崩。
+     */
+    const TAB_KEY = 'zf-pet-settings-tab'
 
     function readPos () {
       try {
@@ -1250,19 +1271,59 @@ window.__ModuleLoader__.load({
      * ------------------------------------------------------------------ */
 
     /** 一个受控开关。样式走本插件自己的类名，不依赖外壳组件。 */
+
+    /* ------------------------------------------------------------------ *
+     * 设置页构件
+     *
+     * 这一层只管"长什么样"，不管业务。四个构件：
+     *   Row  —— 一行设置（左：标题 + 可选说明；右：定宽控件列）
+     *   Card —— 一张可折叠卡片（= 一个概念）
+     *   Tabs —— 顶部页签（外壳的设置导航只有一级，这排是我们补的二级导航）
+     *   Diag —— 诊断键值行（只出现在「诊断」页签里）
+     * ------------------------------------------------------------------ */
+
+    /**
+     * 一行设置。
+     *
+     * ⚠️ 说明文字（`desc`）**必须落在左列**（`.zf-pet-row__main`），
+     * 不许再挂到控件下面。原先三种写法并存 —— `Toggle` 的说明在控件下方
+     * 通栏、下拉框的说明挤在标签与控件之间、独立的 note 段落又满行一段 ——
+     * 同一屏里说明文字**跳三个位置**，"这一行在说什么"得靠找。
+     * 现在只有一种位置，与 DSH 外壳自己的设置行一致（外壳的 `.description`
+     * 也在标题下面、同一列里）。
+     *
+     * 根元素仍然是 `<label>`：点行内任意位置就能激活控件（开关尤其需要，
+     * 16px 的方框很难点）。两个子容器用 `<span>` —— label 的内容模型是
+     * phrasing content，用 `<div>` 是非法结构；span 加 display:flex
+     * 一样能当弹性盒子使。
+     */
+    function Row (props) {
+      const { label, desc, control } = props
+      return h('label', { className: 'zf-pet-row' }, [
+        h('span', { key: 'm', className: 'zf-pet-row__main' }, [
+          h('span', { key: 'l', className: 'zf-pet-row__label' }, label),
+          desc === undefined || desc === null || desc === ''
+            ? null
+            : h('span', { key: 'd', className: 'zf-pet-row__desc' }, desc)
+        ]),
+        h('span', { key: 'c', className: 'zf-pet-row__control' },
+          Array.isArray(control) ? control : [control])
+      ])
+    }
+
     function Toggle (props) {
       const { label, value, onChange, hint } = props
-      return h('label', { className: 'zf-pet-row' }, [
-        h('span', { key: 'l', className: 'zf-pet-row__label' }, label),
-        h('input', {
+      return h(Row, {
+        label,
+        desc: hint,
+        control: h('input', {
           key: 'i',
           type: 'checkbox',
           className: 'zf-pet-row__input',
           checked: value === true,
           onChange: e => onChange(e.target.checked)
-        }),
-        hint === undefined ? null : h('span', { key: 'h', className: 'zf-pet-row__hint' }, hint)
-      ])
+        })
+      })
     }
 
     /**
@@ -1274,17 +1335,17 @@ window.__ModuleLoader__.load({
      */
     function Slider (props) {
       const { label, value, min, max, step, suffix, onChange, hint } = props
-      return h('label', { className: 'zf-pet-row' }, [
-        h('span', { key: 'l', className: 'zf-pet-row__label' }, label),
-        // ⭐ 滑杆与数值**必须包在同一个 flex 容器里**。
+      return h(Row, {
+        label,
+        desc: hint,
+        // ⭐ 滑杆与数值**必须包在同一个容器里**（就是 `Row` 的控件列）。
         //
         // 原先它们是行网格里两个平级的 `auto` 轨道项，于是被排到**两行**去
         //（实测：标签 y=18、控件 y=18、数值 y=46 —— 数值掉到下一行，
         // 行高 68px，而一个正常的行只要 34px）。用 headless Edge 量过
         // 320/420/520/640/760/900 六种面板宽度，**全都换行** ——
         // 所以这不是"窗口窄了"，是这个布局本身错了。
-        // 包起来之后数值稳定跟在滑杆右边，行高回到 38px。
-        h('div', { key: 'c', className: 'zf-pet-row__control' }, [
+        control: [
           h('input', {
             key: 'i',
             type: 'range',
@@ -1296,42 +1357,80 @@ window.__ModuleLoader__.load({
             onChange: e => onChange(Number(e.target.value))
           }),
           h('span', { key: 'v', className: 'zf-pet-row__value' }, `${value}${suffix ?? ''}`)
-        ]),
-        hint === undefined ? null : h('span', { key: 'h', className: 'zf-pet-row__hint' }, hint)
-      ])
+        ]
+      })
     }
 
     /**
-     * 设置分组。
+     * 一张卡片（= 一个概念）。
      *
-     * 为什么要它：原先每个分组都是裸 `h('h3')` + 一串控件平铺，于是
-     * **三种性质完全不同的东西挤在同一列** —— ①设置控件 ②状态/诊断文字
-     * ③操作按钮。视觉上没有任何层级，用户找不到"我该动哪个"。
-     *
-     * `collapsible` + `open` 用**声明式**属性（不读 DOM）：外壳的 React 桩
-     * 没有真实 DOM，读 `open` 属性会让测试与真机行为分叉。
+     * `<details>` + `<summary>`：**整张卡片可折叠**（用户点名"设置里的一些
+     * 内容应该可以折叠或展开"）。`open` 用**声明式**属性（不读 DOM）：
+     * 外壳的 React 桩没有真实 DOM，读 `open` 会让测试与真机行为分叉。
      * 注意 `open` 只在挂载时生效（非受控 `<details>`）—— 这是有意的：
      * 用户手动展开后不该被下一次重渲染合上。
+     *
+     * `note` 是**折叠的**长说明：那些"为什么默认这样、代价是什么"的权衡文字
+     * 原先以 2~3 行段落直接糊在正文里，把真正要调的控件淹了。
      */
-    function Group (props) {
-      const { title, hint, children, collapsible, open } = props
+    function Card (props) {
+      const { title, open, lead, note, noteLabel, children } = props
       const body = (children ?? []).filter(c => c !== null && c !== undefined)
-      if (collapsible !== true) {
-        return h('div', { className: 'zf-pet-group' }, [
-          h('h3', { key: 't', className: 'zf-pet-settings__group' }, title),
-          hint === undefined ? null : h('p', { key: 'h', className: 'zf-pet-settings__note' }, hint),
-          h('div', { key: 'b', className: 'zf-pet-group__body' }, body)
-        ])
-      }
-      return h('details', { className: 'zf-pet-group zf-pet-group--fold', open: open === true }, [
-        h('summary', { key: 's', className: 'zf-pet-group__sum' }, title),
-        hint === undefined ? null : h('p', { key: 'h', className: 'zf-pet-settings__note' }, hint),
-        h('div', { key: 'b', className: 'zf-pet-group__body' }, body)
+      return h('details', { className: 'zf-pet-card', open: open === true }, [
+        h('summary', { key: 's', className: 'zf-pet-card__sum' }, title),
+        h('div', { key: 'b', className: 'zf-pet-card__body' }, [
+          lead === undefined || lead === null
+            ? null
+            : h('p', { key: 'l', className: 'zf-pet-card__lead' }, lead),
+          ...body
+        ]),
+        note === undefined || note === null
+          ? null
+          : h('details', { key: 'n', className: 'zf-pet-card__noteBox' }, [
+              h('summary', { key: 'ns', className: 'zf-pet-card__noteSum' }, noteLabel),
+              h('p', { key: 'np', className: 'zf-pet-card__note' }, note)
+            ])
       ])
     }
 
     /**
-     * 诊断键值行（`高级与诊断` 折叠区专用）。
+     * 顶部页签。
+     *
+     * 为什么必须有它：DSH 的设置面板只提供**一级**导航（`settings.section`，
+     * 一个插件一个入口），我们这 42 个控件原先全塞在同一页里 —— 实测 2556px、
+     * 要滚三屏才能看完，而外壳自己的设置页都是一屏。
+     * 只渲染当前页签的卡片，这就是"太长"的直接解药。
+     */
+    function Tabs (props) {
+      const { items, value, onSelect } = props
+      return h('div', { className: 'zf-pet-tabs', role: 'tablist' }, items.map(it =>
+        h('button', {
+          key: it.id,
+          type: 'button',
+          role: 'tab',
+          id: `zf-pet-tab-${it.id}`,
+          className: 'zf-pet-tab',
+          'aria-selected': it.id === value ? 'true' : 'false',
+          'aria-controls': `zf-pet-panel-${it.id}`,
+          tabIndex: it.id === value ? 0 : -1,
+          onClick: () => onSelect(it.id),
+          // 键盘左右切换 + Home/End：页签是个导航控件，只能用鼠标点是不合格的。
+          onKeyDown: e => {
+            const i = items.findIndex(x => x.id === value)
+            let next = -1
+            if (e.key === 'ArrowRight') next = (i + 1) % items.length
+            else if (e.key === 'ArrowLeft') next = (i - 1 + items.length) % items.length
+            else if (e.key === 'Home') next = 0
+            else if (e.key === 'End') next = items.length - 1
+            if (next < 0) return
+            e.preventDefault()
+            onSelect(items[next].id)
+          }
+        }, it.label)))
+    }
+
+    /**
+     * 诊断键值行。
      *
      * `mono` 给路径/命令行用：等宽 + 允许断行，长路径不会把面板撑破。
      */
@@ -1411,6 +1510,31 @@ window.__ModuleLoader__.load({
        * 否则输入框里会留着已发出的文字。
        */
       const [draftNonce, setDraftNonce] = useState(0)
+
+      /**
+       * 当前页签（v4）。
+       *
+       * 优先序：`runtime.__state.tab`（**测试缝**，与 `__state.settings` 同款，
+       * 让测试能直接渲染指定那一页）→ localStorage（记住上次看的是哪一页）→ 首页。
+       *
+       * 为什么不放全局 runtime：切页签只影响设置页自己，桌宠与 overlay 都不关心；
+       * 放全局会让每次切换触发一次全局重渲染（与上面那几个草稿 ref 同理）。
+       */
+      const [tab, setTabState] = useState(() => {
+        const override = runtime.__state?.tab
+        if (typeof override === 'string' && override !== '') return override
+        try {
+          const saved = window.localStorage.getItem(TAB_KEY)
+          if (typeof saved === 'string' && saved !== '') return saved
+        } catch { /* 读不到就用默认页 */ }
+        return 'appearance'
+      })
+
+      /** 切页签：改状态 + 顺手记下来（记不住也不影响这一次切换）。 */
+      const setTab = id => {
+        setTabState(id)
+        try { window.localStorage.setItem(TAB_KEY, id) } catch { /* 忽略 */ }
+      }
 
       /**
        * 番茄钟动作：POST /pet/pomodoro。
@@ -1617,380 +1741,283 @@ window.__ModuleLoader__.load({
       const coverage = atlas?.report ?? null
       const missingCount = coverage?.missingCount ?? 0
 
-      return h('div', { className: 'zf-pet-settings' }, [
-        h('p', { key: 'sub', className: 'zf-pet-settings__sub' }, t('subtitle')),
+      /* ── 页签装配 ────────────────────────────────────────────────────────
+       *
+       * `card(tabId, props, children)` 只在装配期给卡片贴一个"属于哪一页"的
+       * 标签，`Card` 自己**不读**它。
+       *
+       * 为什么用 `{ tab, node }` 包一层，而不是给元素塞个 prop：
+       * React 的元素 props 在开发构建里是 **Object.freeze 过的**，
+       * 往 `node.props` 上写值会直接抛错 —— 桩里看不出来，真机上必炸。
+       * ──────────────────────────────────────────────────────────────── */
+      const card = (tabId, props, children) => ({ tab: tabId, node: h(Card, props, children) })
 
-        /* ── ① 桌宠：它是谁、长多大、在哪儿 ────────────────────────────────
-         *
-         * 分组顺序按**用户找东西的心智**排，不按开发历史排。原先的顺序是
-         * 常规→窗口→气泡→行为→番茄钟→语音→聊天→运行状态，其中"常规/窗口"
-         * 是同一件事（桌宠怎么显示）却分成两组，而"运行状态"（排障第一入口）
-         * 被压在最后。 */
-        h(Group, { key: 'gPet', title: t('groupPet') },
-          [
-            h(Toggle, {
-              key: 'enabled',
-              label: t('enabled'),
-              value: settings.enabled,
-              onChange: v => set({ enabled: v })
-            }),
-            h('label', { key: 'mode', className: 'zf-pet-row' }, [
-              h('span', { key: 'l', className: 'zf-pet-row__label' }, t('mode')),
-              h('select', {
-                key: 's',
-                className: 'zf-pet-row__input',
-                value: settings.mode,
-                onChange: e => set({ mode: e.target.value })
-              }, [
-                h('option', { key: 'native', value: 'native' }, t('modeNative')),
-                h('option', { key: 'overlay', value: 'overlay' }, t('modeOverlay'))
-              ]),
-              // 选中项的解释随选择变化 —— 用户不该靠猜"这两种有什么区别"。
-              h('span', { key: 'h', className: 'zf-pet-row__hint' },
-                settings.mode === 'overlay' ? t('modeOverlayHint') : t('modeNativeHint'))
-            ]),
-            h(Slider, {
-              key: 'scale',
-              label: t('scale'),
-              value: settings.scale,
-              min: 0.5,
-              max: 2,
-              step: 0.1,
-              suffix: '×',
-              onChange: v => set({ scale: v })
-            }),
-            h(Slider, {
-              key: 'opacity',
-              label: t('opacity'),
-              value: settings.opacity,
-              min: 0.3,
-              max: 1,
-              step: 0.05,
-              suffix: '',
-              onChange: v => set({ opacity: v })
-            }),
-            h(Toggle, {
-              key: 'topmost',
-              label: t('topmost'),
-              value: settings.topmost,
-              onChange: v => set({ topmost: v })
-            }),
-            h(Toggle, {
-              key: 'clickThrough',
-              label: t('clickThrough'),
-              hint: t('clickThroughHint'),
-              value: settings.clickThrough,
-              onChange: v => set({ clickThrough: v })
-            }),
-            h('div', { key: 'posBtns', className: 'zf-pet-settings__btns' }, [
-              h('button', {
-                key: 'reset',
-                className: 'zf-pet-settings__btn',
-                onClick: () => runtime.requestResetPosition?.()
-              }, t('reset'))
+      /**
+       * 页签与页序。
+       *
+       * 为什么是这六页：按**用户找东西的心智**切，不按代码结构切 ——
+       * 一页 = 一类问题（她长什么样 / 她怎么冒泡 / 她什么时候活跃 /
+       * 她怎么说话 / 她记住什么 / 出问题了看哪里）。
+       * 默认配置下每页展开的行数都 ≤ 10，一屏放得下。
+       */
+      const tabItems = [
+        { id: 'appearance', label: t('tabAppearance') },
+        { id: 'bubble', label: t('tabBubble') },
+        { id: 'behavior', label: t('tabBehavior') },
+        { id: 'voice', label: t('tabVoice') },
+        { id: 'chat', label: t('tabChat') },
+        { id: 'diag', label: t('tabDiag') }
+      ]
+
+      const panels = [
+        /* ── ① 外观：她是谁、长多大、在哪儿 ──────────────────────────────── */
+        card('appearance', {
+          key: 'gPet',
+          title: t('groupPet'),
+          open: true,
+          noteLabel: t('noteLabel'),
+          note: t('notePet')
+        }, [
+          h(Toggle, {
+            key: 'enabled',
+            label: t('enabled'),
+            value: settings.enabled,
+            onChange: v => set({ enabled: v })
+          }),
+          h(Row, {
+            key: 'mode',
+            label: t('mode'),
+            // 选中项的解释随选择变化 —— 用户不该靠猜"这两种有什么区别"。
+            desc: settings.mode === 'overlay' ? t('modeOverlayHint') : t('modeNativeHint'),
+            control: h('select', {
+              key: 's',
+              className: 'zf-pet-row__input',
+              value: settings.mode,
+              onChange: e => set({ mode: e.target.value })
+            }, [
+              h('option', { key: 'native', value: 'native' }, t('modeNative')),
+              h('option', { key: 'overlay', value: 'overlay' }, t('modeOverlay'))
             ])
-          ]),
-
-        /* ── ② 气泡与表情：她怎么"说话"（不说话的部分）────────────────── */
-        h(Group, { key: 'gBubble', title: t('groupBubble') },
-          [
-            h(Toggle, {
-              key: 'bubble',
-              label: t('bubble'),
-              value: settings.bubble,
-              onChange: v => set({ bubble: v })
-            }),
-            h(Toggle, {
-              key: 'bubbleImages',
-              label: t('bubbleImages'),
-              value: settings.bubbleImages,
-              onChange: v => set({ bubbleImages: v })
-            }),
-            // ⭐ 对话正文字号（用户点名"你对话里面的文字大小也需要可调呀"）。
-            //
-            // 与「大小」（桌宠本体）分开：用户把桌宠调小是为了不占地，
-            // 而正文是**要读的** —— 跟着一起缩就本末倒置（实测 scale=0.5 时被
-            // 下限夹到 6.5px，基本读不了）。独立成项后"桌宠小、正文清楚"。
-            h(Slider, {
-              key: 'chatFontScale',
-              label: t('chatFontScale'),
-              hint: t('chatFontScaleHint'),
-              value: settings.chatFontScale ?? 1,
-              min: 0.5,
-              max: 3,
-              step: 0.1,
-              suffix: '×',
-              onChange: v => set({ chatFontScale: v })
-            }),
-            h(Slider, {
-              key: 'bubbleMs',
-              label: t('bubbleMs'),
-              value: Math.round(settings.bubbleMs / 1000),
-              min: 1,
-              max: 20,
-              step: 1,
-              suffix: t('unitSec'),
-              onChange: v => set({ bubbleMs: v * 1000 })
-            }),
-            h(Slider, {
-              key: 'bubbleGapMs',
-              label: t('bubbleGapMs'),
-              value: Math.round(settings.bubbleGapMs / 1000),
-              min: 0,
-              max: 60,
-              step: 1,
-              suffix: t('unitSec'),
-              hint: t('bubbleGapHint'),
-              onChange: v => set({ bubbleGapMs: v * 1000 })
-            }),
-            h(Toggle, {
-              key: 'notifyComplete',
-              label: t('notifyComplete'),
-              hint: t('notifyCompleteHint'),
-              value: settings.notifyComplete,
-              onChange: v => set({ notifyComplete: v })
-            }),
-            h(Toggle, {
-              key: 'attentionReminder',
-              label: t('attentionReminder'),
-              hint: t('attentionReminderHint'),
-              value: settings.attentionReminder,
-              onChange: v => set({ attentionReminder: v })
-            }),
-            h('label', { key: 'doubleClick', className: 'zf-pet-row' }, [
-              h('span', { key: 'l', className: 'zf-pet-row__label' }, t('doubleClick')),
-              h('select', {
-                key: 's',
-                className: 'zf-pet-row__input',
-                value: settings.doubleClick,
-                onChange: e => set({ doubleClick: e.target.value })
-              }, [
-                h('option', { key: 'focus-dsh', value: 'focus-dsh' }, t('doubleClickFocus')),
-                h('option', { key: 'emote', value: 'emote' }, t('doubleClickEmote')),
-                h('option', { key: 'none', value: 'none' }, t('doubleClickNone'))
-              ])
+          }),
+          h(Slider, {
+            key: 'scale',
+            label: t('scale'),
+            value: settings.scale,
+            min: 0.5,
+            max: 2,
+            step: 0.1,
+            suffix: '×',
+            onChange: v => set({ scale: v })
+          }),
+          h(Slider, {
+            key: 'opacity',
+            label: t('opacity'),
+            value: settings.opacity,
+            min: 0.3,
+            max: 1,
+            step: 0.05,
+            suffix: '',
+            onChange: v => set({ opacity: v })
+          }),
+          h(Toggle, {
+            key: 'topmost',
+            label: t('topmost'),
+            value: settings.topmost,
+            onChange: v => set({ topmost: v })
+          }),
+          h(Toggle, {
+            key: 'clickThrough',
+            label: t('clickThrough'),
+            hint: t('clickThroughHint'),
+            value: settings.clickThrough,
+            onChange: v => set({ clickThrough: v })
+          }),
+          // 主题并进这张卡片：单独给它一张卡（一行 + 一个卡片头 ≈ 100px）
+          // 是纯浪费 —— 它本来就是"桌宠长什么样"的一部分。
+          h(Row, {
+            key: 'theme',
+            label: t('theme'),
+            control: h('select', {
+              key: 's',
+              className: 'zf-pet-row__input',
+              value: settings.theme,
+              onChange: e => set({ theme: e.target.value })
+            }, [
+              h('option', { key: 'auto', value: 'auto' }, t('themeAuto')),
+              h('option', { key: 'light', value: 'light' }, t('themeLight')),
+              h('option', { key: 'dark', value: 'dark' }, t('themeDark'))
             ])
-          ]),
+          }),
+          h('div', { key: 'posBtns', className: 'zf-pet-settings__btns' }, [
+            h('button', {
+              key: 'reset',
+              className: 'zf-pet-settings__btn',
+              onClick: () => runtime.requestResetPosition?.()
+            }, t('reset'))
+          ])
+        ]),
 
-        /* ── ③ 作息与外观：她什么时候活跃、长什么样 ────────────────────── */
-        h(Group, { key: 'gRoutine', title: t('groupRoutine') },
-          [
-            h('label', { key: 'activity', className: 'zf-pet-row' }, [
-              h('span', { key: 'l', className: 'zf-pet-row__label' }, t('activity')),
-              h('select', {
-                key: 's',
-                className: 'zf-pet-row__input',
-                value: settings.activity,
-                onChange: e => set({ activity: e.target.value })
-              }, [
-                h('option', { key: 'quiet', value: 'quiet' }, t('activityQuiet')),
-                h('option', { key: 'normal', value: 'normal' }, t('activityNormal')),
-                h('option', { key: 'playful', value: 'playful' }, t('activityPlayful'))
-              ])
-            ]),
-            h(Slider, {
-              key: 'happyMs',
-              label: t('happyMs'),
-              value: Math.round(settings.happyMs / 1000),
-              min: 1,
-              max: 30,
-              step: 1,
-              suffix: t('unitSec'),
-              onChange: v => set({ happyMs: v * 1000 })
-            }),
-            h(Slider, {
-              key: 'sleepMs',
-              label: t('sleepMs'),
-              value: Math.round(settings.sleepMs / 60000),
-              min: 1,
-              max: 60,
-              step: 1,
-              suffix: t('unitMin'),
-              onChange: v => set({ sleepMs: v * 60000 })
-            }),
-            h('label', { key: 'theme', className: 'zf-pet-row' }, [
-              h('span', { key: 'l', className: 'zf-pet-row__label' }, t('theme')),
-              h('select', {
-                key: 's',
-                className: 'zf-pet-row__input',
-                value: settings.theme,
-                onChange: e => set({ theme: e.target.value })
-              }, [
-                h('option', { key: 'auto', value: 'auto' }, t('themeAuto')),
-                h('option', { key: 'light', value: 'light' }, t('themeLight')),
-                h('option', { key: 'dark', value: 'dark' }, t('themeDark'))
-              ])
-            ]),
-            h(Toggle, {
-              key: 'hint',
-              label: t('hint'),
-              value: settings.hint,
-              onChange: v => set({ hint: v })
-            }),
-            h(Toggle, {
-              key: 'statusAlways',
-              label: t('statusAlways'),
-              hint: t('statusAlwaysHint'),
-              value: settings.statusAlways,
-              onChange: v => set({ statusAlways: v })
-            }),
-            // ⭐ 状态文字字号（用户点名"我希望能够调整字的大小，因为有的时候字太小了"）。
-            //
-            // 为什么必须独立于"大小"：那个滑块调的是**桌宠多大**，用户把它调到 0.4
-            // 是为了桌宠不占地方 —— 而状态文字是给人读的，跟着一起缩就本末倒置
-            //（实测 0.4× 时字号被下限夹到 8px，确实小得看不清）。
-            // 独立成项后可以"桌宠小、字清楚"。
-            h(Slider, {
-              key: 'statusFontScale',
-              label: t('statusFontScale'),
-              hint: t('statusFontScaleHint'),
-              value: settings.statusFontScale ?? 1,
-              min: 0.5,
-              max: 3,
-              step: 0.1,
-              suffix: '×',
-              onChange: v => set({ statusFontScale: v })
-            })
-          ]),
+        /* 状态文字单独成卡：它跟"她多大"是两件事 —— 用户把桌宠调小是为了
+         * 不占地，而状态文字是给人读的，跟着一起缩就本末倒置
+         *（实测 0.4× 时字号被下限夹到 8px，确实看不清）。 */
+        card('appearance', { key: 'gStatusText', title: t('groupStatusText'), open: true }, [
+          h(Toggle, {
+            key: 'hint',
+            label: t('hint'),
+            value: settings.hint,
+            onChange: v => set({ hint: v })
+          }),
+          h(Toggle, {
+            key: 'statusAlways',
+            label: t('statusAlways'),
+            hint: t('statusAlwaysHint'),
+            value: settings.statusAlways,
+            onChange: v => set({ statusAlways: v })
+          }),
+          h(Slider, {
+            key: 'statusFontScale',
+            label: t('statusFontScale'),
+            hint: t('statusFontScaleHint'),
+            value: settings.statusFontScale ?? 1,
+            min: 0.5,
+            max: 3,
+            step: 0.1,
+            suffix: '×',
+            onChange: v => set({ statusFontScale: v })
+          })
+        ]),
 
-        /* ── ④ 语音：固定台词包 + 念出回答，**合并成一组** ────────────────
-         *
-         * 原先"语音"组只有 1 个开关 + 台词清单，而真正的语音设置
-         *（合成地址/字数上限/常驻/空闲释放）埋在"聊天"组里 —— 因为历史上
-         * 先有固定语音包、后有动态语音，功能长在了不同组里。
-         * 对用户来说这就是"语音"，两件事该在同一处。 */
-        h(Group, { key: 'gVoice', title: t('groupVoice') },
-          [
-            h(Toggle, {
-              key: 'voice',
-              label: t('voice'),
-              hint: t('voiceHint'),
-              value: settings.voice,
-              onChange: v => set({ voice: v })
-            }),
-            h('p', { key: 'voiceInfo', className: 'zf-pet-settings__note' },
-              `${t('voiceCount')}：${voiceInfo === null
-                ? t('voiceCountHint')
-                : `${voiceInfo.count ?? 0} 条 / ${Math.round((voiceInfo.totalMs ?? 0) / 1000)}s`}`),
-            // 台词一览：用户有权知道"她都会说什么" —— 不看清单就只能靠撞。
-            (voiceInfo?.lines?.length ?? 0) === 0
-              ? null
-              : h('details', { key: 'voiceLines', className: 'zf-pet-details' }, [
-                  h('summary', { key: 's' }, `${t('voiceLines')}（${voiceInfo.lines.length}）`),
-                  h('ul', { key: 'ul', className: 'zf-pet-list' },
-                    voiceInfo.lines.map(l => h('li', { key: l.name },
-                      `${l.event ?? '—'} · ${l.text ?? l.name}` +
-                      (l.source === 'synth' ? `（${t('voiceSynth')}）` : ''))))
-                ]),
+        /* ── ② 气泡：她怎么"说话"（不说话的那一半）────────────────────── */
+        card('bubble', {
+          key: 'gBubble',
+          title: t('groupBubble'),
+          open: true,
+          noteLabel: t('noteLabel'),
+          note: t('noteBubble')
+        }, [
+          h(Toggle, {
+            key: 'bubble',
+            label: t('bubble'),
+            value: settings.bubble,
+            onChange: v => set({ bubble: v })
+          }),
+          h(Toggle, {
+            key: 'bubbleImages',
+            label: t('bubbleImages'),
+            value: settings.bubbleImages,
+            onChange: v => set({ bubbleImages: v })
+          }),
+          h(Slider, {
+            key: 'bubbleMs',
+            label: t('bubbleMs'),
+            value: Math.round(settings.bubbleMs / 1000),
+            min: 1,
+            max: 20,
+            step: 1,
+            suffix: t('unitSec'),
+            onChange: v => set({ bubbleMs: v * 1000 })
+          }),
+          h(Slider, {
+            key: 'bubbleGapMs',
+            label: t('bubbleGapMs'),
+            value: Math.round(settings.bubbleGapMs / 1000),
+            min: 0,
+            max: 60,
+            step: 1,
+            suffix: t('unitSec'),
+            hint: t('bubbleGapHint'),
+            onChange: v => set({ bubbleGapMs: v * 1000 })
+          }),
+          // ⭐ 对话正文字号（用户点名"你对话里面的文字大小也需要可调呀"）。
+          // 与「大小」（桌宠本体）分开：桌宠小、正文照样清楚。
+          h(Slider, {
+            key: 'chatFontScale',
+            label: t('chatFontScale'),
+            hint: t('chatFontScaleHint'),
+            value: settings.chatFontScale ?? 1,
+            min: 0.5,
+            max: 3,
+            step: 0.1,
+            suffix: '×',
+            onChange: v => set({ chatFontScale: v })
+          })
+        ]),
 
-            // ── 动态语音（念出 AI 的回答，v3）────────────────────────────
-            h('h4', { key: 'speakTitle', className: 'zf-pet-settings__h' }, t('speakTitle')),
-            h('p', { key: 'speakHint', className: 'zf-pet-settings__note' }, t('speakHint')),
-            h(Toggle, {
-              key: 'speakReplies',
-              label: t('speakReplies'),
-              hint: t('speakRepliesHint'),
-              value: settings.speakReplies,
-              onChange: v => set({ speakReplies: v })
-            }),
-            h('label', { key: 'ttsUrl', className: 'zf-pet-row' }, [
-              h('span', { key: 'l', className: 'zf-pet-row__label' }, t('ttsUrl')),
-              h('input', {
-                key: 'i',
-                className: 'zf-pet-settings__input',
-                type: 'text',
-                defaultValue: settings.ttsUrl ?? '',
-                spellCheck: false,
-                placeholder: 'http://127.0.0.1:8765',
-                onBlur: e => set({ ttsUrl: e.target.value.trim() })
-              })
-            ]),
-            h('label', { key: 'speechMax', className: 'zf-pet-row' }, [
-              h('span', { key: 'l', className: 'zf-pet-row__label' }, t('speechMaxChars')),
-              h('input', {
-                key: 'i',
-                className: 'zf-pet-settings__input',
-                type: 'number',
-                min: 10,
-                max: 300,
-                defaultValue: String(settings.speechMaxChars ?? 60),
-                onBlur: e => set({ speechMaxChars: Number(e.target.value) })
-              }),
-              h('span', { key: 'h', className: 'zf-pet-row__hint' }, t('speechMaxCharsHint'))
-            ]),
-            h('div', { key: 'speakBtns', className: 'zf-pet-settings__btns' }, [
-              h('button', {
-                key: 'probe',
-                className: 'zf-pet-settings__btn',
-                disabled: speakBusy,
-                onClick: () => probeTts()
-              }, speakBusy ? t('speakProbing') : t('speakProbe')),
-              h('button', {
-                key: 'svcUp',
-                className: 'zf-pet-settings__btn',
-                disabled: speakBusy,
-                onClick: () => controlService('start')
-              }, t('svcStart')),
-              h('button', {
-                key: 'svcDown',
-                className: 'zf-pet-settings__btn',
-                disabled: speakBusy,
-                onClick: () => controlService('stop')
-              }, t('svcStop'))
-            ]),
-            // 常驻开关：合成要加载模型（CUDA 下更慢），加载完长期占显存。
-            // 所以"常驻 vs 用完释放"必须让用户选 —— 代价实测写在 hint 里。
-            h(Toggle, {
-              key: 'ttsResident',
-              label: t('ttsResident'),
-              hint: t('ttsResidentHint'),
-              value: settings.ttsResident,
-              onChange: v => set({ ttsResident: v })
-            }),
-            // 非常驻时：多久释放 + **怎么**释放（杀进程全释放 / 只卸模型）
-            settings.ttsResident
-              ? null
-              : h('label', { key: 'idleAction', className: 'zf-pet-row' }, [
-                  h('span', { key: 'l', className: 'zf-pet-row__label' }, t('ttsIdleAction')),
-                  h('select', {
-                    key: 's',
-                    className: 'zf-pet-settings__input',
-                    value: settings.ttsIdleAction ?? '',
-                    onChange: e => set({ ttsIdleAction: e.target.value })
-                  }, [
-                    h('option', { key: 'd', value: '' }, t('ttsIdleActionDefault')),
-                    h('option', { key: 'u', value: 'unload' }, t('ttsIdleActionUnload')),
-                    h('option', { key: 'k', value: 'stop' }, t('ttsIdleActionStop'))
-                  ]),
-                  h('span', { key: 'h', className: 'zf-pet-row__hint' }, t('ttsIdleActionHint'))
-                ]),
-            settings.ttsResident
-              ? null
-              : h('label', { key: 'idleStop', className: 'zf-pet-row' }, [
-                  h('span', { key: 'l', className: 'zf-pet-row__label' }, t('ttsIdleStopSec')),
-                  h('input', {
-                    key: 'i',
-                    className: 'zf-pet-settings__input',
-                    type: 'number',
-                    min: 0,
-                    max: 86400,
-                    defaultValue: String(settings.ttsIdleStopSec ?? 300),
-                    onBlur: e => set({ ttsIdleStopSec: Number(e.target.value) })
-                  })
-                ]),
-            speakNote === null
-              ? null
-              : h('p', { key: 'speakNote', className: 'zf-pet-settings__note' }, speakNote)
-          ]),
+        card('bubble', { key: 'gReminder', title: t('groupReminder'), open: true }, [
+          h(Toggle, {
+            key: 'notifyComplete',
+            label: t('notifyComplete'),
+            hint: t('notifyCompleteHint'),
+            value: settings.notifyComplete,
+            onChange: v => set({ notifyComplete: v })
+          }),
+          h(Toggle, {
+            key: 'attentionReminder',
+            label: t('attentionReminder'),
+            hint: t('attentionReminderHint'),
+            value: settings.attentionReminder,
+            onChange: v => set({ attentionReminder: v })
+          }),
+          h(Row, {
+            key: 'doubleClick',
+            label: t('doubleClick'),
+            control: h('select', {
+              key: 's',
+              className: 'zf-pet-row__input',
+              value: settings.doubleClick,
+              onChange: e => set({ doubleClick: e.target.value })
+            }, [
+              h('option', { key: 'focus-dsh', value: 'focus-dsh' }, t('doubleClickFocus')),
+              h('option', { key: 'emote', value: 'emote' }, t('doubleClickEmote')),
+              h('option', { key: 'none', value: 'none' }, t('doubleClickNone'))
+            ])
+          })
+        ]),
 
-        /* ── ⑤ 番茄钟：默认关 → 只留一个开关（8 个控件收进折叠）───────── */
-        h(Group, {
+        /* ── ③ 行为：她什么时候活跃 ────────────────────────────────────── */
+        card('behavior', { key: 'gActivity', title: t('groupActivity'), open: true }, [
+          h(Row, {
+            key: 'activity',
+            label: t('activity'),
+            control: h('select', {
+              key: 's',
+              className: 'zf-pet-row__input',
+              value: settings.activity,
+              onChange: e => set({ activity: e.target.value })
+            }, [
+              h('option', { key: 'quiet', value: 'quiet' }, t('activityQuiet')),
+              h('option', { key: 'normal', value: 'normal' }, t('activityNormal')),
+              h('option', { key: 'playful', value: 'playful' }, t('activityPlayful'))
+            ])
+          }),
+          h(Slider, {
+            key: 'happyMs',
+            label: t('happyMs'),
+            value: Math.round(settings.happyMs / 1000),
+            min: 1,
+            max: 30,
+            step: 1,
+            suffix: t('unitSec'),
+            onChange: v => set({ happyMs: v * 1000 })
+          }),
+          h(Slider, {
+            key: 'sleepMs',
+            label: t('sleepMs'),
+            value: Math.round(settings.sleepMs / 60000),
+            min: 1,
+            max: 60,
+            step: 1,
+            suffix: t('unitMin'),
+            onChange: v => set({ sleepMs: v * 60000 })
+          })
+        ]),
+
+        /* 番茄钟：默认关 → 整张卡片收起（8 个控件不该占着主面板）。 */
+        card('behavior', {
           key: 'gPomodoro',
           title: t('groupPomodoro'),
-          collapsible: true,
           open: settings.pomodoro === true
-        },
-        [
+        }, [
           h(Toggle, {
             key: 'pomodoro',
             label: t('pomodoro'),
@@ -1998,7 +2025,7 @@ window.__ModuleLoader__.load({
             value: settings.pomodoro,
             onChange: v => set({ pomodoro: v })
           }),
-          // 时长只在启用后显示：默认关着的时候摆一堆滑块是噪音。
+          // 时长只在启用后渲染：默认关着的时候摆一堆滑杆是噪音。
           settings.pomodoro
             ? h('div', { key: 'pomoControls' }, [
                 h(Slider, {
@@ -2088,154 +2115,304 @@ window.__ModuleLoader__.load({
             : null
         ]),
 
-        /* ── ⑥ 聊天与记忆：人设、共享背景、长期记忆、发消息 ─────────────── */
-        h(Group, { key: 'gChat', title: t('groupChat') },
-          [
-            h(Toggle, {
-              key: 'chatEnabled',
-              label: t('chatEnabled'),
-              hint: t('chatEnabledHint'),
-              value: settings.chatEnabled,
-              onChange: v => set({ chatEnabled: v })
-            }),
-            h('label', { key: 'persona', className: 'zf-pet-row' }, [
-              h('span', { key: 'l', className: 'zf-pet-row__label' }, t('persona')),
-              h('select', {
-                key: 's',
-                className: 'zf-pet-row__input',
-                value: settings.persona,
-                onChange: e => selectPersona(e.target.value)
-              }, (personas?.items ?? [{ name: 'default', title: '默认（内置）' }]).map(p =>
-                h('option', { key: p.name, value: p.name }, p.title ?? p.name)))
-            ]),
-            h('p', { key: 'personaHint', className: 'zf-pet-settings__note' }, t('personaHint')),
-            h('div', { key: 'personaBtns', className: 'zf-pet-settings__btns' }, [
-              h('button', {
-                key: 'reload',
-                className: 'zf-pet-settings__btn',
-                onClick: () => reloadPersonas()
-              }, t('personaReload'))
-            ]),
+        /* ── ④ 语音：固定台词包 + 念出回答 ───────────────────────────────
+         *
+         * 原先"语音"组只有 1 个开关 + 台词清单，而真正的语音设置
+         *（合成地址/字数/常驻/空闲释放）埋在"聊天"组里 —— 因为历史上先有
+         * 固定语音包、后有动态语音，功能长在了不同组里。对用户来说这就是
+         * "语音"，两件事该在同一页。 */
+        card('voice', {
+          key: 'gVoiceLines',
+          title: t('groupVoiceLines'),
+          // 台词清单是**只读清单**（现在 130+ 条），默认收起 —— 它不是要调的东西。
+          open: false
+        }, [
+          h(Toggle, {
+            key: 'voice',
+            label: t('voice'),
+            hint: t('voiceHint'),
+            value: settings.voice,
+            onChange: v => set({ voice: v })
+          }),
+          h('p', { key: 'voiceInfo', className: 'zf-pet-settings__note' },
+            `${t('voiceCount')}：${voiceInfo === null
+              ? t('voiceCountHint')
+              : `${voiceInfo.count ?? 0} 条 / ${Math.round((voiceInfo.totalMs ?? 0) / 1000)}s`}`),
+          // 台词一览：用户有权知道"她都会说什么" —— 不看清单就只能靠撞。
+          (voiceInfo?.lines?.length ?? 0) === 0
+            ? null
+            : h('details', { key: 'voiceLines', className: 'zf-pet-details' }, [
+                h('summary', { key: 's' }, `${t('voiceLines')}（${voiceInfo.lines.length}）`),
+                h('ul', { key: 'ul', className: 'zf-pet-list' },
+                  voiceInfo.lines.map(l => h('li', { key: l.name },
+                    `${l.event ?? '—'} · ${l.text ?? l.name}` +
+                    (l.source === 'synth' ? `（${t('voiceSynth')}）` : ''))))
+              ])
+        ]),
 
-            // ── 共享背景（人设的"底座"）────────────────────────────────────
-            //
-            // 用户点名："基于通用的世界观提示词加上不同的语言风格"、"可以在设置中共享"。
-            // 所以把"底座"显式列出来 —— 用户才知道世界观写在哪儿、改哪里。
-            h('h4', { key: 'sharedTitle', className: 'zf-pet-settings__h' }, t('sharedTitle')),
-            h('p', { key: 'sharedHint', className: 'zf-pet-settings__note' }, t('sharedHint')),
+        card('voice', {
+          key: 'gSpeak',
+          title: t('speakTitle'),
+          open: true,
+          noteLabel: t('noteLabel'),
+          note: t('noteSpeak')
+        }, [
+          h(Toggle, {
+            key: 'speakReplies',
+            label: t('speakReplies'),
+            hint: t('speakRepliesHint'),
+            value: settings.speakReplies,
+            onChange: v => set({ speakReplies: v })
+          }),
+          h(Row, {
+            key: 'ttsUrl',
+            label: t('ttsUrl'),
+            control: h('input', {
+              key: 'i',
+              className: 'zf-pet-row__input',
+              type: 'text',
+              defaultValue: settings.ttsUrl ?? '',
+              spellCheck: false,
+              placeholder: 'http://127.0.0.1:8765',
+              onBlur: e => set({ ttsUrl: e.target.value.trim() })
+            })
+          }),
+          h(Row, {
+            key: 'speechMax',
+            label: t('speechMaxChars'),
+            control: h('input', {
+              key: 'i',
+              className: 'zf-pet-row__input',
+              type: 'number',
+              min: 10,
+              max: 300,
+              defaultValue: String(settings.speechMaxChars ?? 60),
+              onBlur: e => set({ speechMaxChars: Number(e.target.value) })
+            })
+          }),
+          // 常驻开关：合成要加载模型（CUDA 下更慢），加载完长期占显存。
+          // 所以"常驻 vs 用完释放"必须让用户选 —— 代价写在卡片的「说明」里。
+          h(Toggle, {
+            key: 'ttsResident',
+            label: t('ttsResident'),
+            value: settings.ttsResident,
+            onChange: v => set({ ttsResident: v })
+          }),
+          // 非常驻时：多久释放 + **怎么**释放（杀进程全释放 / 只卸模型）
+          settings.ttsResident
+            ? null
+            : h(Row, {
+                key: 'idleAction',
+                label: t('ttsIdleAction'),
+                desc: t('ttsIdleActionHint'),
+                control: h('select', {
+                  key: 's',
+                  className: 'zf-pet-row__input',
+                  value: settings.ttsIdleAction ?? '',
+                  onChange: e => set({ ttsIdleAction: e.target.value })
+                }, [
+                  h('option', { key: 'd', value: '' }, t('ttsIdleActionDefault')),
+                  h('option', { key: 'u', value: 'unload' }, t('ttsIdleActionUnload')),
+                  h('option', { key: 'k', value: 'stop' }, t('ttsIdleActionStop'))
+                ])
+              }),
+          settings.ttsResident
+            ? null
+            : h(Row, {
+                key: 'idleStop',
+                label: t('ttsIdleStopSec'),
+                control: h('input', {
+                  key: 'i',
+                  className: 'zf-pet-row__input',
+                  type: 'number',
+                  min: 0,
+                  max: 86400,
+                  defaultValue: String(settings.ttsIdleStopSec ?? 300),
+                  onBlur: e => set({ ttsIdleStopSec: Number(e.target.value) })
+                })
+              }),
+          h('div', { key: 'speakBtns', className: 'zf-pet-settings__btns' }, [
+            h('button', {
+              key: 'probe',
+              className: 'zf-pet-settings__btn',
+              disabled: speakBusy,
+              onClick: () => probeTts()
+            }, speakBusy ? t('speakProbing') : t('speakProbe')),
+            h('button', {
+              key: 'svcUp',
+              className: 'zf-pet-settings__btn',
+              disabled: speakBusy,
+              onClick: () => controlService('start')
+            }, t('svcStart')),
+            h('button', {
+              key: 'svcDown',
+              className: 'zf-pet-settings__btn',
+              disabled: speakBusy,
+              onClick: () => controlService('stop')
+            }, t('svcStop'))
+          ]),
+          speakNote === null
+            ? null
+            : h('p', { key: 'speakNote', className: 'zf-pet-settings__note' }, speakNote)
+        ]),
+
+        /* ── ⑤ 对话：人设、共享背景、长期记忆、发消息 ───────────────────── */
+        card('chat', { key: 'gChat', title: t('groupChat'), open: true }, [
+          h(Toggle, {
+            key: 'chatEnabled',
+            label: t('chatEnabled'),
+            hint: t('chatEnabledHint'),
+            value: settings.chatEnabled,
+            onChange: v => set({ chatEnabled: v })
+          }),
+          h(Row, {
+            key: 'persona',
+            label: t('persona'),
+            desc: t('personaHint'),
+            control: h('select', {
+              key: 's',
+              className: 'zf-pet-row__input',
+              value: settings.persona,
+              onChange: e => selectPersona(e.target.value)
+            }, (personas?.items ?? [{ name: 'default', title: '默认（内置）' }]).map(p =>
+              h('option', { key: p.name, value: p.name }, p.title ?? p.name)))
+          }),
+          h('div', { key: 'personaBtns', className: 'zf-pet-settings__btns' }, [
+            h('button', {
+              key: 'reload',
+              className: 'zf-pet-settings__btn',
+              onClick: () => reloadPersonas()
+            }, t('personaReload'))
+          ]),
+          // 共享背景（人设的"底座"）：用户点名"基于通用的世界观提示词加上不同的
+          // 语言风格"、"可以在设置中共享"。所以把"底座"显式列出来 ——
+          // 用户才知道世界观写在哪儿、改哪里。
+          h('details', { key: 'shared', className: 'zf-pet-details' }, [
+            h('summary', { key: 's' }, t('sharedTitle')),
+            h('p', { key: 'hint', className: 'zf-pet-settings__note' }, t('sharedHint')),
             (personas?.shared?.items?.length ?? 0) === 0
-              ? h('p', { key: 'sharedEmpty', className: 'zf-pet-settings__note' }, t('sharedEmpty'))
-              : h('ul', { key: 'sharedList', className: 'zf-pet-list' },
+              ? h('p', { key: 'empty', className: 'zf-pet-settings__note' }, t('sharedEmpty'))
+              : h('ul', { key: 'list', className: 'zf-pet-list' },
                   (personas?.shared?.items ?? []).map(it => h('li', { key: it.name },
                     `${it.name}.md · ${it.bytes} ${t('memoryBytes')}` +
                     (it.preview ? ` — ${it.preview}` : '')))),
             (personas?.shared?.items?.length ?? 0) === 0
               ? null
-              : h('p', { key: 'sharedUsed', className: 'zf-pet-settings__note' },
-                  `${t('sharedUsed')} ${personas?.shared?.used ?? 0} ${t('sharedFiles')}`),
+              : h('p', { key: 'used', className: 'zf-pet-settings__note' },
+                  `${t('sharedUsed')} ${personas?.shared?.used ?? 0} ${t('sharedFiles')}`)
+          ])
+        ]),
 
-            // ── 长期记忆（跨会话共享）──────────────────────────────────────
-            h('h4', { key: 'memTitle', className: 'zf-pet-settings__h' }, t('memoryTitle')),
-            h('p', { key: 'memHint', className: 'zf-pet-settings__note' }, t('memoryHint')),
-            h(Toggle, {
-              key: 'memoryAuto',
-              label: t('memoryAuto'),
-              hint: t('memoryAutoHint'),
-              value: settings.memoryAuto,
-              onChange: v => set({ memoryAuto: v })
-            }),
-            h('textarea', {
-              key: `memBox-${memoryNonce}`,
-              className: 'zf-pet-memobox',
-              placeholder: t('memoryEmpty'),
-              spellCheck: false,
-              // **非受控**（defaultValue + onInput）：受控 textarea 每敲一个字都会
-              // 重渲染整个设置页（人设/语音/聊天都在同一棵树里），打字会卡。
-              //
-              // ⚠️ `key` 里必须带 `memoryNonce`。原先 `key` 是写死的 `'memBox'`，
-              // 而注释却声称"key 带上字节数" —— 注释与代码不一致，代价是**数据丢失**：
-              //
-              //   ① 首帧渲染时 `memory` 还是 null → `defaultValue` 是空串；
-              //   ② 挂载后 `loadMemory()` 回来，`memory` 有内容了，但 **key 没变**，
-              //      React 不会重建元素 → 屏幕上仍是**空白框**（实测确认）；
-              //   ③ 用户在空白框里敲一个字再点「保存记忆」→ 发出的是
-              //      `{"text":"那一个字"}`，**把真实记忆整个覆盖掉**。
-              //
-              // 现在 `memoryNonce` 只在两个安全时机自增：首次加载完成、保存成功。
-              // 这两处重建都是**对的**（前者让内容可见，后者清掉已保存的草稿），
-              // 且都不会打断用户正在进行的输入 —— 加载只发生一次（挂载时），
-              // 保存则是用户自己按的。
-              defaultValue: memory?.text ?? '',
-              onInput: e => { memoryDraftRef.current = e.target.value }
-            }),
-            h('div', { key: 'memBtns', className: 'zf-pet-settings__btns' }, [
-              h('button', {
-                key: 'save',
-                className: 'zf-pet-settings__btn',
-                disabled: memoryBusy,
-                onClick: () => saveMemory()
-              }, memoryBusy ? t('memorySaving') : t('memorySave'))
-            ]),
-            memoryNote === null
-              ? null
-              : h('p', { key: 'memNote', className: 'zf-pet-settings__note' }, memoryNote),
-
-            // ── 发消息 ─────────────────────────────────────────────────────
-            h('label', { key: 'chatWs', className: 'zf-pet-row' }, [
-              h('span', { key: 'l', className: 'zf-pet-row__label' }, t('chatWorkspace')),
-              h('input', {
-                key: 'i',
-                className: 'zf-pet-row__input',
-                type: 'text',
-                value: settings.chatWorkspace,
-                placeholder: t('chatWorkspaceHint'),
-                onChange: e => set({ chatWorkspace: e.target.value })
-              })
-            ]),
-            h('div', { key: 'chatRow', className: 'zf-pet-chatrow' }, [
-              h('input', {
-                // ⚠️ `key` 带 `draftNonce`：发完消息后 ref 被清空，但输入框是
-                // **非受控**的，不重建元素的话已发出的文字会留在框里。
-                // 见 `chatDraftRef` 上面那段注释（这里原来还有个给 const
-                // 赋值的 bug，导致一个字都发不出去）。
-                key: `msg-${draftNonce}`,
-                className: 'zf-pet-chatrow__input',
-                type: 'text',
-                defaultValue: '',
-                placeholder: t('chatPlaceholder'),
-                disabled: chatBusy,
-                onInput: e => { chatDraftRef.current = e.target.value },
-                onKeyDown: e => {
-                  if (e.key === 'Enter' && !chatBusy) sendChatMessage()
-                }
-              }),
-              h('button', {
-                key: 'send',
-                className: 'zf-pet-settings__btn',
-                disabled: chatBusy,
-                onClick: () => sendChatMessage()
-              }, chatBusy ? t('chatSending') : t('chatSend'))
-            ]),
-            chatNote === null
-              ? null
-              : h('p', { key: 'chatNote', className: 'zf-pet-settings__note' }, chatNote),
-            h('p', { key: 'chatReplyNote', className: 'zf-pet-settings__note' }, t('chatReplyNote'))
+        card('chat', {
+          key: 'gMemory',
+          title: t('memoryTitle'),
+          open: true,
+          lead: t('memoryHint')
+        }, [
+          h(Toggle, {
+            key: 'memoryAuto',
+            label: t('memoryAuto'),
+            hint: t('memoryAutoHint'),
+            value: settings.memoryAuto,
+            onChange: v => set({ memoryAuto: v })
+          }),
+          h('textarea', {
+            key: `memBox-${memoryNonce}`,
+            className: 'zf-pet-memobox',
+            placeholder: t('memoryEmpty'),
+            spellCheck: false,
+            // **非受控**（defaultValue + onInput）：受控 textarea 每敲一个字都会
+            // 重渲染整个设置页（人设/语音/聊天都在同一棵树里），打字会卡。
+            //
+            // ⚠️ `key` 里必须带 `memoryNonce`。原先 `key` 是写死的 `'memBox'`，
+            // 而注释却声称"key 带上字节数" —— 注释与代码不一致，代价是**数据丢失**：
+            //
+            //   ① 首帧渲染时 `memory` 还是 null → `defaultValue` 是空串；
+            //   ② 挂载后 `loadMemory()` 回来，`memory` 有内容了，但 **key 没变**，
+            //      React 不会重建元素 → 屏幕上仍是**空白框**（实测确认）；
+            //   ③ 用户在空白框里敲一个字再点「保存记忆」→ 发出的是
+            //      `{"text":"那一个字"}`，**把真实记忆整个覆盖掉**。
+            //
+            // 现在 `memoryNonce` 只在两个安全时机自增：首次加载完成、保存成功。
+            //
+            // ⚠️ `memoryDraftRef.current || …` 这一层是**页签**带来的新要求：
+            // 切到别的页签会把这张卡片整个卸载，切回来时 textarea 会按
+            // `defaultValue` 重建 —— 若只看 `memory?.text`，用户打了一半的草稿
+            // 就被"已保存的那一份"覆盖了（ref 挂在 Section 上，活得比卡片久）。
+            defaultValue: memoryDraftRef.current || memory?.text || '',
+            onInput: e => { memoryDraftRef.current = e.target.value }
+          }),
+          h('div', { key: 'memBtns', className: 'zf-pet-settings__btns' }, [
+            h('button', {
+              key: 'save',
+              className: 'zf-pet-settings__btn',
+              disabled: memoryBusy,
+              onClick: () => saveMemory()
+            }, memoryBusy ? t('memorySaving') : t('memorySave'))
           ]),
+          memoryNote === null
+            ? null
+            : h('p', { key: 'memNote', className: 'zf-pet-settings__note' }, memoryNote)
+        ]),
 
-        /* ── ⑦ 高级与诊断：**默认折叠** ───────────────────────────────────
+        // 发消息：桌宠本体上也有入口（悬停出现的 ✎），设置页这里是"它不在手边"
+        // 时的备用通道 —— 所以默认收起，不占位置。
+        card('chat', { key: 'gSend', title: t('groupSendMessage'), open: false }, [
+          h(Row, {
+            key: 'chatWs',
+            label: t('chatWorkspace'),
+            control: h('input', {
+              key: 'i',
+              className: 'zf-pet-row__input',
+              type: 'text',
+              value: settings.chatWorkspace,
+              placeholder: t('chatWorkspaceHint'),
+              onChange: e => set({ chatWorkspace: e.target.value })
+            })
+          }),
+          h('div', { key: 'chatRow', className: 'zf-pet-chatrow' }, [
+            h('input', {
+              // ⚠️ `key` 带 `draftNonce`：发完消息后 ref 被清空，但输入框是
+              // **非受控**的，不重建元素的话已发出的文字会留在框里。
+              // 见 `chatDraftRef` 上面那段注释（这里原来还有个给 const
+              // 赋值的 bug，导致一个字都发不出去）。
+              key: `msg-${draftNonce}`,
+              className: 'zf-pet-row__input zf-pet-chatrow__input',
+              type: 'text',
+              // 同上：切页签会重建这个输入框，草稿存在 ref 里，别丢。
+              defaultValue: chatDraftRef.current,
+              placeholder: t('chatPlaceholder'),
+              disabled: chatBusy,
+              onInput: e => { chatDraftRef.current = e.target.value },
+              onKeyDown: e => {
+                if (e.key === 'Enter' && !chatBusy) sendChatMessage()
+              }
+            }),
+            h('button', {
+              key: 'send',
+              className: 'zf-pet-settings__btn',
+              disabled: chatBusy,
+              onClick: () => sendChatMessage()
+            }, chatBusy ? t('chatSending') : t('chatSend'))
+          ]),
+          chatNote === null
+            ? null
+            : h('p', { key: 'chatNote', className: 'zf-pet-settings__note' }, chatNote),
+          h('p', { key: 'chatReplyNote', className: 'zf-pet-settings__note' }, t('chatReplyNote'))
+        ]),
+
+        /* ── ⑥ 诊断：**整页默认全部收起** ────────────────────────────────
          *
-         * 这里放的全是"出问题时才需要看"的东西：服务状态、**启动命令（机器路径）**、
-         * 素材覆盖、会话 id、目录路径。原先它们以 24 条同权重的说明段落散在正文里，
-         * 其中一整行是绝对路径 —— 把真正要调的东西淹了。
+         * 这里放的全是"出问题时才需要看"的东西：服务状态、**启动命令（机器
+         * 路径）**、素材覆盖、会话 id、目录路径。原先它们以 24 条同权重的说明
+         * 段落散在正文里，其中一整行是绝对路径 —— 把真正要调的东西淹了。
          * 折叠而不是删除：排障时它们是关键信息，藏起来但别丢掉。 */
-        h(Group, {
-          key: 'gAdvanced',
-          title: t('groupAdvanced'),
-          hint: t('advancedHint'),
-          collapsible: true,
-          open: false
-        },
-        [
+        card('diag', {
+          key: 'gRuntime',
+          title: t('groupStatus'),
+          open: false,
+          lead: t('advancedHint')
+        }, [
           // 桌宠是否真的浮在桌面上（第一眼要能判断）
           h('div', { key: 'status', className: 'zf-pet-status' }, [
             h('span', {
@@ -2250,9 +2427,10 @@ window.__ModuleLoader__.load({
             : h('p', { key: 'fallback', className: 'zf-pet-settings__note' }, t('fallbackNote')),
           snapshot?.nativeError === null || snapshot?.nativeError === undefined
             ? null
-            : h(Diag, { key: 'reason', k: t('reason'), v: snapshot.nativeError }),
+            : h(Diag, { key: 'reason', k: t('reason'), v: snapshot.nativeError })
+        ]),
 
-          // 素材覆盖
+        card('diag', { key: 'gAssets', title: t('diagAssets'), open: false }, [
           coverage === null
             ? null
             : h(Diag, {
@@ -2261,8 +2439,10 @@ window.__ModuleLoader__.load({
                 v: `${coverage.coveredStates?.length ?? 0}/${(coverage.coveredStates?.length ?? 0) + (coverage.uncoveredStates?.length ?? 0)} ` +
                   `${t('diagStates')} · ${coverage.bubbleCount ?? 0} ${t('diagBubbles')}` +
                   (missingCount > 0 ? ` · ${missingCount} ${t('diagMissing')}` : '')
-              }),
+              })
+        ]),
 
+        card('diag', { key: 'gTtsService', title: t('svcState'), open: false }, [
           // 合成服务（谁在管、pid、后端、最近一次错误）
           speakStatus?.service === undefined || speakStatus.service === null
             ? h(Diag, { key: 'svc', k: t('svcState'), v: t('svcUnknown') })
@@ -2280,8 +2460,8 @@ window.__ModuleLoader__.load({
                   (speakStatus.service.lastError ? ` · ⚠ ${speakStatus.service.lastError}` : '')
               }),
           // 启动命令解析结果：用户能看到桌宠**到底会执行什么**
-          //（自动探测猜错时，一眼就能看出该改哪个配置）。机器路径归插件 loader 配置管，
-          // 面板只**只读展示**，不提供编辑控件。
+          //（自动探测猜错时，一眼就能看出该改哪个配置）。机器路径归插件 loader
+          // 配置管，面板只**只读展示**，不提供编辑控件。
           speakStatus?.launch === undefined || speakStatus.launch === null
             ? null
             : h(Diag, {
@@ -2297,9 +2477,10 @@ window.__ModuleLoader__.load({
                 k: t('speakStatus'),
                 v: `${speakStatus.enabled ? t('on') : t('off')} · ${speakStatus.url ?? '—'} · ` +
                   `${t('speakCached')} ${speakStatus.cached ?? 0}`
-              }),
+              })
+        ]),
 
-          // 人设 / 共享背景 / 记忆 / 会话 —— 路径与 id
+        card('diag', { key: 'gPaths', title: t('groupPaths'), open: false }, [
           h(Diag, { key: 'personaDir', k: t('personaDir'), mono: true, v: personas?.dir ?? '—' }),
           h(Diag, { key: 'sharedDir', k: t('sharedDir'), mono: true, v: personas?.shared?.dir ?? '—' }),
           h(Diag, {
@@ -2330,6 +2511,21 @@ window.__ModuleLoader__.load({
                   : t('chatWsNone')
               })
         ])
+      ]
+
+      return h('div', { className: 'zf-pet-settings' }, [
+        h('h2', { key: 'title', className: 'zf-pet-settings__title' }, t('title')),
+        h('p', { key: 'intro', className: 'zf-pet-settings__intro' }, t('subtitle')),
+        h(Tabs, { key: 'tabs', items: tabItems, value: tab, onSelect: setTab }),
+        /* 只渲染当前页签的卡片 —— 这是"太长、要滚三屏"的直接解药。
+         * 面板上也标好 ARIA 关系，读屏能跟着走。 */
+        h('div', {
+          key: 'panel',
+          className: 'zf-pet-panel',
+          id: `zf-pet-panel-${tab}`,
+          role: 'tabpanel',
+          'aria-labelledby': `zf-pet-tab-${tab}`
+        }, panels.filter(p => p.tab === tab).map(p => p.node))
       ])
     }
 
@@ -2541,124 +2737,156 @@ window.__ModuleLoader__.load({
 
 /* ── 设置页 ───────────────────────────────────────────────────────────
  *
- * 这一块是**为"看得懂"服务的**，不是装饰。改之前的状态（用 headless Edge
- * 实测真实渲染树得到，见 '.scratch/probe-settings-fullpage.mjs'）：
+ * 这一块是**为"看得懂"服务的**，不是装饰。第三轮改造前实测（headless Edge
+ * 拉真实渲染树，见 '.scratch/probe-settings-fullpage.mjs'）：
  *
- *   · 总高 **2696px**（面板宽 520）—— 要滚很久才到底；
- *   · 42 个控件 + 10 个按钮 + 8 条说明**同一列平铺**，没有任何层级；
- *   · 每个滑杆行高 **68px**（数值被挤到第二行），而正常行只要 34px；
- *   · 分组标题用 'text-transform:uppercase' + 'letter-spacing:.12em' ——
- *     那是给西文小标题用的，套在中文上只会把字**拉散**；
- *   · 控件右边缘不齐（下拉/输入框各自为政），眼睛没法沿一条线扫下来。
+ *   · 总高 **2556px**（面板宽 520，7 组 / 40 行 / 42 控件）—— 要滚三屏；
+ *   · 每一行的说明文字**位置不固定**：Toggle 的挂 在控件下方通栏、下拉框的
+ *     挤在标签与控件之间、独立的 note 又满行一段 —— 同一屏里跳三个位置；
+ *   · 字号只有 11 / 12 / 13 三档，互相差 1px —— 整页一片灰，没有重点；
+ *   · 输入框高 30px 圆角 6px、按钮圆角 8px、聊天框圆角 8px 配 12px 字 ——
+ *     同一个面板里混了**四套控件外观**；
+ *   · 42 个控件同权重平铺，没有分组容器，也没有任何导航。
  *
- * 下面逐条对上。判定标准只有一条：**用户能不能一眼找到"我该动哪个"**。
+ * 现在对齐 **DSH 外壳自己的设置页**（把 dsh-client-ui-settings-general 与
+ * -models 的样式从 app.asar 里挖出来逐条核对）：
+ *
+ *   · 行 = 左（标题 14px + 说明 12px 二级灰）+ 右（定宽 208px 控件列），
+ *     上下内边距 14px，行间 .5px 发丝线（border-l2，外壳同款）；
+ *   · 一张卡片 = 一个概念，卡片头可折叠（外壳用 settings-card-fill /
+ *     -stroke + radius-xl 20px，这里照抄）；
+ *   · 字号阶梯只有 **12 / 14 / 16** 三档，层级靠档位差，不靠堆字重；
+ *   · 顶部六个页签，每页只渲染自己那几张卡片 —— 一屏放得下，不用滚。
+ *
+ * 判定标准只有一条：**用户能不能一眼找到"我该动哪个"**。
  * ──────────────────────────────────────────────────────────────────── */
-.zf-pet-settings{ display:flex;flex-direction:column;gap:4px; }
-/* 页面副标题（唯一一处）：说明这个插件是什么。 */
-.zf-pet-settings__sub{ margin:0 0 4px;color:var(--dsw-alias-label-tertiary);font-size:12px; }
+.zf-pet-settings{
+  /* 卡片与控件的尺度**只在这里定义一次**，别处一律引用 ——
+   * 同一个面板里混四套控件外观，正是"很乱"最直接的那一半。 */
+  --zf-card-fill:var(--dsw-alias-settings-card-fill, var(--dsw-alias-bg-layer-2, rgba(0,0,0,.02)));
+  --zf-card-stroke:var(--dsw-alias-settings-card-stroke, var(--dsw-alias-border-l2, rgba(0,0,0,.1)));
+  --zf-hairline:var(--dsw-alias-border-l2, rgba(0,0,0,.1));
+  --zf-ctl-h:32px;
+  --zf-ctl-radius:var(--dsw-radius-sm, 8px);
+  display:flex;flex-direction:column;gap:10px;
+  /* 外壳 models 那页自己封了 720px。这里给 760px：够放"最长的标题 + 一行
+   * 说明"，又不至于让标签和控件被拉到两端看不见彼此。 */
+  max-width:760px;
+}
+.zf-pet-settings__title{ margin:0;font-size:16px;line-height:24px;font-weight:500;color:var(--dsw-alias-label-primary); }
+.zf-pet-settings__intro{ margin:0;font-size:14px;line-height:22px;color:var(--dsw-alias-label-tertiary); }
 
-/* 组内小标题（「念出回答（动态语音）」「共享背景」「长期记忆」）。
- *
- * ⚠️ 它原先与页面副标题**共用** '.zf-pet-settings__sub'（12px 三级色）——
- * 于是"这一段换主题了"和"这一页是干嘛的"长得一模一样，层级完全消失。
- * 一个分组里塞 4 件事（聊天组实测 616px 高）时，用户看不出哪里是分界。
- * 现在它有自己的类：更黑、更粗、带一点上间距，读起来就是"新的一段开始了"。 */
-.zf-pet-settings__h{
-  margin:14px 0 2px;font-size:12px;font-weight:600;
+/* 页签。
+ * 外壳的设置导航只有**一级**（settings.section，一个插件一个入口），
+ * 我们没有二级 —— 40 多个控件全塞一页就是实测的 2556px 三屏。
+ * 这一排就是补上的二级导航；每页只渲染自己那几张卡片。 */
+.zf-pet-tabs{ display:flex;flex-wrap:wrap;gap:4px;margin:2px 0; }
+.zf-pet-tab{
+  height:34px;padding:0 12px;border:none;cursor:pointer;
+  border-radius:var(--dsw-radius-md, 12px);
+  background:transparent;color:var(--dsw-alias-label-secondary);
+  font:inherit;font-size:14px;line-height:34px;
+}
+.zf-pet-tab:hover{ background:var(--dsw-alias-interactive-bg-hover, rgba(0,0,0,.04)); }
+.zf-pet-tab[aria-selected="true"]{
+  background:var(--dsw-alias-interactive-bg-active, rgba(0,0,0,.06));
+  color:var(--dsw-alias-label-primary);font-weight:500;
+}
+.zf-pet-tab:focus-visible{ outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px; }
+.zf-pet-panel{ display:flex;flex-direction:column;gap:12px; }
+
+/* ── 卡片 ─────────────────────────────────────────────────────────────
+ * 一个概念一张卡；卡片头可折叠（用户点名"设置里的一些内容应该可以折叠
+ * 或展开"）。外观照抄外壳的 settings-models：fill + .5px stroke + radius-xl。
+ * 折叠用原生 <details>，不用自己管开关状态。 */
+.zf-pet-card{
+  border:.5px solid var(--zf-card-stroke);
+  background:var(--zf-card-fill);
+  border-radius:var(--dsw-radius-xl, 20px);
+  padding:0 14px;
+}
+.zf-pet-card__sum{
+  display:flex;align-items:center;gap:8px;height:40px;cursor:pointer;
+  list-style:none;font-size:14px;line-height:22px;font-weight:500;
+  color:var(--dsw-alias-label-primary);
+}
+.zf-pet-card__sum::-webkit-details-marker{ display:none; }
+/* 自绘折叠箭头：不依赖原生 marker（各浏览器样式不一）。 */
+.zf-pet-card__sum::before{ content:'▾';color:var(--dsw-alias-label-tertiary);font-size:12px; }
+.zf-pet-card:not([open]) > .zf-pet-card__sum::before{ content:'▸'; }
+.zf-pet-card__body{ display:flex;flex-direction:column; }
+/* 卡片级的说明行：一句话讲清这张卡在干什么（外壳的 .description 同款）。 */
+.zf-pet-card__lead{
+  margin:0 0 2px;font-size:12px;line-height:18px;
   color:var(--dsw-alias-label-secondary);
 }
-
-/* 分组标题。
- * ⚠️ 去掉 'text-transform:uppercase' 与 '.12em' 字距：中文没有大小写，
- * uppercase 是空操作，而 0.12em 字距在中文里只是把「作息与外观」拉成
- * 「作 息 与 外 观」—— 更难读。改成靠**字重 + 分隔线**建立层级。 */
-.zf-pet-settings__group{
-  margin:16px 0 2px;font-size:13px;font-weight:600;
-  letter-spacing:0;text-transform:none;
-  color:var(--dsw-alias-label-primary);
-  padding-bottom:5px;
-  border-bottom:1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.1));
+/* 卡片的「说明」折叠块：放**权衡**（代价、边界、为什么默认这样）。
+ * 这些原先以 2~3 行的段落直接糊在正文里，把真正要调的控件淹了。 */
+.zf-pet-card__noteBox{ margin:0 0 8px; }
+.zf-pet-card__noteSum{
+  cursor:pointer;list-style:none;padding:4px 0 0;
+  font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);
 }
-
-/* 分组：把"设置控件"和"状态/诊断"分开。
-   分组给控件一个容器，折叠组给次要内容一个默认收起。 */
-.zf-pet-group{ display:flex;flex-direction:column;gap:0; }
-.zf-pet-group__body{ display:flex;flex-direction:column;gap:0; }
-.zf-pet-group--fold{ gap:0; }
-.zf-pet-group__sum{
-  cursor:pointer;font-size:13px;letter-spacing:0;text-transform:none;
-  color:var(--dsw-alias-label-primary);font-weight:600;
-  margin:14px 0 2px;list-style:none;
-  padding-bottom:5px;
-  border-bottom:1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.1));
+.zf-pet-card__noteSum::-webkit-details-marker{ display:none; }
+.zf-pet-card__noteSum::before{ content:'▸ '; }
+.zf-pet-card__noteBox[open] > .zf-pet-card__noteSum::before{ content:'▾ '; }
+.zf-pet-card__note{
+  margin:4px 0 0;font-size:12px;line-height:18px;
+  color:var(--dsw-alias-label-tertiary);
 }
-.zf-pet-group__sum::-webkit-details-marker{ display:none; }
-/* 自绘折叠箭头：不依赖原生 marker（各浏览器样式不一） */
-.zf-pet-group__sum::before{ content:'▸ '; }
-.zf-pet-group--fold[open] > .zf-pet-group__sum::before{ content:'▾ '; }
-
-/* 诊断键值行：路径/命令行用等宽并允许断行，长路径不会把面板撑破 */
-.zf-pet-diag{
-  display:grid;grid-template-columns:minmax(84px,auto) 1fr;gap:8px;
-  font-size:11px;color:var(--dsw-alias-label-tertiary);align-items:baseline;
-}
-.zf-pet-diag__k{ color:var(--dsw-alias-label-secondary);white-space:nowrap; }
-.zf-pet-diag__v{ word-break:break-all; }
-.zf-pet-diag__v--mono{ font-family:Consolas,"Cascadia Mono",monospace; }
 
 /* ── 一行设置 ─────────────────────────────────────────────────────────
- *
- * 两列：标签自适应、**控件列定宽 208px**。定宽是"对齐"的前提 ——
- * 原先用 'auto'，于是每个控件的右边缘取决于它自己的宽度，
- * 一眼扫下去是锯齿状的。
- *
- * 行之间加发丝分隔线（'.5px'，与外壳 settings-form 同款），
- * 让"这是一行"在视觉上成立 —— 原先 7 个控件堆在一起没有任何边界。
- * ──────────────────────────────────────────────────────────────────── */
+ * 左列：标题 14px + 说明 12px（**说明必须在左列**，见 Row 的注释）；
+ * 右列：定宽 208px 的控件列（定宽是"右边缘对齐"的前提 —— 原先用 auto，
+ * 每个控件右边缘取决于自身宽度，一眼扫下去是锯齿状的）。
+ * 上下 12px：外壳自己用 16px，这里取 12px —— 卡片本身还有一层内边距，
+ * 叠起来已经比原先的 6px 松了一倍；而实测（headless Edge，见
+ * '.scratch/probe-settings-tabs.mjs'）最高的「外观」页要压进一屏 846px，
+ * 14px 会超出。 */
 .zf-pet-row{
-  display:grid;grid-template-columns:minmax(110px,1fr) 208px;
-  align-items:center;gap:2px 12px;
-  padding:6px 0;
-  font-size:13px;color:var(--dsw-alias-label-primary);
+  display:flex;align-items:center;justify-content:space-between;gap:24px;
+  padding:12px 0;
+  border-bottom:.5px solid var(--zf-hairline);
+  font-size:14px;color:var(--dsw-alias-label-primary);
 }
-/* 行分隔线。
- * ⚠️ 用 border-l2（外壳 settings-form 用的同一档），**不是 l1** ——
- * l1 是 rgba(0,0,0,.04)，在浅色主题下几乎看不见，等于没画。
- * 我第一版就是抄了"发丝线"的形、用错了档位，肉眼验收时才发现。 */
-.zf-pet-row + .zf-pet-row{ border-top:.5px solid var(--dsw-alias-border-l2, rgba(0,0,0,.1)); }
-.zf-pet-row__label{ min-width:0; }
+/* 卡片里最后一行不画底线：卡片自己的圆角边就是边界，多一条线反而脏。 */
+.zf-pet-card__body > .zf-pet-row:last-child{ border-bottom:none; }
+.zf-pet-row__main{ display:flex;flex-direction:column;gap:4px;min-width:0;flex:1 1 auto; }
+.zf-pet-row__label{ font-size:14px;line-height:20px; }
+.zf-pet-row__desc{ font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary); }
+.zf-pet-row__control{
+  display:flex;align-items:center;justify-content:flex-end;gap:10px;
+  flex:0 0 208px;min-width:0;
+}
 
-/* 控件容器：滑杆 + 数值**同一行**（见 'Slider' 的注释：原先数值被挤到第二行）。 */
-.zf-pet-row__control{ display:flex;align-items:center;gap:10px;min-width:0;justify-self:stretch; }
-
-.zf-pet-row__input{ accent-color:var(--dsw-alias-brand-primary);min-width:0; }
-input[type=range].zf-pet-row__input{ flex:1 1 auto; }
+/* 滑杆与复选框没有文字，但仍让它们继承字号 —— 否则浏览器给表单控件的
+ * 默认字号（13.3333px）会冒出来，量字号阶梯时凭空多出一档，看着像 bug。 */
+.zf-pet-row__input{ accent-color:var(--dsw-alias-brand-primary);min-width:0;font:inherit; }
+input[type=range].zf-pet-row__input{ flex:1 1 auto;width:100%; }
 /* 复选框：贴控件列右边缘，与下拉/输入框的右边缘对齐。 */
 input[type=checkbox].zf-pet-row__input{
-  flex:0 0 auto;width:16px;height:16px;margin:0;justify-self:end;
+  flex:0 0 auto;width:18px;height:18px;margin:0 0 0 auto;
 }
 
-/* 下拉 / 文本框 / 数字框统一成一种外观。
+/* 下拉 / 文本框 / 数字框 —— **一套规则**。
  *
- * ⚠️ 这里必须同时收 'zf-pet-settings__input' —— 语音组那 4 个控件用的是
- * 那个类名，而它**从来没有被定义过**（只有 4 处引用，CSS 里 0 处规则）。
- * 于是「合成服务地址」等输入框是**浏览器裸样式**：高度、边框、圆角、
- * 背景全都和旁边的下拉框不一致 —— 这正是"看起来很乱"的一大来源。
- * 现在两个类名共用同一组规则，不再有两套外观。 */
+ * ⚠️ 这里必须把两种输入框都收进来。历史上「合成服务地址」等 4 个控件用的是
+ * zf-pet-settings__input，而那个类名**从来没有被定义过**（4 处引用、0 处
+ * 规则）→ 它们是浏览器裸样式，高度/边框/圆角/背景与旁边的下拉框全不一致，
+ * 这正是"看起来很乱"的一大来源。现在只剩一个类名，不可能再分叉。
+ * 聊天输入框也带 zf-pet-row__input（额外那个类只负责 flex 行为）。 */
 select.zf-pet-row__input,
 input[type=text].zf-pet-row__input,
-input[type=number].zf-pet-row__input,
-.zf-pet-settings__input{
-  width:100%;height:30px;box-sizing:border-box;
-  padding:0 8px;border-radius:6px;
-  border:1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.14));
+input[type=number].zf-pet-row__input{
+  width:100%;height:var(--zf-ctl-h);box-sizing:border-box;
+  padding:0 8px;border-radius:var(--zf-ctl-radius);
+  border:1px solid var(--zf-hairline);
   background:var(--dsw-alias-bg-layer-1, #fff);
-  color:inherit;font:inherit;font-size:13px;
+  color:inherit;font:inherit;font-size:14px;
 }
 select.zf-pet-row__input:focus-visible,
 input[type=text].zf-pet-row__input:focus-visible,
-input[type=number].zf-pet-row__input:focus-visible,
-.zf-pet-settings__input:focus-visible{
+input[type=number].zf-pet-row__input:focus-visible{
   outline:none;border-color:var(--dsw-alias-brand-primary);
 }
 
@@ -2668,50 +2896,62 @@ input[type=number].zf-pet-row__input:focus-visible,
   font-family:Consolas,"Cascadia Mono",monospace;font-size:12px;
   color:var(--dsw-alias-brand-primary);
 }
-/* 说明文字：整行通栏，跟在控件下面。 */
-.zf-pet-row__hint{
-  grid-column:1/-1;font-size:11px;line-height:1.5;
-  color:var(--dsw-alias-label-tertiary);
-}
-.zf-pet-status{ display:flex;align-items:center;gap:7px;font-size:12px; }
+
+.zf-pet-status{ display:flex;align-items:center;gap:7px;font-size:12px;line-height:18px; }
 .zf-pet-status__dot{ width:8px;height:8px;border-radius:50%;flex:0 0 auto;background:#c9a227; }
 .zf-pet-status__dot[data-zf-native="on"]{ background:var(--dsw-alias-state-success-primary,#2ea043); }
-.zf-pet-settings__note{ margin:2px 0 0;font-size:11px;line-height:1.5;color:var(--dsw-alias-label-tertiary); }
+
+/* 诊断键值行：路径/命令行用等宽并允许断行，长路径不会把面板撑破。 */
+.zf-pet-diag{
+  display:grid;grid-template-columns:minmax(84px,auto) 1fr;gap:8px;
+  padding:8px 0;font-size:12px;line-height:18px;
+  color:var(--dsw-alias-label-primary);align-items:baseline;
+}
+.zf-pet-diag__k{ color:var(--dsw-alias-label-secondary);white-space:nowrap; }
+.zf-pet-diag__v{ word-break:break-all; }
+.zf-pet-diag__v--mono{ font-family:Consolas,"Cascadia Mono",monospace; }
+
+/* 反馈与状态（探测结果 / 保存结果 / 当前番茄钟状态 / 语音包条数）。
+ * 与"说明"分开：这些是**刚才那一下怎么样了**，不是文档。 */
+.zf-pet-settings__note{
+  margin:4px 0 8px;font-size:12px;line-height:18px;
+  color:var(--dsw-alias-label-secondary);
+}
+
+/* 按钮也走同一套尺度（高 32px / 圆角 8px / 14px 字）。 */
 .zf-pet-settings__btn{
-  align-self:flex-start;margin-top:6px;padding:6px 12px;border-radius:8px;
-  border:1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.14));
-  background:var(--dsw-alias-bg-layer-2, transparent);
-  color:var(--dsw-alias-label-primary);font-size:12px;cursor:pointer;
+  align-self:flex-start;margin:0;height:var(--zf-ctl-h);padding:0 12px;
+  border-radius:var(--zf-ctl-radius);
+  border:1px solid var(--zf-hairline);
+  background:var(--dsw-alias-bg-layer-1, transparent);
+  color:var(--dsw-alias-label-primary);font:inherit;font-size:14px;cursor:pointer;
 }
 .zf-pet-settings__btn:hover{ border-color:var(--dsw-alias-brand-primary); }
 .zf-pet-settings__btn:disabled{ opacity:.5;cursor:default; }
-/* 按钮组（v3：番茄钟三个按钮 / 人设重扫）—— 横排，间距一致 */
-.zf-pet-settings__btns{ display:flex;gap:6px;flex-wrap:wrap;margin-top:6px; }
-.zf-pet-settings__btns .zf-pet-settings__btn{ margin-top:0; }
-/* 聊天输入行（v3）：输入框占满剩余宽度，按钮不缩 */
-.zf-pet-chatrow{ display:flex;gap:6px;align-items:center;margin-top:8px; }
-.zf-pet-chatrow__input{
-  flex:1 1 auto;min-width:0;padding:6px 8px;border-radius:8px;
-  border:1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.14));
-  background:var(--dsw-alias-bg-layer-2, transparent);
-  color:var(--dsw-alias-label-primary);font-size:12px;
-}
+.zf-pet-settings__btns{ display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:8px 0; }
+
+/* 聊天输入行：输入框占满剩余宽度，按钮不缩。 */
+.zf-pet-chatrow{ display:flex;gap:6px;align-items:center;padding:8px 0; }
+.zf-pet-chatrow__input{ flex:1 1 auto;min-width:0; }
 .zf-pet-chatrow__input:disabled{ opacity:.6; }
-.zf-pet-chatrow .zf-pet-settings__btn{ margin-top:0;flex:0 0 auto; }
-/* 记忆编辑框（v3）：等宽 + 可纵向拖，长记忆也能看清 */
+.zf-pet-chatrow .zf-pet-settings__btn{ flex:0 0 auto; }
+
+/* 记忆编辑框：等宽 + 可纵向拖。高度压到 96px —— 它是个编辑区，
+ * 不是正文，默认给太大就会把「保存」按钮顶到屏幕外。 */
 .zf-pet-memobox{
-  width:100%;box-sizing:border-box;min-height:120px;max-height:280px;margin-top:6px;
-  padding:8px;border-radius:8px;resize:vertical;
-  border:1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.14));
-  background:var(--dsw-alias-bg-layer-2, transparent);
+  width:100%;box-sizing:border-box;min-height:96px;max-height:280px;margin:8px 0 0;
+  padding:8px;border-radius:var(--zf-ctl-radius);resize:vertical;
+  border:1px solid var(--zf-hairline);
+  background:var(--dsw-alias-bg-layer-1, transparent);
   color:var(--dsw-alias-label-primary);font-size:12px;line-height:1.5;
   font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
 }
-/* 共享背景文件列表 */
-.zf-pet-details{ margin:6px 0 0; font-size:11px; }
-.zf-pet-details summary{ cursor:pointer; color:var(--dsw-alias-label-secondary); }
+
+/* 卡片内的折叠清单（台词一览 / 共享背景）。 */
+.zf-pet-details{ margin:0;font-size:12px;line-height:18px; }
+.zf-pet-details summary{ cursor:pointer;color:var(--dsw-alias-label-secondary);padding:8px 0; }
 .zf-pet-list{
-  margin:4px 0 0;padding-left:18px;font-size:11px;
+  margin:0 0 8px;padding-left:18px;font-size:12px;line-height:18px;
   color:var(--dsw-alias-label-secondary);
 }
 .zf-pet-list li{ margin:2px 0;word-break:break-all; }
@@ -3101,6 +3341,7 @@ input[type=number].zf-pet-row__input:focus-visible,
       readPos,
       writePos,
       POS_KEY,
+      TAB_KEY,
       STATE_TEXT,
       DICT,
       OVERLAY_ID,
@@ -3108,7 +3349,12 @@ input[type=number].zf-pet-row__input:focus-visible,
       get runtime () { return pluginRuntime },
       Pet,
       Section,
-      styleText
+      styleText,
+      /* v4 设置页的构件：测试要能单独展开它们核对结构（桩 React 不会自动
+       * 展开函数组件，只按 `type.name` 找得到节点）。 */
+      Row,
+      Card,
+      Tabs
     }
 
     exports.apply = apply

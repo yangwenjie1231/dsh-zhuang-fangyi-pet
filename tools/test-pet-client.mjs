@@ -665,10 +665,16 @@ ok('⭐⭐ POST 出去的 body 里必须带全字段（合并语义下缺键 = �
   })
   runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 1 } } }
   runtime.__state.snapshot = { petState: 'idle', label: '', bubble: null, nativeAvailable: true }
+  // 页签化之后这些开关分在两页里（语音 / 对话）。必须走**真实的 onSelect** 切页签：
+  // 桩的 `useState` 会把首次 `init()` 的结果缓存在 `hooks.states[i]` 里，
+  // 只改 `runtime.__state.tab` 再渲染等于**没切**（第二次读到的还是旧值）。
   l.react.resetHooks()
-  const tree = Section({ close () {} })
-
-  const toggles = collectByType(tree, 'Toggle').map(n => n.props)
+  const first = Section({ close () {} })
+  const toggles = [
+    ...collectByType(first, 'Toggle').map(n => n.props),
+    ...collectByType(switchTab(l, first, 'voice'), 'Toggle').map(n => n.props),
+    ...collectByType(switchTab(l, first, 'chat'), 'Toggle').map(n => n.props)
+  ]
   const find = label => toggles.find(x => x.label === label)
 
   // 每个受影响的控件都真的点一下，检查 POST body。
@@ -742,6 +748,7 @@ ok('⭐⭐ 聊天输入框的 onInput 不抛错，且草稿真的存下来（否
   runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 1 } } }
   runtime.__state.snapshot = { petState: 'idle', label: '', bubble: null, nativeAvailable: true }
   runtime.__state.settings = normalizePet({})
+  runtime.__state.tab = 'chat'   // 聊天输入框在「对话」页签里
   l.react.resetHooks()
   const tree = Section({ close () {} })
 
@@ -783,6 +790,7 @@ okAsync('⭐⭐⭐ 记忆加载完成后编辑框会重建（否则是空白框�
   const { Section, runtime } = l.exports.__test
   runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 1 } } }
   runtime.__state.snapshot = { petState: 'idle', label: '', bubble: null, nativeAvailable: true }
+  runtime.__state.tab = 'chat'   // 记忆编辑框在「对话」页签里
   l.react.resetHooks()
 
   // ① 首帧：memory 还是 null
@@ -859,10 +867,13 @@ ok('⭐ 滑杆的数值与滑杆必须在同一个容器里（否则数值被挤
   const sliders = collectByType(tree, 'Slider')
   assert.ok(sliders.length > 0, '应有滑杆')
 
-  // 直接验 Slider 的产物结构：它应当渲染出 __control 容器，
-  // 且 range 与 __value 都是它的**后代**（而不是行的直接子节点）。
+  // 直接验 Slider 的产物结构：v4 起所有行都走 `Row` 这一条骨架，
+  // Slider 把 range 与数值作为**同一个控件列**的两个兄弟交给它。
+  const { Row } = loaded.exports.__test
   const probe = sliders[0].type({ ...sliders[0].props, hint: 'x' })
-  const kids = probe.props.children
+  assert.equal(probe.type.name, 'Row',
+    'Slider 应当通过 Row 渲染 —— 行骨架只允许有一处，否则又会出现两套行布局')
+  const kids = Row(probe.props).props.children
   const ctrl = kids.find(c => c && c.props?.className === 'zf-pet-row__control')
   assert.ok(ctrl, '滑杆应把 range 与数值包进 .zf-pet-row__control（否则数值会换行）')
   const flat = []
@@ -881,22 +892,54 @@ ok('⭐ 滑杆的数值与滑杆必须在同一个容器里（否则数值被挤
   assert.equal(directValue.length, 0, '数值不该再作为行的直接子节点（会与容器里的重复）')
 })
 
-ok('⭐ 设置页可滚动内容不该比必要的高（行高回归兜底）', () => {
-  // 这条不量真实像素（无头测试没有布局引擎），只锁住"行的垂直内边距"
-  // 这个唯一由我们控制的高度来源 —— 实测把它从 9px 调到 6px，
-  // 整页从 2870px 降到 2608px（40 行 × 6px）。
+ok('⭐ 行的呼吸感：至少 12px（外壳用 16px，原来 6px 挤成一团）', () => {
+  // ⚠️ 这条断言的**方向反过来了**。原先是"行内边距必须 ≤ 8px"，因为那一版的
+  // 问题是"整页太长"（实测 2556px、要滚三屏）。但把行压到 6px 只是让长页面
+  // 更密 —— 用户的原话是"太密：行挤在一起，没有呼吸感"，而 DSH 外壳自己的
+  // 设置行用的是 `padding:16px 0`。
+  // 真正的解法是**页签**（每页只渲染一页的卡片，实测首页 998px 一屏放得下），
+  // 把"长度"交给信息架构解决，行距就该回到正常值。
+  // 所以现在锁的是：内边距**不能小于 12px**（别再挤回去）。
   const css = loaded.exports.__test.styleText()
   const row = css.match(/\.zf-pet-row\{[^}]*\}/)
   assert.ok(row, '应有 .zf-pet-row 规则')
   const m = row[0].match(/padding:\s*(\d+)px\s+0/)
   assert.ok(m, `.zf-pet-row 应有垂直内边距，实际：${row[0]}`)
-  assert.ok(Number(m[1]) <= 8,
-    `行的垂直内边距应 ≤ 8px（过高会让设置页长到 2800px+），实际 ${m[1]}px`)
+  assert.ok(Number(m[1]) >= 12,
+    `行的垂直内边距应 ≥ 12px（外壳自己用 16px；6px 实测"挤成一团"），实际 ${m[1]}px`)
+  // 行必须是"左标签 + 右控件"的两列弹性布局，且控件列**定宽** ——
+  // 定宽是右边缘对齐的前提（原先 auto 轨道下每个控件右边缘各不相同，是锯齿）。
+  assert.ok(/display:flex/.test(row[0]) && /justify-content:space-between/.test(row[0]),
+    `行应是左右两列的弹性布局，实际：${row[0]}`)
+  const ctrl = css.match(/\.zf-pet-row__control\{[^}]*\}/)
+  assert.ok(ctrl, '应有 .zf-pet-row__control 规则')
+  assert.ok(/flex:0 0 208px/.test(ctrl[0]),
+    `控件列必须定宽（对齐的前提），实际：${ctrl[0]}`)
+})
+
+ok('⭐⭐ 设置页只有一套字号阶梯（12 / 14 / 16），不许再挤成 11/12/13', () => {
+  // 用户原话："字太小太淡：一片灰，看不出重点"。
+  // 病根是整页只用了 11/12/13 三档、互相只差 1px —— 层级被压平了。
+  // 外壳自己的设置页是 16 / 14 / 12 三档（差 2px），才读得出层级。
+  const css = loaded.exports.__test.styleText()
+  const SETTINGS_SEL = /\.(zf-pet-settings|zf-pet-row|zf-pet-card|zf-pet-tab|zf-pet-tabs|zf-pet-panel|zf-pet-diag|zf-pet-list|zf-pet-details|zf-pet-memobox|zf-pet-chatrow|zf-pet-status)/
+  // 只看设置页那一批规则 —— overlay / 气泡那边还有 11px、12px，不归这条管。
+  const rules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)]
+    .map(m => ({ sel: m[1].trim(), body: m[2] }))
+    .filter(r => SETTINGS_SEL.test(r.sel))
+  assert.ok(rules.length > 20, `设置页规则应有 20+ 条，实际 ${rules.length}`)
+  const sizes = new Set()
+  for (const r of rules) {
+    for (const m of r.body.matchAll(/font-size:\s*([0-9.]+)px/g)) sizes.add(Number(m[1]))
+  }
+  const bad = [...sizes].filter(n => ![12, 14, 16].includes(n)).sort((a, b) => a - b)
+  assert.deepEqual(bad, [],
+    `设置页出现了阶梯外的字号（只允许 12/14/16）—— 11px 太小，13px 与 12/14 只差 1px 读不出层级：${bad.join(', ')}`)
 })
 
 ok('⭐ 分组标题不能用西文那套 uppercase/字距（套在中文上只会更难读）', () => {
   const css = loaded.exports.__test.styleText()
-  for (const sel of ['.zf-pet-settings__group', '.zf-pet-group__sum']) {
+  for (const sel of ['.zf-pet-card__sum', '.zf-pet-settings__title']) {
     const rule = css.match(new RegExp(`\\${sel}\\{[^}]*\\}`))
     assert.ok(rule, `应有 ${sel} 规则`)
     assert.ok(!/text-transform:\s*uppercase/.test(rule[0]),
@@ -932,6 +975,7 @@ okAsync('⭐⭐ 保存记忆后编辑框会重建（显示"已保存的那一份
   const { Section, runtime } = l.exports.__test
   runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 1 } } }
   runtime.__state.snapshot = { petState: 'idle', label: '', bubble: null, nativeAvailable: true }
+  runtime.__state.tab = 'chat'
   l.react.resetHooks()
   Section({ close () {} })
 
@@ -999,6 +1043,7 @@ okAsync('⭐⭐ 保存记忆后，诊断区的"记忆文件/容量"不许退化�
   const { Section, runtime } = l.exports.__test
   runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 1 } } }
   runtime.__state.snapshot = { petState: 'idle', label: '', bubble: null, nativeAvailable: true }
+  runtime.__state.tab = 'chat'
   l.react.resetHooks()
   Section({ close () {} })
   for (const fn of l.react.hooks.effects) { if (typeof fn === 'function') { try { fn() } catch { /* 忽略 */ } } }
@@ -1020,9 +1065,11 @@ okAsync('⭐⭐ 保存记忆后，诊断区的"记忆文件/容量"不许退化�
   saveBtn.props.onClick()
   await new Promise(r => setTimeout(r, 30))
 
-  // 诊断区那行必须**仍然**有文件路径与容量
-  l.react.resetHooks()
-  tree = Section({ close () {} })
+  // 诊断区那行必须**仍然**有文件路径与容量。
+  // ⚠️ 这里必须**在同一个挂载里切页签**（走真实的 onSelect），不能重新挂载：
+  // 重新挂载会重新 GET /memory，那份数据本来就带 file/capBytes ——
+  // 那样即使 `setMemory` 的合并坏了，这条断言也会假绿。
+  tree = switchTab(l, tree, 'diag')
   const diags = collectByType(tree, 'Diag').map(n => n.props)
   const memRow = diags.find(d => String(d.k).includes('记忆文件') || String(d.k).includes('Memory'))
   assert.ok(memRow, `诊断区应有"记忆文件"行，实际的键：${diags.map(d => d.k).join(', ')}`)
@@ -1052,6 +1099,7 @@ okAsync('⭐ 宿主写盘失败（HTTP 200 + ok:false）必须如实报错，不
   const { Section, runtime } = l.exports.__test
   runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 1 } } }
   runtime.__state.snapshot = { petState: 'idle', label: '', bubble: null, nativeAvailable: true }
+  runtime.__state.tab = 'chat'
   l.react.resetHooks()
   let tree = Section({ close () {} })
   let saveBtn = null
@@ -1080,7 +1128,7 @@ ok('⭐ 滑杆单位也必须走字典（不许写死英文 s/min）', () => {
   // 真机症状：同一个面板里并排出现「空闲多久后睡觉 5min」和
   // 「专注时长 25 分钟」—— 因为秒/分钟那几处是写死的 `'s'` / `'min'`，
   // 而番茄钟那几处走 `t('minutes')`。单位也是文案。
-  const tree = renderSectionTree({ pomodoro: true })
+  const tree = renderSectionTree({ pomodoro: true }, 'behavior')
   const sliders = collectByType(tree, 'Slider').map(n => n.props)
   const raw = sliders.filter(s => s.suffix === 's' || s.suffix === 'min')
   assert.deepEqual(raw.map(s => s.label), [],
@@ -1098,13 +1146,25 @@ ok('⭐ 行分隔线要用看得见的档位（l1 只有 4% 不透明度，等�
   // 我第一版抄了外壳 settings-form 的"发丝线"写法，但把颜色档位写成了
   // `--dsw-alias-border-l1`（rgba(0,0,0,.04)）—— 浅色主题下肉眼几乎看不见，
   // 于是"加了分隔线"这件事在验收时是不成立的。外壳自己用的是 l2（.1）。
+  //
+  // v4 改成外壳 settings-general 的**同款写法**：线画在行的 `border-bottom` 上
+  //（不是 `row + row` 的 border-top），这样卡片内最后一行可以用
+  // `:last-child` 去掉底线 —— 否则卡片自己的圆角边旁边会多一条线，显脏。
   const css = loaded.exports.__test.styleText()
-  const rule = css.match(/\.zf-pet-row\s*\+\s*\.zf-pet-row\{[^}]*\}/)
-  assert.ok(rule, '应有"相邻行加分隔线"的规则')
+  const rule = css.match(/\.zf-pet-row\{[^}]*\}/)
+  assert.ok(rule, '应有 .zf-pet-row 规则')
+  assert.ok(/border-bottom:\.5px solid var\(--zf-hairline\)/.test(rule[0]),
+    `行的分隔线应是 .5px 且走同一个发丝色变量，实际：${rule[0]}`)
   assert.ok(!/border-l1/.test(rule[0]),
     `分隔线不该用 border-l1（4% 不透明度，看不见），实际：${rule[0]}`)
-  assert.ok(/border-l2/.test(rule[0]),
-    `分隔线应与外壳 settings-form 同档（border-l2），实际：${rule[0]}`)
+  // 发丝色变量本身必须是 l2（外壳同档）
+  const token = css.match(/--zf-hairline:([^;]*);/)
+  assert.ok(token, '应定义 --zf-hairline 发丝色变量')
+  assert.ok(/border-l2/.test(token[1]),
+    `发丝线应与外壳 settings-form 同档（border-l2），实际：${token[1]}`)
+  // 最后一行不画底线
+  assert.ok(/\.zf-pet-card__body\s*>\s*\.zf-pet-row:last-child\{[^}]*border-bottom:none/.test(css),
+    '卡片内最后一行必须去掉底线（否则与卡片自己的边撞在一起）')
 })
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -1667,7 +1727,7 @@ ok('⭐ 设置页有"审批/提问常亮提醒"开关', () => {
       walk(node.props.children)
     }
   }
-  walk(renderSection({ attentionReminder: false }).props.children)
+  walk(renderSection({ attentionReminder: false }, 'bubble').props.children)
   assert.ok(toggle !== null, '设置页应有该开关')
   assert.equal(toggle.props.value, false, '开关应反映当前值（关闭态）')
   // 再确认开着的时候渲染 true
@@ -1680,7 +1740,7 @@ ok('⭐ 设置页有"审批/提问常亮提醒"开关', () => {
       walk2(node.props.children)
     }
   }
-  walk2(renderSection({ attentionReminder: true }).props.children)
+  walk2(renderSection({ attentionReminder: true }, 'bubble').props.children)
   assert.equal(toggle2?.props.value, true)
 })
 
@@ -1691,13 +1751,14 @@ ok('⭐ 设置页有"审批/提问常亮提醒"开关', () => {
  * 完全没被发现。一个"注册了却渲染不出来"的设置页，用户看到的就是坏了。
  * ──────────────────────────────────────────────────────────────────────── */
 
-function renderSection (settingsPatch = {}) {
+function renderSection (settingsPatch = {}, tab = 'appearance') {
   const l = loadClient()
   l.exports.apply(l.ctx)
   const { Section, runtime } = l.exports.__test
   runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 1 } } }
   runtime.__state.snapshot = { petState: 'idle', label: '', bubble: null, nativeAvailable: false }
   runtime.__state.settings = normalizePet(settingsPatch)
+  runtime.__state.tab = tab
   l.react.resetHooks()
   return Section({ close () {} })
 }
@@ -1720,9 +1781,16 @@ ok('⭐ 设置页包含关键控件且反映当前值（大小/活跃度/双击/
         values.push(String(node.props.value))
       }
       collect(node.props.children)
+      // ⚠️ v4 的控件挂在 `Row` 的 `control` **prop** 上，不是 children ——
+      // 只走 children 会一个控件值都收不到（这条断言会假红）。
+      collect(node.props.control)
     }
   }
-  collect(renderSection({ activity: 'playful', doubleClick: 'emote', theme: 'dark' }).props.children)
+  // 页签化之后这三个控件分在「外观」（主题）「气泡」（双击）「行为」（活跃度）
+  // 三页里 —— 逐个页签渲染再收集。
+  for (const tab of ['appearance', 'bubble', 'behavior']) {
+    collect(renderSection({ activity: 'playful', doubleClick: 'emote', theme: 'dark' }, tab).props.children)
+  }
   const joined = values.join('|')
   assert.ok(joined.includes('playful'), '活跃度选择器应反映当前值')
   assert.ok(joined.includes('emote'), '双击行为选择器应反映当前值')
@@ -1823,7 +1891,7 @@ ok('运行时未装配时给出可读错误，而不是 undefined.t', () => {
  * 不能只扫 children —— 第一版就是这么写的，于是三条断言全假红。
  * ──────────────────────────────────────────────────────────────────────── */
 
-/** 收集树里所有**用户可见文案**（含函数组件的 label/hint/title props）。 */
+/** 收集树里所有**用户可见文案**（含函数组件的文案 props）。 */
 function collectStrings (node, out = []) {
   if (node === null || node === undefined) return out
   if (typeof node === 'string') { out.push(node); return out }
@@ -1831,11 +1899,29 @@ function collectStrings (node, out = []) {
   if (Array.isArray(node)) { node.forEach(n => collectStrings(n, out)); return out }
   if (typeof node !== 'object') return out
   const p = node.props ?? {}
-  for (const k of ['label', 'hint', 'title', 'placeholder']) {
+  // `desc`/`lead`/`note` 是 v4 的说明位（行的说明、卡片的引导句、折叠的长说明）——
+  // 它们也是用户看得见的文案，漏掉它们会让"文案还在不在"的核对出现假绿。
+  for (const k of ['label', 'hint', 'title', 'placeholder', 'desc', 'lead', 'note']) {
     if (typeof p[k] === 'string') out.push(p[k])
   }
   collectStrings(p.children, out)
   return out
+}
+
+/**
+ * 在**同一个挂载**里切页签（模拟用户点那一下），返回重渲染后的树。
+ *
+ * 为什么不能靠 `runtime.__state.tab` 再渲染一次：桩的 `useState` 会把首次
+ * `init()` 的结果**缓存**在 `hooks.states[i]` 里（`resetHooks()` 只归零游标），
+ * 所以第二次渲染读到的还是第一次的页签 —— 那不是"切换"，是"没切"。
+ * 走真实的 `onSelect` 才是用户路径，也才能验到"状态真的变了"。
+ */
+function switchTab (l, tree, id) {
+  const tabs = collectByType(tree, 'Tabs')[0]
+  assert.ok(tabs, '设置页应渲染出页签控件（Tabs）')
+  tabs.props.onSelect(id)
+  l.react.resetHooks()
+  return l.exports.__test.Section({ close () {} })
 }
 
 /** 按组件名收集节点（桩里函数组件不会展开，只能按 `type.name` 找）。 */
@@ -1849,21 +1935,59 @@ function collectByType (node, name, out = []) {
   return out
 }
 
-function renderSectionTree (settingsPatch = {}) {
+/**
+ * 把函数组件**递归展开**，得到接近真实 DOM 形状的树。
+ *
+ * `collectByType` 只按 `type.name` 找节点、**不展开** —— 但 v4 起控件藏在
+ * `Row` 的 `control` **prop** 里（不是 children），所以"每个控件都带同一个
+ * 类名""说明文字必须在左列"这类断言必须展开后才验得到。
+ * ⚠️ 只能用在 `Section` 返回的树上，**不能**用在 `Section` 元素本身（会重跑 hooks）。
+ */
+function expandTree (node) {
+  if (node === null || node === undefined) return null
+  if (Array.isArray(node)) return node.map(expandTree).filter(n => n !== null)
+  if (typeof node !== 'object') return node
+  const props = { ...node.props }
+  if (props.children !== undefined) props.children = expandTree(props.children)
+  if (props.control !== undefined) props.control = expandTree(props.control)
+  if (typeof node.type === 'function') return expandTree(node.type({ ...props, key: undefined }))
+  return { type: node.type, props }
+}
+
+/** 一行设置的两个必需容器（左列 / 右列）。 */
+function rowParts (row) {
+  const kids = row.props.children ?? []
+  return {
+    main: kids.find(c => c && String(c.props?.className).includes('zf-pet-row__main')),
+    ctrl: kids.find(c => c && String(c.props?.className).includes('zf-pet-row__control'))
+  }
+}
+
+/**
+ * 渲染设置页的**某一页签**（v4 起设置页是六页签的，控件分在六页里）。
+ * 页签通过 `runtime.__state.tab` 这个测试缝注入（与 `__state.settings` 同款）。
+ */
+function renderSectionTree (settingsPatch = {}, tab = 'appearance') {
   const l = loadClient()
   l.exports.apply(l.ctx)
   const { Section, runtime } = l.exports.__test
   runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 1 } } }
   runtime.__state.snapshot = { petState: 'idle', label: '', bubble: null, nativeAvailable: true }
   runtime.__state.settings = normalizePet(settingsPatch)
+  runtime.__state.tab = tab
   l.react.resetHooks()
   return Section({ close () {} })
 }
 
 ok('⭐ 重排后每个设置控件都还在（防"功能悄悄消失"）', () => {
   // 用**用户看得见的文案**核对，而不是内部键名：文案没了 = 控件没了。
-  const texts = collectStrings(renderSectionTree({ pomodoro: true, ttsResident: false }))
-  const joined = texts.join('|')
+  //
+  // v4 把设置页拆成六个页签，所以必须**逐页收集再合并** ——
+  // 只渲染一页会漏掉另外五页的控件，而"页签化把功能弄丢"正是这一步最大的风险。
+  const TABS = ['appearance', 'bubble', 'behavior', 'voice', 'chat', 'diag']
+  const joined = TABS
+    .map(tab => collectStrings(renderSectionTree({ pomodoro: true, ttsResident: false }, tab)).join('|'))
+    .join('|')
   const expected = [
     '启用桌宠', '显示方式', '大小', '不透明度', '总在最前', '点击穿透',
     '显示气泡', '气泡显示表情图', '对话文字大小', '气泡显示时长', '两条气泡最小间隔',
@@ -1891,6 +2015,7 @@ ok('⭐ 状态文字大小：独立滑杆，能改到设置（用户要"调大�
   runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 1 } } }
   runtime.__state.snapshot = { petState: 'idle', label: '', bubble: null, nativeAvailable: true }
   runtime.__state.settings = normalizePet({ statusFontScale: 1.8 })
+  runtime.__state.tab = 'appearance'
   l.react.resetHooks()
   const tree = Section({ close () {} })
 
@@ -1928,15 +2053,21 @@ ok('⭐ 对话文字大小：独立滑杆（用户点名"对话里的文字大�
   l.react.resetHooks()
   const tree = Section({ close () {} })
 
-  const sliders = []
-  const walk = n => {
-    if (n === null || n === undefined) return
-    if (Array.isArray(n)) { n.forEach(walk); return }
-    if (typeof n !== 'object') return
-    if (typeof n.type === 'function' && n.type.name === 'Slider') sliders.push(n)
-    if (n.props) walk(n.props.children)
+  const collectSliders = node => {
+    const out = []
+    const walk = n => {
+      if (n === null || n === undefined) return
+      if (Array.isArray(n)) { n.forEach(walk); return }
+      if (typeof n !== 'object') return
+      if (typeof n.type === 'function' && n.type.name === 'Slider') out.push(n)
+      if (n.props) walk(n.props.children)
+    }
+    walk(node)
+    return out
   }
-  walk(tree)
+  // v4：两个字号滑杆分属两页（状态文字在「外观」、对话正文在「气泡」）——
+  // 在**同一个挂载**里切页签再收集，「各管各的」这条性质才验得到。
+  const sliders = [...collectSliders(tree), ...collectSliders(switchTab(l, tree, 'bubble'))]
   const chatSlider = sliders.find(s => s.props.label === '对话文字大小')
   assert.ok(chatSlider, '应有「对话文字大小」滑杆')
   assert.equal(chatSlider.props.value, 2.4, '滑杆应反映当前值')
@@ -1952,45 +2083,283 @@ ok('⭐ 对话文字大小：独立滑杆（用户点名"对话里的文字大�
   assert.equal(normalizePet({ chatFontScale: 0.01 }).chatFontScale, 0.5, '越界应夹到 0.5')
 })
 
-ok('⭐ 分组按"用户找东西的心智"排序（不再是开发历史顺序）', () => {
-  const groups = collectByType(renderSectionTree({}), 'Group')
-  const titles = groups.map(g => g.props.title)
-  // 标题复用既有 i18n 键（`groupBubble`='气泡'、`groupChat`='聊天'），
-  // 只有新增的分组才有新键 —— 这里断言的是**顺序与构成**，不是措辞。
-  assert.deepEqual(titles,
-    ['桌宠', '气泡', '作息与外观', '语音', '番茄钟', '聊天', '高级与诊断'],
-    `分组顺序不对，实际：${titles.join(' → ')}`)
-  // 关键性质：原先把"常规/窗口"拆成两组、把"运行状态"压在最后；
-  // 现在前两组是桌宠本体，诊断在最后且可折叠。
-  assert.equal(titles[0], '桌宠', '第一组应是桌宠本体')
-  assert.equal(titles[titles.length - 1], '高级与诊断', '诊断应在最后（不再夹在中间）')
+ok('⭐⭐ 页签与卡片按"用户找东西的心智"排（不再按开发历史）', () => {
+  // 旧版是一列 7 个分组平铺（实测 2556px、三屏）。v4 拆成六页，每页若干张卡片。
+  // 这里断言**每一页的卡片构成**：顺序与归属错了，用户就又找不到东西了。
+  const TABS = ['appearance', 'bubble', 'behavior', 'voice', 'chat', 'diag']
+  const layout = TABS.map(tab =>
+    collectByType(renderSectionTree({}, tab), 'Card').map(c => c.props.title))
+  // 「外观」只有两张卡：「主题」并进了「桌宠」—— 单行卡片自带一个卡片头，
+  // 实测要占 100px，"一行一个概念"反而把一屏挤爆（见 probe-settings-tabs）。
+  assert.deepEqual(layout[0], ['桌宠', '状态文字'], `「外观」页不对：${layout[0].join(' → ')}`)
+  assert.deepEqual(layout[1], ['气泡', '提醒'], `「气泡」页不对：${layout[1].join(' → ')}`)
+  assert.deepEqual(layout[2], ['活跃度', '番茄钟'], `「行为」页不对：${layout[2].join(' → ')}`)
+  assert.deepEqual(layout[3], ['固定台词', '念出回答（动态语音）'], `「语音」页不对：${layout[3].join(' → ')}`)
+  assert.deepEqual(layout[4], ['聊天', '长期记忆（跨会话共享）', '发消息'], `「对话」页不对：${layout[4].join(' → ')}`)
+  assert.deepEqual(layout[5], ['运行状态', '素材', '合成服务', '路径与会话'], `「诊断」页不对：${layout[5].join(' → ')}`)
+  // 关键性质：诊断**单独一页**（原先被压在整个面板最后，要滚到底才看得见）
+  assert.equal(layout[5][0], '运行状态', '诊断页的第一张应是运行状态')
+
+  // 而且渲染出的卡片**只能有当前页签的** —— 这是"三屏变一屏"的全部机制。
+  const cards = collectByType(renderSectionTree({}, 'voice'), 'Card')
+  assert.deepEqual(cards.map(c => c.props.title), layout[3],
+    '渲染出的卡片必须只有当前页签的（否则页签等于没做）')
+
+  // 卡片必须是真正可折叠的（用户点名"设置里的一些内容应该可以折叠或展开"）
+  const { Card } = loaded.exports.__test
+  const sample = Card({ title: 'x', children: [] })
+  assert.equal(sample.type, 'details', '卡片必须渲染成 <details>（原生折叠，不用自己管状态）')
+  assert.equal(sample.props.open, false, 'open 不显式给 true 时应是收起的')
 })
 
-ok('⭐ 诊断区默认**收起**（机器路径不该糊在脸上）', () => {
-  const groups = collectByType(renderSectionTree({}), 'Group')
-  const adv = groups.find(g => g.props.title === '高级与诊断')
-  assert.ok(adv, '应有"高级与诊断"分组')
-  assert.equal(adv.props.collapsible, true, '"高级与诊断"必须是可折叠的')
-  assert.notEqual(adv.props.open, true, '"高级与诊断"必须默认收起')
+ok('⭐ 诊断页的卡片默认**全部收起**（机器路径不该糊在脸上）', () => {
+  const cards = collectByType(renderSectionTree({}, 'diag'), 'Card')
+  assert.ok(cards.length >= 4, `诊断页应有 4 张卡片，实际 ${cards.length}`)
+  for (const c of cards) {
+    assert.notEqual(c.props.open, true, `诊断页的「${c.props.title}」必须默认收起`)
+  }
   // 番茄钟默认关 → 也收起（8 个控件不该占着主面板）
-  const pomo = groups.find(g => g.props.title === '番茄钟')
-  assert.equal(pomo.props.collapsible, true, '番茄钟应可折叠')
+  const pomoCards = collectByType(renderSectionTree({}, 'behavior'), 'Card')
+  const pomo = pomoCards.find(c => c.props.title === '番茄钟')
+  assert.ok(pomo, '应有「番茄钟」卡片')
   assert.notEqual(pomo.props.open, true, '番茄钟默认关时应收起')
+  // 而启用之后应当展开 —— 否则用户打开了开关却看不到时长设置
+  const pomoOn = collectByType(renderSectionTree({ pomodoro: true }, 'behavior'), 'Card')
+    .find(c => c.props.title === '番茄钟')
+  assert.equal(pomoOn.props.open, true, '启用番茄钟后该卡片应展开')
 })
 
-ok('⭐ 启动命令（机器路径）只出现在折叠的诊断区里', () => {
+ok('⭐ 启动命令（机器路径）只出现在诊断页里', () => {
   // 这条是"降噪"的核心：绝对路径原先以正文段落的形式糊在面板中间。
-  const tree = renderSectionTree({})
-  const groups = collectByType(tree, 'Group')
-  const adv = groups.find(g => g.props.title === '高级与诊断')
-  const advText = collectStrings(adv).join('|')
-  const allText = collectStrings(tree).join('|')
-  // 诊断区里**有**路径位（launch 由运行时数据填，静态渲染时是键名）
-  assert.ok(advText.includes('启动命令'), '诊断区应包含"启动命令"')
-  // 而正文（诊断区之外）不该出现机器路径的痕迹
-  const outside = collectStrings(tree).filter(s => !advText.includes(s)).join('|')
-  assert.ok(!/[A-Z]:\\/.test(outside), `正文里不该出现盘符路径：${outside.slice(0, 160)}`)
-  assert.ok(allText.length > 0, '面板应有可见文案')
+  const diagText = collectStrings(renderSectionTree({}, 'diag')).join('|')
+  assert.ok(diagText.includes('启动命令'), '诊断页应包含"启动命令"')
+  // 其余五页是**日常设置**，不该出现盘符路径。
+  for (const tab of ['appearance', 'bubble', 'behavior', 'voice', 'chat']) {
+    const text = collectStrings(renderSectionTree({}, tab)).join('|')
+    assert.ok(!/[A-Z]:\\/.test(text), `「${tab}」页里不该出现盘符路径：${text.slice(0, 160)}`)
+    assert.ok(text.length > 0, `「${tab}」页应有可见文案`)
+  }
+})
+
+/* ── v4 新增：页签本身、每页的行数预算、单一样式系统、说明的位置与长度 ──────
+ *
+ * 这几条对应用户点名的六条：太长 / 太密 / 一片灰 / 控件尺寸不统一 /
+ * 说明文字淹了控件 / 诊断混在正文里。都是"不会报错、只是难看"的那类问题，
+ * 所以必须变成断言才守得住。 */
+
+ok('⭐⭐ 页签是真正的导航控件（role/aria + 点一下真的换页）', () => {
+  const tree = renderSectionTree({}, 'appearance')
+  const tabs = collectByType(tree, 'Tabs')
+  assert.equal(tabs.length, 1, '应恰好渲染一个页签条')
+  const items = tabs[0].props.items
+  assert.equal(items.length, 6, `应有 6 个页签，实际 ${items.length}`)
+  assert.deepEqual(items.map(i => i.id),
+    ['appearance', 'bubble', 'behavior', 'voice', 'chat', 'diag'], '页签顺序不对')
+  assert.deepEqual(items.map(i => i.label),
+    ['外观', '气泡', '行为', '语音', '对话', '诊断'],
+    `页签文案不对：${items.map(i => i.label).join('/')}`)
+
+  // 渲染出来的按钮必须带 ARIA（读屏要能用），且**恰好一个**选中态
+  const { Tabs } = loaded.exports.__test
+  const rendered = Tabs({ items, value: 'appearance', onSelect: () => {} })
+  assert.equal(rendered.props.role, 'tablist', '页签条应有 role=tablist')
+  const btns = rendered.props.children
+  assert.equal(btns.length, 6, '应渲染 6 个页签按钮')
+  for (const b of btns) {
+    assert.equal(b.props.role, 'tab', `页签按钮应有 role=tab，实际 ${b.props.role}`)
+    assert.ok(b.props['aria-controls'], '页签按钮应有 aria-controls（指向面板）')
+  }
+  const selected = btns.filter(b => b.props['aria-selected'] === 'true')
+  assert.equal(selected.length, 1, `必须恰好一个页签是选中态，实际 ${selected.length}`)
+  assert.equal(selected[0].props.id, 'zf-pet-tab-appearance', '选中的应是当前页')
+
+  // 点「语音」→ 卡片整批换掉，面板的 ARIA 关系跟着走
+  const l = loadClient()
+  l.exports.apply(l.ctx)
+  const { Section, runtime } = l.exports.__test
+  runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 1 } } }
+  runtime.__state.snapshot = { petState: 'idle', label: '', bubble: null, nativeAvailable: true }
+  runtime.__state.settings = normalizePet({})
+  runtime.__state.tab = 'appearance'
+  l.react.resetHooks()
+  const before = Section({ close () {} })
+  const beforeTitles = collectByType(before, 'Card').map(c => c.props.title)
+  const after = switchTab(l, before, 'voice')
+  const afterTitles = collectByType(after, 'Card').map(c => c.props.title)
+  assert.notDeepEqual(afterTitles, beforeTitles, '点了页签卡片必须换掉')
+  assert.ok(!afterTitles.includes('桌宠'), '切到「语音」后不该还渲染着「桌宠」卡片')
+  assert.ok(afterTitles.includes('固定台词'), '切到「语音」后应渲染语音那一页的卡片')
+  const panel = after.props.children.find(c => c && c.props?.role === 'tabpanel')
+  assert.ok(panel, '应有 role=tabpanel 的面板')
+  assert.equal(panel.props.id, 'zf-pet-panel-voice', '面板 id 应跟着当前页签')
+  assert.equal(panel.props['aria-labelledby'], 'zf-pet-tab-voice', '面板应指回当前页签按钮')
+})
+
+ok('⭐⭐ 每个页签「展开状态」的行数 ≤ 10（一屏放得下）', () => {
+  // 用户原话："太长：要滚好几屏，找不到东西"。原先一列 40 行、实测 2556px。
+  // 拆页之后，每页**摊开来看**的行数必须控制在一屏之内。
+  // 只数**展开卡片**里的行：收起的卡片（诊断页、台词清单、发消息）本来就看不见。
+  const TABS = ['appearance', 'bubble', 'behavior', 'voice', 'chat', 'diag']
+  const counts = {}
+  for (const tab of TABS) {
+    const cards = collectByType(renderSectionTree({}, tab), 'Card')
+    let rows = 0
+    for (const c of cards) {
+      if (c.props.open !== true) continue
+      // Toggle / Slider 各自就是一行（它们渲染 Row，但桩不展开，所以不会重复计）
+      rows += collectByType(c, 'Row').length +
+        collectByType(c, 'Toggle').length +
+        collectByType(c, 'Slider').length
+    }
+    counts[tab] = rows
+    assert.ok(rows <= 10, `「${tab}」页展开后有 ${rows} 行（应 ≤ 10，否则又要滚屏）`)
+  }
+  assert.ok(counts.appearance >= 6, `「外观」页行数明显偏少，可能控件丢了：${counts.appearance}`)
+})
+
+ok('⭐⭐ 全设置页只有一套控件外观（不许再有第二个输入框类名）', () => {
+  // 用户原话："控件尺寸不统一"。病根是同一个面板里混了四套外观：
+  // 输入框 30px/圆角 6px、按钮圆角 8px、聊天框圆角 8px 配 12px 字、正文 13px。
+  // 现在所有 input/select 共用同一个类名 —— 也就是同一组 CSS 规则，无法再分叉。
+  const src = fs.readFileSync(CLIENT, 'utf8')
+  // 只查"还有没有在 className 里用" —— CSS 注释里保留它的来历是对的
+  //（那正是"为什么会裸样式"的现场记录），把注释也算进去就成了假红。
+  const usedClasses = new Set()
+  for (const m of src.matchAll(/className:\s*'([^']+)'/g)) {
+    for (const cls of m[1].split(/\s+/)) usedClasses.add(cls)
+  }
+  assert.ok(!usedClasses.has('zf-pet-settings__input'),
+    'zf-pet-settings__input 应已彻底不再使用（那个类名曾经只有引用没有规则，是"裸样式控件"的根因）')
+
+  const TABS = ['appearance', 'bubble', 'behavior', 'voice', 'chat', 'diag']
+  const bad = []
+  let seen = 0
+  for (const tab of TABS) {
+    const tree = expandTree(renderSectionTree({ pomodoro: true, ttsResident: false }, tab))
+    for (const tag of ['input', 'select']) {
+      for (const n of collectByType(tree, tag)) {
+        seen += 1
+        const cls = String(n.props.className ?? '')
+        if (!cls.split(/\s+/).includes('zf-pet-row__input')) {
+          bad.push(`${tag}[${n.props.type ?? ''}] ${cls}`)
+        }
+      }
+    }
+  }
+  assert.ok(seen > 25, `应检查到 25+ 个控件，实际 ${seen}`)
+  assert.deepEqual(bad, [], `这些控件没走统一的控件类名（会各长各的样）：${bad.join(' / ')}`)
+})
+
+ok('⭐⭐ 每行的说明都在左列（不许再挂到控件下面）', () => {
+  // 用户原话："说明文字太多，把要调的淹了"。三种写法并存时，同一个面板里
+  // 说明文字**跳三个位置**（控件下方通栏 / 标签与控件之间 / 独立段落），
+  // 视线每一行都要重新找一次。现在只有一种位置：行标题下面、左列里面。
+  const TABS = ['appearance', 'bubble', 'behavior', 'voice', 'chat']
+  let descs = 0
+  let rows = 0
+  for (const tab of TABS) {
+    const tree = expandTree(renderSectionTree({ pomodoro: true, ttsResident: false }, tab))
+    const rowNodes = collectByType(tree, 'label')
+      .filter(n => String(n.props.className).includes('zf-pet-row'))
+    for (const row of rowNodes) {
+      rows += 1
+      const { main, ctrl } = rowParts(row)
+      assert.ok(main, '每行都应有左列 .zf-pet-row__main')
+      assert.ok(ctrl, '每行都应有右列 .zf-pet-row__control')
+      const direct = (row.props.children ?? [])
+        .filter(c => c && String(c.props?.className).includes('zf-pet-row__desc'))
+      assert.equal(direct.length, 0, '说明文字不能是行的直接子节点（必须在左列里）')
+      const inCtrl = collectByType(ctrl, 'span')
+        .filter(n => String(n.props.className).includes('zf-pet-row__desc'))
+      assert.equal(inCtrl.length, 0, '说明文字不该出现在控件列里')
+      descs += collectByType(main, 'span')
+        .filter(n => String(n.props.className).includes('zf-pet-row__desc')).length
+    }
+  }
+  assert.ok(rows > 15, `应检查到 15+ 行，实际 ${rows}`)
+  assert.ok(descs > 5, `应有若干行带说明且都在左列，实际 ${descs}`)
+})
+
+ok('⭐⭐ 行内说明压到一行（中文 ≤ 34 字），长解释挪进卡片的「说明」折叠块', () => {
+  // 用户原话："说明文字太多，把要调的淹了"。原先最长的行内说明 61 字、
+  // 占三行，把控件压成了配角。现在行内只留一句话，权衡搬进折叠块。
+  // 34 字 ≈ 左列 500px 宽下的一行（12px 中文），是量出来的预算。
+  const long = []
+  for (const tab of ['appearance', 'bubble', 'behavior', 'voice', 'chat']) {
+    const tree = expandTree(renderSectionTree({ pomodoro: true, ttsResident: false }, tab))
+    for (const n of collectByType(tree, 'span')) {
+      if (!String(n.props.className).includes('zf-pet-row__desc')) continue
+      const text = (n.props.children ?? []).map(String).join('')
+      if (text.length > 34) long.push(text)
+    }
+  }
+  assert.deepEqual(long, [],
+    `这些行内说明超过一行（34 字），应挪进卡片的「说明」折叠块：${long.map(s => s.slice(0, 18) + '…').join(' / ')}`)
+
+  // 而且要确认完整解释是**挪了位置**、不是被删掉
+  const speakCard = collectByType(renderSectionTree({}, 'voice'), 'Card')
+    .find(c => String(c.props.title).includes('念出回答'))
+  assert.ok(speakCard, '应有「念出回答」卡片')
+  assert.ok(String(speakCard.props.note).includes('显存'),
+    '常驻/释放的权衡说明必须保留在卡片的「说明」里（挪位置，不是删内容）')
+  assert.equal(speakCard.props.noteLabel, '说明', '折叠块要有「说明」这个可点的标题')
+})
+
+okAsync('⭐⭐ 切页签不能丢掉草稿（卡片会被整个卸载重建）', async () => {
+  // 页签是有代价的：非当前页的卡片会被**卸载**。记忆框与聊天输入框都是
+  // **非受控**的（defaultValue 只在挂载时生效），切回来就按 defaultValue 重建 ——
+  // 若 defaultValue 只看 `memory?.text`，用户打了一半的草稿会被"已保存的那一份"
+  // 覆盖，等于静默丢掉他刚打的内容（和当年那个"空白框覆盖真实记忆"是同一类数据丢失）。
+  // 修法：defaultValue 优先用草稿 ref —— ref 挂在 Section 上，活得比卡片久。
+  const l = loadClient({
+    fetchImpl: async url => {
+      if (String(url).endsWith('/memory')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ text: '磁盘上的旧记忆', file: 'm.md', bytes: 12, capBytes: 4096 }),
+          text: async () => ''
+        }
+      }
+      return { ok: true, status: 200, json: async () => ({}), text: async () => '' }
+    }
+  })
+  l.exports.apply(l.ctx)
+  const { Section, runtime } = l.exports.__test
+  runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 1 } } }
+  runtime.__state.snapshot = { petState: 'idle', label: '', bubble: null, nativeAvailable: true }
+  runtime.__state.settings = normalizePet({})
+  runtime.__state.tab = 'chat'
+  l.react.resetHooks()
+  let tree = Section({ close () {} })
+  for (const fn of l.react.hooks.effects) { if (typeof fn === 'function') { try { fn() } catch { /* 忽略 */ } } }
+  await new Promise(r => setTimeout(r, 30))
+  l.react.resetHooks()
+  tree = Section({ close () {} })
+
+  const box = collectByType(tree, 'textarea')[0]
+  assert.ok(box, '应有记忆编辑框')
+  assert.equal(box.props.defaultValue, '磁盘上的旧记忆', '加载完应能看到磁盘上的记忆')
+  box.props.onInput({ target: { value: '我写到一半的草稿' } })
+
+  // 聊天输入框也在这一页（「发消息」卡片里），一并验
+  const chatInput = collectByType(tree, 'input')
+    .find(n => String(n.props.className).includes('zf-pet-chatrow__input'))
+  assert.ok(chatInput, '应有聊天输入框')
+  chatInput.props.onInput({ target: { value: '没发出去的半句话' } })
+
+  // 切走 → 这两张卡片应当真的被卸载（页签省地方靠的就是这个）
+  const away = switchTab(l, tree, 'voice')
+  assert.equal(collectByType(away, 'textarea').length, 0, '切走后记忆框应已卸载')
+
+  // 切回来 → 草稿必须还在
+  const back = switchTab(l, away, 'chat')
+  const box2 = collectByType(back, 'textarea')[0]
+  assert.equal(box2.props.defaultValue, '我写到一半的草稿',
+    '切回来必须还是用户的草稿 —— 否则等于静默丢掉他刚打的内容')
+  const chat2 = collectByType(back, 'input')
+    .find(n => String(n.props.className).includes('zf-pet-chatrow__input'))
+  assert.equal(chat2.props.defaultValue, '没发出去的半句话', '聊天草稿同样不能在切页签时丢')
 })
 
 ok('⭐ i18n 中英键集必须一致（漏翻会直接显示键名）', () => {
@@ -2008,6 +2377,22 @@ ok('⭐ i18n 中英键集必须一致（漏翻会直接显示键名）', () => {
   assert.ok(zh.length > 100, `中文键数应 > 100，实际 ${zh.length}`)
   assert.deepEqual(zh.filter(k => !en.includes(k)), [], '这些键只有中文')
   assert.deepEqual(en.filter(k => !zh.includes(k)), [], '这些键只有英文')
+})
+
+ok('⭐⭐⭐ 每个 t(...) 用到的键都必须在字典里（否则界面直接显示裸键名）', () => {
+  // 真机上刚发生过：给 DICT 插入新键时**把锚点那一行替换掉了**，
+  // 于是 `advancedHint` 从两份字典里一起消失 —— 而 `t()` 取不到键时
+  // **回落成键名本身**，诊断页上就一本正经地显示着 "advancedHint"。
+  // 这类错没有任何断言会红（"只是难看"），人眼也很容易滑过去。
+  const src = fs.readFileSync(CLIENT, 'utf8')
+  const DICT = loaded.exports.__test.DICT
+  const used = new Set()
+  for (const m of src.matchAll(/\bt\('([A-Za-z0-9_]+)'\)/g)) used.add(m[1])
+  assert.ok(used.size > 60, `应解析出 60+ 个文案键，实际 ${used.size}`)
+  const missingZh = [...used].filter(k => !(k in DICT.zh)).sort()
+  const missingEn = [...used].filter(k => !(k in DICT.en)).sort()
+  assert.deepEqual(missingZh, [], `这些键在代码里用了、中文文案里却没有（会显示裸键名）：${missingZh.join(', ')}`)
+  assert.deepEqual(missingEn, [], `这些键在代码里用了、英文文案里却没有：${missingEn.join(', ')}`)
 })
 
 /* ── 让位：原生窗口在跑时 overlay 必须完全不渲染 ──────────────────────────
