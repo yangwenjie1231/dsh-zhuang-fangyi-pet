@@ -1036,6 +1036,78 @@ namespace DshZhuangFangyiPet
                 PetHttp.InteractKinds.Length == 7;
             Check(kindsOk, "互动白名单 v10：pat / fling / hover 已加（共 7 个）",
                   "InteractKinds.Length=" + PetHttp.InteractKinds.Length);
+
+            // (11) ⭐⭐ 菜单里的动作 + 手势动作 = 全部动作，**一个都不许漏**。
+            //
+            // 这条断言防的是"加了新动作却忘了给入口"：菜单里没有、手势也没有，
+            // 那个动作就**永远无法触发** —— 而且不会有任何报错（Host 的表里有它，
+            // 白名单也认它，只是没人能发出那个请求）。
+            // 反过来也防"两个入口"：同一个动作既有手势又在菜单里，
+            // 用户会以为它们不一样（这是 v9 就定下的纪律）。
+            bool everyKindReachable = true;
+            string missing = null;
+            for (int i = 0; i < PetHttp.InteractKinds.Length; i++)
+            {
+                string k = PetHttp.InteractKinds[i];
+                bool inMenu = PetHttp.IsMenuInteractKind(k);
+                bool hasGesture = PetHttp.HasGestureEntry(k);
+                if (!inMenu && !hasGesture) { everyKindReachable = false; missing = k; break; }
+                if (inMenu && hasGesture) { everyKindReachable = false; missing = k + "（两个入口）"; break; }
+            }
+            Check(everyKindReachable,
+                  "⭐⭐ 每个互动动作**恰好有一个**入口（菜单 或 手势，不许漏也不许重）",
+                  missing == null ? ("菜单 " + PetHttp.MenuInteractKinds.Length + " 个 / 手势 5 个") : ("问题：" + missing));
+
+            // (12) 今日统计那一行：格式化 + 空数据隐藏
+            PetTodayInfo t1 = new PetTodayInfo();
+            t1.PomodoroCount = 3; t1.FocusMs = 75 * 60 * 1000; t1.GoalCount = 8;
+            bool line1 = t1.MenuLine() == "今天：3/8 个番茄 · 1 小时 15 分";
+            PetTodayInfo t2 = new PetTodayInfo();
+            t2.PomodoroCount = 1; t2.FocusMs = 25 * 60 * 1000; t2.Interrupts = 4; t2.StreakDays = 3;
+            bool line2 = t2.MenuLine() == "今天：1 个番茄 · 25 分 · 摸鱼 4 次 · 连续 3 天";
+            Check(line1 && line2, "今日统计行：目标进度 / 时长 / 摸鱼 / 连续天数",
+                  line1 ? line2.ToString() : t1.MenuLine());
+
+            // (12b) 时长格式化的三个边界
+            bool durOk =
+                PetTodayInfo.FormatDuration(0) == "0 分" &&
+                // 不足一分钟但确实有专注 → "1 分"（显示 0 分而番茄 +1 会让人以为统计坏了）
+                PetTodayInfo.FormatDuration(30 * 1000) == "1 分" &&
+                PetTodayInfo.FormatDuration(60 * 1000) == "1 分" &&
+                PetTodayInfo.FormatDuration(60 * 60 * 1000) == "1 小时" &&
+                PetTodayInfo.FormatDuration(2 * 60 * 60 * 1000) == "2 小时" &&
+                PetTodayInfo.FormatDuration(65 * 60 * 1000) == "1 小时 5 分" &&
+                PetTodayInfo.FormatDuration(-5000) == "0 分";
+            Check(durOk, "时长格式化：不足一分钟显示 1 分（不是 0 分）",
+                  "0→0 分；30s→1 分；1h→1 小时；65m→1 小时 5 分");
+
+            // (13) snapshot.today 块解析：缺块 = null（零回归）、坏值夹到非负
+            PetSnapshot noToday = PetSnapshot.Parse("{\"rev\":1,\"petState\":\"idle\"}");
+            Check(noToday != null && noToday.Today == null,
+                  "snapshot.today 块缺失 → null（旧 Host 零回归，菜单不显示那一行）", "Today=null");
+
+            PetSnapshot withToday = PetSnapshot.Parse(
+                "{\"rev\":1,\"petState\":\"idle\",\"today\":{\"pomodoroCount\":3," +
+                "\"focusMs\":1500000,\"interrupts\":-2,\"streakDays\":5,\"goalCount\":8}}");
+            bool todayOk = withToday != null && withToday.Today != null &&
+                           withToday.Today.PomodoroCount == 3 &&
+                           withToday.Today.FocusMs == 1500000 &&
+                           // 负数夹到 0：显示"-2 次摸鱼"是统计坏了的信号，不如显示 0
+                           withToday.Today.Interrupts == 0 &&
+                           withToday.Today.StreakDays == 5 &&
+                           withToday.Today.GoalCount == 8;
+            Check(todayOk, "snapshot.today 解析正确，且负数被夹到 0",
+                  withToday?.Today?.MenuLine() ?? "(null)");
+
+            // (14) 没开过番茄钟 → 菜单那一行整项隐藏（而不是显示"今天：0 个番茄"）
+            PetTodayInfo blank = new PetTodayInfo();
+            bool hideBlank = !(blank.PomodoroCount > 0 || blank.StreakDays > 1 || blank.Interrupts > 0);
+            PetTodayInfo used = new PetTodayInfo();
+            used.PomodoroCount = 1;
+            bool showUsed = used.PomodoroCount > 0 || used.StreakDays > 1 || used.Interrupts > 0;
+            Check(hideBlank && showUsed,
+                  "「今天」行的显隐：一次没用过 → 隐藏；用过 → 显示",
+                  "空白隐藏 / 有番茄显示");
         }
 
         /// <summary>

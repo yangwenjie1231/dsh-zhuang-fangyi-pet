@@ -821,6 +821,40 @@ namespace DshZhuangFangyiPet
         }
 
         /// <summary>
+        /// 允许出现在**右键菜单**里的动作（v10）。其余一律走手势。
+        ///
+        /// 判据是"**这个动作有没有可能用手势表达**"：
+        ///   · `feed`（投喂）/ `praise`（夸奖）—— 是"对她做一件事"，不是"碰她"，
+        ///     没有对应的手势，**必须有菜单入口**（否则功能直接消失）；
+        ///   · `pet-head` / `pat`（摸头）、`click`（单击）、`fling`（甩）、
+        ///     `hover`（悬停）—— 全都有手势了，进菜单只会造成"两个入口"的困惑。
+        ///
+        /// ⚠️ 放在 `PetHttp` 而不是 `Program`：`SelfTest` 要断言
+        /// "菜单 ∪ 手势 = 全部动作"，而 `Program` 的成员在自检里不好取
+        /// （它是入口类，且 `MenuInteractKinds` 一度因为 `Contains` 需要
+        /// `System.Linq` 而编译失败 —— C#5 回落路径下不能假设有 LINQ）。
+        /// </summary>
+        internal static readonly string[] MenuInteractKinds = new string[] { "feed", "praise" };
+
+        /// <summary>该动作有没有手势入口（v10）。纯函数，与 `MenuInteractKinds` 互补。</summary>
+        internal static bool HasGestureEntry(string kind)
+        {
+            // `pet-head` 与 `pat` 共用同一条长按手势（见 interactions.js 的 sharesWith）。
+            return kind == "click" || kind == "pat" || kind == "fling" ||
+                   kind == "hover" || kind == "pet-head";
+        }
+
+        /// <summary>该动作是否出现在右键菜单里。纯函数。</summary>
+        internal static bool IsMenuInteractKind(string kind)
+        {
+            for (int i = 0; i < MenuInteractKinds.Length; i++)
+            {
+                if (string.Equals(MenuInteractKinds[i], kind, StringComparison.Ordinal)) return true;
+            }
+            return false;
+        }
+
+        /// <summary>
         /// 记一次互动（POST /pet/interact）。
         ///
         /// **动作名必须在 exe 侧就是常量**，且只从这里发出 —— 绝不把界面上的

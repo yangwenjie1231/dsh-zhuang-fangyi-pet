@@ -1263,6 +1263,9 @@ namespace DshZhuangFangyiPet
         /// <summary>当前好感度（快照里的）。</summary>
         private PetAffectionInfo _affection;
 
+        /// <summary>今日番茄统计（v10，右键菜单「今天」一行用；块缺失 = null）。</summary>
+        private PetTodayInfo _today;
+
         /// <summary>
         /// 单击桌宠 → 记一次互动。
         ///
@@ -1336,6 +1339,17 @@ namespace DshZhuangFangyiPet
                                     : "（已满级）"));
                 }
                 _tray.Refresh();
+            }
+
+            // 今日统计 diff（v10）。值没变零日志 —— 它每帧都在快照里，
+            // 无条件打日志会把日志淹掉。
+            if (!PetTodayInfo.Same(snap.Today, _today))
+            {
+                _today = snap.Today;
+                if (_today != null && _today.PomodoroCount > 0)
+                {
+                    PetLog.Info("今日统计 → " + _today.MenuLine());
+                }
             }
 
             // 互动信号：只在 seq **变化**时播一次。
@@ -1981,14 +1995,18 @@ namespace DshZhuangFangyiPet
             // 且好感度档位会随互动变化，右键是最自然的"看看现在怎么样"的时机。
             RefreshInteractMenu();
             if (_petMenu == null) _petMenu = BuildPetMenu();
-            // 好感度那一行是动态文本，每次打开都更新。
+            // 好感度与「今天」两行是动态文本，每次打开都更新。
             UpdateAffectionMenuItem();
+            UpdateTodayMenuItem();
             _petMenu.PlacementTarget = w;
             _petMenu.IsOpen = true;
         }
 
         /// <summary>右键菜单顶部的"好感度"行（只读展示）。</summary>
         private MenuItem _miAffection;
+
+        /// <summary>右键菜单顶部的"今天"行（v10，只读展示）。</summary>
+        private MenuItem _miToday;
 
         /// <summary>刷新好感度那一行。没有数据时显示"未知"而不是空白。</summary>
         private void UpdateAffectionMenuItem()
@@ -2011,58 +2029,86 @@ namespace DshZhuangFangyiPet
             catch { }
         }
 
+        /// <summary>
+        /// 刷新「今天」那一行（v10）。
+        ///
+        /// ⚠️ 没数据时**整项隐藏**（`Visibility.Collapsed`），不是显示"今天：—"。
+        /// 理由：番茄钟没开的人右键时，一行"今天：0 个番茄"只是噪音 ——
+        /// 而好感度那行必须显示（它永远有意义）。两个只读行的空数据语义不同，
+        /// 这不是不一致，是**同一份数据在两种功能下的不同相关性**。
+        /// </summary>
+        private void UpdateTodayMenuItem()
+        {
+            if (_miToday == null) return;
+            try
+            {
+                PetTodayInfo t = _today;
+                // 一次都没用过番茄钟 → 整项隐藏（不看"有没有开"，看"有没有用过"：
+                // 开了但一轮没跑完的人也不该看到一行 0）。
+                bool useful = t != null && (t.PomodoroCount > 0 || t.StreakDays > 1 || t.Interrupts > 0);
+                _miToday.Visibility = useful ? Visibility.Visible : Visibility.Collapsed;
+                if (useful) _miToday.Header = t.MenuLine();
+            }
+            catch { }
+        }
+
         private ContextMenu BuildPetMenu()
         {
             ContextMenu m = new ContextMenu();
 
-            // ── v9：互动（用户点名"增加一些互动"）────────────────────────────
+            // ── v10：互动**不再由菜单承载** ──────────────────────────────────
+            //
+            // 用户原话："互动当前方式，通过右键就点个按钮，很奇怪，能不能加一些
+            // 更有意思的"。现在主路径是**手上的动作**：
+            //   单击 = 打招呼 / 长按 = 摸头 / 甩出去 = 抛掷 / 悬停 = 她看你一眼。
+            //
+            // 但有两个动作**没有对应的手势**：`feed`（投喂）与 `praise`（夸奖）——
+            // 它们不是"碰她"，是"对她做一件事"。删掉入口等于删掉功能。
+            // 所以它们收进「更多」，而不是消失。
+            //
+            // `pet-head`/`click`/`pat`/`fling`/`hover` 一律不进菜单：
+            // 同一个动作有两个入口时，用户会以为它们不一样（已有纪律）。
             //
             // 菜单项**由 Host 给**（`GET /pet/interact`），不在这里硬编码：
-            // 加一个互动动作只改 `src/pet/interactions.js`，exe 不用重新编译。
-            // 首次右键时若还没拉到，就退回内置的三个（保证菜单不会是空的）。
-            MenuItem interact = new MenuItem();
-            interact.Header = "互动(_I)";
+            // 加一个动作只改 `src/pet/interactions.js`，exe 不用重新编译。
+            MenuItem more = new MenuItem();
+            more.Header = "更多(_M)";
             PetInteractMenu menu = _interactMenu;
             if (menu != null && menu.Kinds.Count > 0)
             {
                 for (int i = 0; i < menu.Kinds.Count; i++)
                 {
                     PetInteractKind k = menu.Kinds[i];
-                    // click 是"单击桌宠"那条路，不放进右键菜单（否则同一个动作
-                    // 有两个入口，用户会以为它们不一样）。
-                    if (k.Kind == "click") continue;
+                    // 只放"没有手势入口"的那两个（判据在 PetHttp.MenuInteractKinds，
+                    // 自检有一条断言钉住"菜单 ∪ 手势 = 全部动作"）。
+                    if (!PetHttp.IsMenuInteractKind(k.Kind)) continue;
                     string kind = k.Kind;
                     MenuItem mi = new MenuItem();
                     mi.Header = k.Label;
                     mi.Click += delegate { OnInteractChosen(kind); };
-                    interact.Items.Add(mi);
+                    more.Items.Add(mi);
                 }
             }
-            if (interact.Items.Count == 0)
+            if (more.Items.Count == 0)
             {
-                // 兜底：还没拉到菜单时给三个内置的（名字与 Host 侧一致）。
+                // 兜底：还没拉到菜单时给内置的两个（名字与 Host 侧一致）。
                 // **不显示"加载中"这种空洞** —— 用户右键是要做事，不是等。
-                string[] fallback = new string[] { "pet-head", "feed", "praise" };
-                string[] labels = new string[] { "摸摸头", "投喂", "夸奖" };
+                string[] fallback = new string[] { "feed", "praise" };
+                string[] labels = new string[] { "投喂", "夸奖" };
                 for (int i = 0; i < fallback.Length; i++)
                 {
                     string kind = fallback[i];
                     MenuItem mi = new MenuItem();
                     mi.Header = labels[i];
                     mi.Click += delegate { OnInteractChosen(kind); };
-                    interact.Items.Add(mi);
+                    more.Items.Add(mi);
                 }
             }
-            m.Items.Add(interact);
-
-            _miAffection = new MenuItem();
-            _miAffection.Header = "好感度：—";
-            _miAffection.IsEnabled = false;   // 纯展示
-            m.Items.Add(_miAffection);
-            UpdateAffectionMenuItem();
-
-            m.Items.Add(new Separator());
-
+            more.Items.Add(new Separator());
+            MenuItem gallery = new MenuItem();
+            gallery.Header = "表情包…(_G)";
+            gallery.Click += delegate { OpenGallery(); };
+            more.Items.Add(gallery);
             MenuItem preview = new MenuItem();
             preview.Header = "表情预览(_E)";
             MenuItem auto = new MenuItem();
@@ -2087,19 +2133,27 @@ namespace DshZhuangFangyiPet
                 };
                 preview.Items.Add(mi);
             }
-            m.Items.Add(preview);
-
+            more.Items.Add(preview);
             MenuItem next = new MenuItem();
             next.Header = "切换表情预览(_N)";
             next.Click += delegate { CycleEmote(); };   // task-6：与双击 emote 共用同一机制
-            m.Items.Add(next);
+            more.Items.Add(next);
+            m.Items.Add(more);
 
-            // ⭐ 表情包画廊：主动看全 41 张（此前只能靠状态变化被动随机撒，
-            // 用户反馈"这么久都没看全"）。点一张立刻用它当气泡。
-            MenuItem gallery = new MenuItem();
-            gallery.Header = "表情包…(_G)";
-            gallery.Click += delegate { OpenGallery(); };
-            m.Items.Add(gallery);
+            // ── 两个只读状态行（"看看现在怎么样"是右键最自然的用途）─────────
+            _miAffection = new MenuItem();
+            _miAffection.Header = "好感度：—";
+            _miAffection.IsEnabled = false;   // 纯展示
+            m.Items.Add(_miAffection);
+            UpdateAffectionMenuItem();
+
+            _miToday = new MenuItem();
+            _miToday.Header = "今天：—";
+            _miToday.IsEnabled = false;       // 纯展示
+            m.Items.Add(_miToday);
+            UpdateTodayMenuItem();
+
+            m.Items.Add(new Separator());
 
             MenuItem focus = new MenuItem();
             focus.Header = "打开 DSH 窗口(_D)";

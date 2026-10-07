@@ -201,6 +201,74 @@ namespace DshZhuangFangyiPet
     }
 
     /// <summary>
+    /// 契约 §2（v10，additive）：snapshot.today —— 今日番茄统计。
+    ///
+    /// 用途：右键菜单顶部的"今天"一行（exe 只**显示**，绝不自算 ——
+    /// 与番茄钟同一条纪律）。块缺失（旧 Host）→ `Today=null` → 菜单不显示那一行。
+    /// </summary>
+    internal sealed class PetTodayInfo
+    {
+        /// <summary>今日完成的番茄数。</summary>
+        public int PomodoroCount;
+        /// <summary>今日专注总时长（ms）。</summary>
+        public long FocusMs;
+        /// <summary>今日被打断（摸鱼）次数。</summary>
+        public int Interrupts;
+        /// <summary>连续专注天数（**今天还没开始不算断签**，Host 判定）。</summary>
+        public int StreakDays;
+        /// <summary>今日目标个数（0 = 没设目标）。</summary>
+        public int GoalCount;
+
+        /// <summary>值是否相同（Program diff 用，值没变零日志）。</summary>
+        public static bool Same(PetTodayInfo a, PetTodayInfo b)
+        {
+            if (a == null && b == null) return true;
+            if (a == null || b == null) return false;
+            return a.PomodoroCount == b.PomodoroCount && a.FocusMs == b.FocusMs &&
+                   a.Interrupts == b.Interrupts && a.StreakDays == b.StreakDays &&
+                   a.GoalCount == b.GoalCount;
+        }
+
+        /// <summary>
+        /// 菜单里那一行的文本（**纯函数**，自检直接断言）。
+        ///
+        /// 为什么格式化放在 exe 而不是 Host：它要跟着 `goalCount` 变（进度），
+        /// 而 Host 每帧给的是**数字**。若让 Host 拼字符串，同一个数字就有
+        /// "快照里的数字"与"快照里的字符串"两份真相 —— 改一处忘一处时，
+        /// 菜单显示 3/8、面板显示 2/8，谁也说不清哪个对。
+        ///
+        /// 时长按"小时+分钟"给：`25 分` / `1 小时 5 分`。只说分钟的话，
+        /// 专注 3 小时会显示 `180 分` —— 读不出量级。
+        /// </summary>
+        public string MenuLine()
+        {
+            System.Text.StringBuilder sb = new System.Text.StringBuilder();
+            sb.Append("今天：");
+            if (GoalCount > 0) sb.Append(PomodoroCount).Append('/').Append(GoalCount).Append(" 个番茄");
+            else sb.Append(PomodoroCount).Append(" 个番茄");
+            if (FocusMs > 0) sb.Append(" · ").Append(FormatDuration(FocusMs));
+            if (Interrupts > 0) sb.Append(" · 摸鱼 ").Append(Interrupts).Append(" 次");
+            if (StreakDays > 1) sb.Append(" · 连续 ").Append(StreakDays).Append(" 天");
+            return sb.ToString();
+        }
+
+        /// <summary>把毫秒格式化成 `25 分` / `1 小时 5 分` / `2 小时`。纯函数。</summary>
+        internal static string FormatDuration(long ms)
+        {
+            if (ms <= 0) return "0 分";
+            long totalMin = ms / 60000;
+            // 不足一分钟但确实有专注 → 显示"1 分"而不是"0 分"：
+            // 显示 0 分而番茄数 +1，用户会以为统计坏了。
+            if (totalMin <= 0) return "1 分";
+            long h = totalMin / 60;
+            long m = totalMin % 60;
+            if (h <= 0) return m + " 分";
+            if (m <= 0) return h + " 小时";
+            return h + " 小时 " + m + " 分";
+        }
+    }
+
+    /// <summary>
     /// 契约 §2（v9，additive）：snapshot.chat —— 聊天能力位。
     ///
     /// 块缺失（旧 Host）→ `Chat=null` → 输入窗只显示"指定对话"（零回归）。
@@ -238,6 +306,8 @@ namespace DshZhuangFangyiPet
         public PetAffectionInfo Affection;
         /// <summary>契约 §2 v9（additive）：聊天能力位。块缺失 = null（按不可用处理）。</summary>
         public PetChatInfo Chat;
+        /// <summary>契约 §2 v10（additive）：今日番茄统计。块缺失 = null（菜单不显示那一行）。</summary>
+        public PetTodayInfo Today;
         /// <summary>
         /// 契约 §2 v9（additive）：最近一次互动（一次性信号）。
         ///
@@ -482,6 +552,23 @@ namespace DshZhuangFangyiPet
                 // `show` 缺省跟随 enabled（旧 Host 若只给 enabled 也能工作）。
                 pi.Show = pomo.Get("show") != null ? pomo.Bool("show", pi.Enabled) : pi.Enabled;
                 s.Pomodoro = pi;
+            }
+
+            // 契约 §2 v10（additive）：今日番茄统计。块缺失 → Today=null。
+            //
+            // ⚠️ 每个数字都夹到非负：`Math.Max(0, …)`。坏值（负数/NaN）若透传，
+            // 菜单会显示"今天：-3 个番茄"，而那是**统计坏了**的信号 ——
+            // 与其显示一个荒唐的数字，不如显示 0（至少不误导）。
+            PetJson.JVal today = root.Get("today");
+            if (today != null && today.IsObj)
+            {
+                PetTodayInfo ti = new PetTodayInfo();
+                ti.PomodoroCount = Math.Max(0, today.Int("pomodoroCount", 0));
+                ti.FocusMs = Math.Max(0, (long)today.Num("focusMs", 0));
+                ti.Interrupts = Math.Max(0, today.Int("interrupts", 0));
+                ti.StreakDays = Math.Max(0, today.Int("streakDays", 0));
+                ti.GoalCount = Math.Max(0, today.Int("goalCount", 0));
+                s.Today = ti;
             }
 
             // 契约 §2 v9（additive）：好感度 + 最近一次互动。
