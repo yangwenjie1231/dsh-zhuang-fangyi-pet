@@ -105,9 +105,13 @@ function makeClock (start = 1000000) {
 /** 建一个状态机 + 假时钟。 */
 function makeMachine (config = {}, pickBubbleImage) {
   const clock = makeClock()
+  // ⚠️ 默认 `minStateDwellMs: 0`（**关掉最短驻留**）：本文件绝大多数用例断言的是
+  // 「事件刚到，状态立刻变」这条语义，而 2 秒驻留会把它们全变成"得等一会儿"，
+  // 失败原因看起来像状态机坏了，其实只是闩锁在正常工作。
+  // 闩锁本身由后面的专用用例测（显式传 `minStateDwellMs`）—— 显式传入时以传入值为准。
   const machine = createPetState({
     now: clock.now,
-    config,
+    config: { minStateDwellMs: 0, ...config },
     pickBubbleImage
   })
   return { machine, clock }
@@ -314,18 +318,104 @@ ok('agent/error → error', () => {
   assert.equal(machine.snapshot().petState, 'error')
 })
 
-ok('inbox/inserted → listening（瞬时闩锁）', () => {
-  const { machine, clock } = makeMachine({ listeningMs: 1200 })
+ok('⭐ inbox/inserted → 只弹气泡，**不改主体状态**（listening 已降级）', () => {
+  // 用户 2026-10-07："Listening 这个状态几乎不会出现（过的很快，而且意义不大），
+  // 相关的内容并入其他的吧"。
+  //
+  // 原行为：置一个 1.2 秒的 `listeningUntil`，petState 变 `listening`。
+  // 问题：它优先级低于 thinking —— agent 一开跑就被盖掉；而且那组图与 idle 撞脸。
+  // 现在：状态机**不动**，"收到"由 `inbox/inserted` 气泡承担。
+  const { machine } = makeMachine()
   machine.apply({ type: 'inbox/inserted', sessionId: 's1' })
-  assert.equal(machine.snapshot().petState, 'listening')
-  clock.advance(1201)
-  machine.tick()
-  assert.equal(machine.snapshot().petState, 'idle')
+  const snap = machine.snapshot()
+  assert.equal(snap.petState, 'idle',
+    `收到消息不该改变主体状态（应仍是 idle），实际 ${snap.petState}`)
+  assert.notEqual(snap.petState, 'listening', 'listening 运行时不再产出')
+  assert.ok(snap.bubble !== null && snap.bubble !== undefined, '但气泡必须弹')
+  assert.equal(snap.bubble.text, '收到，说吧。', '气泡文案要说"收到了"')
+  // ⚠️ 不断言 `snap.bubble.state`：快照契约 §2 的 bubble 块**不带** `state`
+  // 字段（那是内部记账），渲染方只用 id/kind/image/text/durationMs/priority。
 })
 
 /* ══════════════════════════════════════════════════════════════════════════
  * 3. 关键不变式：历史错误不覆盖当前回合
  * ═════════════════════════════════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════════════════════════════════
+ * 2.5 最短驻留（消除 thinking ↔ working 抖动）
+ * ══════════════════════════════════════════════════════════════════════════ */
+section('2.5 过程态最短驻留（用户定的 2 秒）')
+
+ok('⭐ thinking 刚起 → 工具在飞**不立刻**切 working（这正是抖动）', () => {
+  const { machine, clock } = makeMachine({ minStateDwellMs: 2000 })
+  machine.apply({ type: 'agent/status', sessionId: 's1', status: 'running' })
+  assert.equal(machine.snapshot().petState, 'thinking', '先进入思考')
+  clock.advance(300)
+  machine.apply({ type: 'tool/call', sessionId: 's1', callId: 'c1', name: 'read_file' })
+  assert.equal(machine.snapshot().petState, 'thinking',
+    '思考还不到 2 秒就不该换图 —— 否则每次工具调用都抖一下')
+  // 底层语义确实已经变成 working 了（闩锁只挡"对外显示"）
+  clock.advance(1800)
+  machine.tick()
+  assert.equal(machine.snapshot().petState, 'working', '满 2 秒后切到干活')
+})
+
+ok('⭐ tool/result 之后同样受驻留保护（回到 thinking 也要等够）', () => {
+  const { machine, clock } = makeMachine({ minStateDwellMs: 2000 })
+  machine.apply({ type: 'agent/status', sessionId: 's1', status: 'running' })
+  clock.advance(2100)
+  machine.apply({ type: 'tool/call', sessionId: 's1', callId: 'c1', name: 'x' })
+  machine.tick()
+  assert.equal(machine.snapshot().petState, 'working')
+  clock.advance(100)                                   // 工具只跑了 100ms
+  machine.apply({ type: 'tool/result', sessionId: 's1', callId: 'c1' })
+  assert.equal(machine.snapshot().petState, 'working', '刚干完 100ms，别急着切回思考')
+  clock.advance(2000)
+  machine.tick()
+  assert.equal(machine.snapshot().petState, 'thinking', '满 2 秒才切回思考')
+})
+
+ok('⭐ 事件时刻立即生效：出错 / 等你审批不被压 2 秒', () => {
+  const { machine, clock } = makeMachine({ minStateDwellMs: 2000 })
+  machine.apply({ type: 'agent/status', sessionId: 's1', status: 'running' })
+  assert.equal(machine.snapshot().petState, 'thinking')
+  clock.advance(50)
+  machine.apply({ type: 'turn/end', sessionId: 's1', reason: { kind: 'error' } })
+  assert.equal(machine.snapshot().petState, 'error', '出错必须立刻显示')
+  clock.advance(50)
+  machine.apply({ type: 'agent/status', sessionId: 's2', status: 'running' })
+  clock.advance(50)
+  machine.apply({ type: 'approval/asked', sessionId: 's2' })
+  assert.equal(machine.snapshot().petState, 'waiting', '等你审批必须立刻显示')
+})
+
+ok('⭐ 驻留为 0 时恢复"立刻响应"（测试与降级路径）', () => {
+  const { machine } = makeMachine({ minStateDwellMs: 0 })
+  machine.apply({ type: 'agent/status', sessionId: 's1', status: 'running' })
+  machine.apply({ type: 'tool/call', sessionId: 's1', callId: 'c1', name: 'x' })
+  assert.equal(machine.snapshot().petState, 'working', 'dwell=0 → 立刻切')
+})
+
+ok('⭐ 快照里 sessions[].state 也过闩锁（否则 exe 的 EffectiveState 会把抖动放回去）', () => {
+  const { machine, clock } = makeMachine({ minStateDwellMs: 2000 })
+  machine.apply({ type: 'agent/status', sessionId: 's1', status: 'running' })
+  clock.advance(100)
+  machine.apply({ type: 'tool/call', sessionId: 's1', callId: 'c1', name: 'x' })
+  const s = machine.snapshot()
+  assert.equal(s.petState, 'thinking')
+  assert.equal(s.sessions[0].state, 'thinking',
+    '会话级状态必须与顶层一致 —— exe 会拿它跟 petState 比优先级取最大')
+})
+
+ok('⭐ 驻留时长可热更新（setConfig 改完立即生效）', () => {
+  const { machine, clock } = makeMachine({ minStateDwellMs: 2000 })
+  machine.apply({ type: 'agent/status', sessionId: 's1', status: 'running' })
+  clock.advance(100)
+  machine.apply({ type: 'tool/call', sessionId: 's1', callId: 'c1', name: 'x' })
+  assert.equal(machine.snapshot().petState, 'thinking')
+  machine.setConfig({ minStateDwellMs: 0 })
+  assert.equal(machine.snapshot().petState, 'working', '改成 0 后立刻切')
+})
+
 section('3. 关键不变式：历史错误不覆盖当前回合')
 
 ok('running 清除该会话的 error 闩锁', () => {
@@ -538,7 +628,7 @@ ok('气泡到期后被清空', () => {
 })
 
 ok('静默期内同 key 不重复弹', () => {
-  const { machine, clock } = makeMachine({ bubbleSilenceMs: 8000, listeningMs: 100 }, () => null)
+  const { machine, clock } = makeMachine({ bubbleSilenceMs: 8000 }, () => null)
   machine.apply({ type: 'inbox/inserted', sessionId: 's1' })
   const first = machine.snapshot().bubble?.id
   clock.advance(50)
@@ -1042,10 +1132,16 @@ ok('attention 文案随 locale 切换', () => {
 
 section('13.6 表情结合状态（emotes.js）')
 
-ok('⭐ 9 个状态**全部**有专属表情池（不能有状态哑掉）', () => {
-  const states = ['waking', 'idle', 'listening', 'thinking', 'working', 'waiting', 'happy', 'error', 'sleeping']
+ok('⭐ 实际会产出的 8 个状态**全部**有专属表情池（不能有状态哑掉）', () => {
+  // ⚠️ 这里**不含 listening**：2026-10-07 用户决定它降级为纯气泡 ——
+  // 它只有 1.2 秒闩锁、优先级又低于 thinking，实际几乎不作为主体状态出现，
+  // 而它那组图（眨眼等）与 idle 撞脸。收到消息现在只弹 `inbox/inserted` 气泡。
+  const states = ['waking', 'idle', 'thinking', 'working', 'waiting', 'happy', 'error', 'sleeping']
   const missing = states.filter(s => emotePool(s).length === 0)
   assert.deepEqual(missing, [], `这些状态没有表情池：${missing.join(', ')}`)
+  // 反向：listening 应当**已经没有**情境池（合并进 inbox/inserted）
+  assert.deepEqual(emotePool('listening'), [],
+    'listening 已降级为纯气泡，不该再有专属情境池')
 })
 
 ok('⭐ 事件型 key 也有池（完成/失败/来消息/主动卖萌）', () => {
@@ -1115,7 +1211,7 @@ ok('⭐⭐ 确定性判据：不同状态**必须**取到不同图（这就是"�
   //   seed=0 时索引取模只产生 **1 种**结果；而按状态取产生 4 种（好耶/生气/工作中/摸鱼）。
   // 所以"同一 seed 下各状态结果是否互不相同"就能确定性地区分新旧行为 ——
   // 不需要靠随机抽样（那样概率上会漏，实测过：随机的断言在回退成旧代码时仍然全绿）。
-  const keys = ['waking', 'idle', 'listening', 'thinking', 'working', 'waiting', 'happy', 'error', 'sleeping']
+  const keys = ['waking', 'idle', 'thinking', 'working', 'waiting', 'happy', 'error', 'sleeping', 'inbox/inserted']
   const picked = keys.map(k => pickEmoteFile(k, 0))
   const distinct = new Set(picked.filter(p => p !== null))
   assert.ok(distinct.size >= 5,

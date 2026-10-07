@@ -1129,8 +1129,18 @@ await ok('⭐⭐ 合成服务不在 → 气泡照常、不交付语音（绝不�
   //（回退验证实测确认漏过）。
   await new Promise(r => setTimeout(r, 1200))
   const after = await (await fetch(`${base}/api/zhuang-fangyi/pet/state`)).json()
-  assert.ok(after.speak === null || after.speak === undefined,
-    `合成失败时不该交付语音，实际 ${JSON.stringify(after.speak)}`)
+  // ⚠️ **不许交付音频**：`speak.name` / `speak.seq` 必须缺席 ——
+  //   exe 拿 name 去 `/pet/speech/<name>` 取字节，硬交付一个不存在的名字
+  //   只会换来一条警告 + 每次帧都重试。
+  assert.ok(after.speak === null || after.speak === undefined ||
+    after.speak.name === undefined,
+  `合成失败时不该交付语音音频，实际 ${JSON.stringify(after.speak)}`)
+  // ⭐ 但**要**给兜底信号（契约 §2 `speak.fallback`）：TTS 没兜住的那个时刻
+  //   不该完全无声 —— `chat/reply` 那 12 条固定台词就是干这个用的。
+  //   （以前这里只有一句注释、exe 侧从没实现，于是它们是死资源。）
+  const fb = after.speak?.fallback
+  assert.ok(fb && typeof fb.seq === 'number' && fb.seq > 0 && fb.event === 'chat/reply',
+    `合成失败时应发兜底台词信号，实际 ${JSON.stringify(after.speak?.fallback)}`)
   await ws.close()
   for (const d of local.__effects) if (typeof d === 'function') assert.doesNotThrow(() => d())
 })
@@ -1887,31 +1897,89 @@ await ok('变体经 HTTP 清单拿到的是**自己的**几何，不是 state �
   assert.ok(checked > 0, '真实素材里应至少有一个变体的几何与 state 声明不同（否则这条测试没意义）')
 })
 
-await ok('⭐ F5 那批已改为**桌宠主体**（用户点名"不要做气泡表情"）', async () => {
-  // 用户 2026-10-07："新增的那一批表情包不要做气泡表情，要做桌宠主体"。
-  // 这条锁住三件事，防止将来素材换版时悄悄退回去：
-  //   ① 这批进了 `states.variants`（= 主体），不是只在 bubble 池里；
-  //   ② 每张主体条带的几何自洽（frames × frameWidth == 实际宽度）；
-  //   ③ 那 2 张**确实做不了主体**的（后半段满屏不透明）仍留在气泡池 ——
-  //      不是漏掉了，是硬约束：主体任何一帧都不能铺满，否则桌面上闪矩形块。
+await ok('⭐ 素材台账落地：产物名带语义 id + 清单有 assets 身份段', async () => {
+  // 用户 2026-10-07 拍板："改成带语义名"。产物从按位置编号（`idle-4.png`）
+  // 改成带语义 id（`idle-smile.png`），清单同步多出 `assets` 身份段。
+  //
+  // 这一改动的最大收益在下面几条断言里：以前"某张图归哪个状态"只能**数张数**
+  // （历史包袱：几何指纹撞车导致假绿、认文件名把人认错过一次），现在可以按 id 认人。
   const atlas = JSON.parse((await get('/api/zhuang-fangyi/pet/atlas')).body)
-  const bodyFiles = new Set()
-  for (const list of Object.values(atlas.variants ?? {})) {
-    for (const f of list) bodyFiles.add(f)
-  }
-  // 这 18 张是能当主体的那批（语义名 → 产物文件名不含语义名，
-  // 所以按"变体里出现了多少张 25 帧条带"来判定更稳：新素材都是 25 帧）。
-  let animatedVariants = 0
-  for (const list of Object.values(atlas.variants ?? {})) {
-    for (const f of list) {
-      const g = atlas.files?.[f]
-      if (g && g.frames > 1) animatedVariants += 1
+  const onDisk = JSON.parse(fs.readFileSync(path.join(ART, 'pet.json'), 'utf8'))
+  const ledger = atlas.assets ?? {}
+  assert.ok(Object.keys(ledger).length > 0, '清单里应有 assets 段（产物路径 → 身份）')
+
+  // ① 每条变体都能拆成 `<state>-<id>.png`，且 id 与清单对得上
+  for (const [state, files] of Object.entries(atlas.variants ?? {})) {
+    for (const file of files) {
+      assert.ok(file.startsWith(`${state}-`) && file.endsWith('.png'),
+        `${file} 应命名为 <state>-<id>.png（现在还是按位置编号）`)
+      const meta = ledger[file]
+      assert.ok(meta && meta.id, `${file} 在 assets 里应有语义 id`)
+      assert.deepEqual(meta.states, [state], `${file} 的 states 应恰好是 [${state}]`)
     }
   }
-  assert.ok(animatedVariants >= 18,
-    `主体里应有 ≥18 张动图变体（F5 那批），实际 ${animatedVariants}`)
 
-  // 主体条带几何自洽：宽度 == frames × frameWidth
+  // ② **一张素材只服务一个状态** —— 此前 5 张素材跨 2~3 个状态被复用
+  //    （"微笑"同时出现在 waking/idle/happy），于是"每个状态表情都不一样"从根上不成立。
+  const owners = new Map()
+  for (const [state, files] of Object.entries(atlas.variants ?? {})) {
+    for (const file of files) {
+      const id = ledger[file]?.id
+      owners.set(id, [...(owners.get(id) ?? []), state])
+    }
+  }
+  const shared = [...owners].filter(([, st]) => st.length > 1)
+  assert.deepEqual(shared, [],
+    `这些素材被多个状态共用：${shared.map(([id, st]) => `${id}→${st.join('/')}`).join(', ')}`)
+
+  // ③ listening 已降级为纯气泡（用户：它几乎不会出现，意义不大）→ 不分配主体素材
+  assert.ok(!atlas.variants?.listening, 'listening 不该再有主体变体')
+  assert.ok(!atlas.states?.listening, 'listening 不该再有 canonical 条目')
+
+  // ④ 旧的按序号命名不许复活
+  const legacy = []
+  for (const files of Object.values(atlas.variants ?? {})) {
+    for (const file of files) {
+      if (/^[a-z]+-[2-9]\.png$/.test(path.basename(file))) legacy.push(file)
+    }
+  }
+  assert.deepEqual(legacy, [], `不该再有按序号命名的产物：${legacy.join(', ')}`)
+
+  // ⑤ HTTP 这一跳与磁盘一致（`files` 字段曾在这两处不一致上吃过亏）
+  assert.equal(Object.keys(onDisk.assets ?? {}).length, Object.keys(ledger).length,
+    '磁盘 pet.json 与 /pet/atlas 的 assets 条目数应一致')
+})
+
+await ok('⭐ F5 那批已改为**桌宠主体**（用户点名"不要做气泡表情"）', async () => {
+  // 用户 2026-10-07："新增的那一批表情包不要做气泡表情，要做桌宠主体"。
+  // 这条锁住：① 这批进了 `states.variants`（= 主体）而不是只在气泡池里；
+  //          ② 曾经被透明占比判据挡住的两张也已按用户决定归队；
+  //          ③ 它们**不在**气泡池。
+  //
+  // ⚠️ 断言用**名字**认，不数张数 —— 产物现在带语义 id，这是本轮改名最大的收益。
+  const atlas = JSON.parse((await get('/api/zhuang-fangyi/pet/atlas')).body)
+  const idOf = f => atlas.assets?.[f]?.id
+  const idsOf = state => (atlas.variants?.[state] ?? []).map(idOf)
+
+  const expect = {
+    happy: ['muscle', 'watermelon', 'cat-paws', 'cheerful', 'excited'],
+    error: ['listless', 'sunglasses', 'road-rage'],
+    thinking: ['dizzy', 'stunned', 'star-eyes', 'wink', 'please', 'grass-holding'],
+    working: ['megaphone', 'follow-me'],
+    waiting: ['hungry', 'cover-mouth']
+  }
+  for (const [state, ids] of Object.entries(expect)) {
+    const have = idsOf(state)
+    for (const id of ids) {
+      assert.ok(have.includes(id), `${id} 应在 ${state} 的变体里，实际：${have.join(', ')}`)
+    }
+  }
+  const bubbleIds = (atlas.bubble ?? []).map(b => idOf(b.file))
+  for (const id of ['muscle', 'sunglasses', 'starry-formula', 'listless']) {
+    assert.ok(!bubbleIds.includes(id), `${id} 做了主体，就不该再留在气泡池`)
+  }
+
+  // 主体条带几何自洽（帧数/帧宽 ≥ 1）
   for (const list of Object.values(atlas.variants ?? {})) {
     for (const f of list) {
       const g = atlas.files?.[f]
@@ -1919,93 +1987,50 @@ await ok('⭐ F5 那批已改为**桌宠主体**（用户点名"不要做气泡�
       assert.ok(g.frames >= 1 && g.frameWidth >= 1, `${f} 几何非法`)
     }
   }
-
-  // muscle / sunglasses：2026-10-07 用户拍板"管线关于不透明的要求，直接去掉"，
-  // 这两张（后半段满屏不透明）随之**归队进主体**，并按 F5 批次的统一原则
-  // （"不要做气泡表情，要做桌宠主体"）撤出气泡池。
-  //
-  // ⚠️ "进没进主体"不能按名字找：产物名是状态编号（happy-8.png），
-  // 语义名不进文件名（老坑）。所以用**张数**判定 —— muscle 进 happy（7→8）、
-  // sunglasses 进 error（3→4），配合下面"不在气泡池"的检查，两个方向都锁住。
-  const bubbleFiles = (atlas.bubble ?? []).map(b => b.file)
-  assert.equal((atlas.variants?.happy ?? []).length, 8,
-    `happy 应为 8 张（muscle 归队 +1），实际 ${(atlas.variants?.happy ?? []).length}`)
-  assert.equal((atlas.variants?.error ?? []).length, 4,
-    `error 应为 4 张（sunglasses 归队 +1），实际 ${(atlas.variants?.error ?? []).length}`)
-  for (const name of ['muscle', 'sunglasses']) {
-    const inBubble = bubbleFiles.some(f => String(f).includes(name))
-    assert.ok(!inBubble, `${name} 不该再留在气泡池（整批做主体的决定）`)
-  }
 })
 
-await ok('⭐ "吐彩虹"那张归属**出错**，不在思考（用户点名）', async () => {
-  // 用户 2026-10-07："思考用这张图不合适，这张图出错的时候放"。
+await ok('⭐ 用户拍板的三处归属，按名字钉住（不再数张数）', async () => {
+  // 这三处都是 2026-10-07 用户点名的决定：
+  //   ① "思考用这张图不合适，这张图出错的时候放" → 吐彩虹（listless）归 error；
+  //   ② "这张图应该用于思考的时候" + "这两个都并存" → 星空公式进 thinking，
+  //      并成为 thinking 的**主图**（思考意象最强的那张）；
+  //   ③ "把这张图从气泡里挪开" → 星空公式只当主体，不在气泡池。
   //
-  // 那张是 **`listless`**（源文件 `表情包_35_双眼半睁无精打采嘴巴.gif`）——
-  // 半睁的眼睛 + 吐彩虹，表达"顶不住了/被搞懵"，属于**出错**，不是思考。
-  // 改法：`STATE_PLAN` 里把它从 thinking 挪到 error。
+  // ── 为什么改成"按名字" ────────────────────────────────────────────────
   //
-  // ── 判据为什么是"张数"而不是"认图" ─────────────────────────────────────
-  //
-  // 试过两条更"聪明"的路，都不可靠，记下来免得后人重走：
-  //   · **几何指纹**（25帧/40ms）：`error-2`（持刀）**也是** 25帧/40ms ——
-  //     `some()` 于是恒真，回滚后照样绿，是**假断言**（实测确认）。
-  //   · **文件名**：产物按状态编号（`error-3.png`），语义名不进文件名，认不出。
-  //     而且**我正是被文件名骗过一次**：按"圆睁大眼嘴巴张成小小"猜成 `stunned`，
-  //     把错的那张搬了过去 —— 这批素材的文件名描述的是**静态印象**，
-  //     而 GIF 的**中后段**才是用户看到的画面。认图必须看中间帧。
-  //   · **像素比对**：要解 GIF/PNG，Node 侧代价太高（不值得为一条断言引依赖）。
-  //
-  // 张数虽然朴素，但**精确对应这一串决定**（都是用户拍板的，按时间记账）：
-  //   吐彩虹挪去 error        → thinking 5→4, error 2→3
-  //   星空公式进 thinking 并存 → thinking 4→5
-  //   muscle 进 happy         → happy 7→8
-  //   sunglasses 进 error     → error 3→4
-  // 谁把这些挪回去，张数立刻变 —— 回滚验证过。副作用是有意的：
-  // 将来素材变动导致张数变化时这条会红，需要人重新确认归属，
-  // 而不是让它悄悄漂回去。
+  // 这条断言过去踩过两次坑，都记在这里免得后人重走：
+  //   · **几何指纹**（25 帧/40ms）：持刀那张**也是** 25 帧/40ms，`some()` 恒真，
+  //     回滚后照样绿 —— 是**假断言**（实测确认）。
+  //   · **数张数**（`thinking.length === 5`）：素材一换版就红，而且看不出
+  //     哪张挪去了哪，只能再数一遍。
+  //   · **按源文件名认**：我正是被文件名骗过一次（把"圆睁大眼嘴巴张成小小"
+  //     猜成 `stunned`）—— 这批 GIF 的文件名描述的是**首帧印象**，
+  //     而用户看到的是中后段。认图必须看中间帧。
+  // 现在产物带语义 id 且清单有 `assets` 段，于是按 id 认人：**以后再挪图不用改测试**。
   const atlas = JSON.parse((await get('/api/zhuang-fangyi/pet/atlas')).body)
-  const thinking = atlas.variants?.thinking ?? []
-  const error = atlas.variants?.error ?? []
+  const idOf = f => atlas.assets?.[f]?.id
+  const idsOf = state => (atlas.variants?.[state] ?? []).map(idOf)
 
-  assert.deepEqual(thinking.filter(f => error.includes(f)), [],
-    `thinking 与 error 不该共用变体：${thinking.filter(f => error.includes(f)).join(', ')}`)
-  assert.equal(thinking.length, 5,
-    `thinking 应为 5 张（吐彩虹挪走 -1，星空公式并存 +1），实际 ${thinking.length}：${thinking.join(', ')}`)
-  assert.equal(error.length, 4,
-    `error 应为 4 张（吐彩虹 + 墨镜流泪），实际 ${error.length}：${error.join(', ')}`)
+  assert.ok(idsOf('error').includes('listless'), '吐彩虹（listless）应在 error 的变体里')
+  assert.ok(!idsOf('thinking').includes('listless'), '吐彩虹不该再出现在 thinking')
+  assert.deepEqual(
+    idsOf('thinking').filter(id => idsOf('error').includes(id)), [],
+    'thinking 与 error 不该共用变体（用户逐条指定过）'
+  )
+  assert.equal(atlas.variants?.thinking?.[0], 'thinking-starry-formula.png',
+    'thinking 的主图应是星空公式')
 })
 
-await ok('⭐ 星空公式**只在思考主体**，已撤出气泡池（用户点名）', async () => {
-  // 用户 2026-10-07："这张图应该用于思考的时候" → 进 thinking（与星星眼并存）；
-  // 随后 "把这张图从气泡里挪开" → 气泡池不再有它。
-  //
-  // ① thinking 里应有**两张** 33帧/30ms 的条带（戳脸颊 + 星空公式）——
-  //   原先只有一张（gif:04 戳脸颊）。几何指纹在这里够用：只判"多了张"。
-  //   （它带背景 —— 全幅不透明，用户明确"不需要抠背景"，公式就画在背景上。）
-  // ② 气泡池**不得**再有 starry-formula —— 挪开了就是挪开了，别让它漂回来。
-  // ③ 它同时曾登记为气泡（kind=anim）+ 主体（kind=gif），`by_semantic`
-  //   撞键会让一边拿到另一边的条目 —— 这里的帧数断言就是那道防线。
-  const atlas = JSON.parse((await get('/api/zhuang-fangyi/pet/atlas')).body)
-  const thinking = atlas.variants?.thinking ?? []
-  const big33 = thinking.filter(f => {
-    const g = atlas.files?.[f]
-    return g && g.frames === 33 && g.frameMs === 30
-  })
-  assert.equal(big33.length, 2,
-    `thinking 应有 2 张 33帧/30ms（戳脸颊 + 星空公式），实际 ${big33.length}：${big33.join(', ')}`)
-
-  const bubble = (atlas.bubble ?? []).find(b => String(b.file).includes('starry-formula'))
-  assert.ok(bubble === undefined,
-    '气泡池里不该再有 starry-formula（用户要求从气泡挪开）')
-})
-
-await ok('9 个状态全部有专属素材（覆盖率 9/9）', async () => {
+await ok('8 个实际使用的状态全部有专属素材（覆盖率 8/8）', async () => {
+  // `listening` 不在其中：2026-10-07 用户决定它降级为纯气泡（收到消息只弹气泡、
+  // 不切主体状态）。契约 §1 的 9 个状态名保留不动，只是运行时不再产出它。
   const r = await get('/api/zhuang-fangyi/pet/atlas')
   const body = JSON.parse(r.body)
   const covered = body.report.coveredStates
-  assert.equal(covered.length, 9, `只覆盖 ${covered.length} 个：${covered.join(',')}`)
-  assert.equal(body.report.uncoveredStates.length, 0)
+  assert.equal(covered.length, 8, `只覆盖 ${covered.length} 个：${covered.join(',')}`)
+  assert.equal(body.report.uncoveredStates.length, 0,
+    `这些状态没有专属素材：${body.report.uncoveredStates.join(',')}`)
+  assert.ok(!covered.includes('listening'), 'listening 已降级为纯气泡，不该出现在主体覆盖里')
 })
 
 await ok('每个状态的素材文件都能通过 /pet/art/ 真的取到字节', async () => {
@@ -2251,6 +2276,29 @@ async function openSse () {
   }
 }
 
+await ok('⭐ 兜底 ticker 在连着两个"无 deadline"的事件之后**仍然 armed**', async () => {
+  // 这条守的是一个**能永久丢掉定时器**的顺序：
+  // `scheduleTick()` 原先"先 clearTimeout 再判 delay===tickFloor"，
+  // 于是同一延迟的那一支会**把定时器清掉却不补上** —— 而 `tickFloor` 还留着
+  // 旧值，后续每次算出同一个 delay 都再次早退，定时器**永远回不来**。
+  // 后果不是"晚一点"：`sleeping`/气泡过期只靠这个 15 秒兜底，
+  // 丢了它桌宠就再也不睡觉、气泡再也不消失（且毫无报错）。
+  //
+  // 触发条件现在很容易满足：`onApplied` 让每个事件都重排一次，
+  // 而"没有 deadline"的事件算出来都是兜底值 15000 —— 连着两个就中。
+  // 这里就用两次同状态的 `agent/status` 制造"无 deadline"（状态没变 → 无驻留到期）。
+  const armed = async () => JSON.parse((await get('/api/zhuang-fangyi/pet/diag')).body).diag.tick
+  ctx.emit('agent/status', { agent: { id: 'e2e-tick' }, status: 'idle' })
+  await new Promise(r => setTimeout(r, 60))
+  ctx.emit('agent/status', { agent: { id: 'e2e-tick' }, status: 'idle' })
+  await new Promise(r => setTimeout(r, 60))
+  const t = await armed()
+  assert.ok(t !== undefined && t !== null, 'diag 应带 tick 块')
+  assert.equal(t.armed, true,
+    `连着两个无 deadline 的事件之后兜底 ticker 丢了（floor=${t.floor}）—— ` +
+    '桌宠将不再睡觉、气泡不再过期，直到某个事件算出不同的 delay')
+})
+
 const sse = await openSse()
 
 await ok('SSE 建立后立刻收到 hello + retry（契约 §2）', async () => {
@@ -2269,6 +2317,51 @@ await ok('hello 帧是全量快照，不是空对象（否则 petState/rev 会�
   assert.ok(typeof snap.rev === 'number', 'hello 必须带数值 rev')
 })
 
+/* ── ⭐ 下行通道：exe/桌面端改了设置 → 快照必须把它带出来 ──────────────────
+ *
+ * 用户报的："桌面端滚轮调完大小，DSH 的设置页不跟着变"。
+ * 链路是：exe 去抖后 POST /pet/settings → 宿主合并落盘 → **广播带新 settings 的快照**
+ * → 浏览器半边把快照里的 settings 并进本地状态。
+ *
+ * 这一条测的是**中间那一跳**：POST 之后，SSE 帧里到底有没有带上新值。
+ * 少了它，客户端再怎么"并进本地状态"也拿不到东西（两边各自都绿、接缝上全错 ——
+ * 这个项目已经在"字段白名单"上栽过一次同样的跟头）。
+ * ──────────────────────────────────────────────────────────────────────── */
+await ok('⭐⭐ POST /pet/settings 的改动必须出现在随后的 SSE 快照里（设置下行通道）', async () => {
+  // 用 doubleClick + statusFontScale：两者都在快照的 settings 子集里，
+  // 且**不影响画面**（改 scale 会真的缩放用户桌面上的桌宠）。
+  const before = JSON.parse((await get('/api/zhuang-fangyi/pet/settings')).body).settings
+  const targetDc = before.doubleClick === 'none' ? 'emote' : 'none'
+  const targetFs = Math.abs(before.statusFontScale - 2.1) < 0.001 ? 1.3 : 2.1
+
+  const framesBefore = sse.snapshots().length
+  const posted = await post2('/api/zhuang-fangyi/pet/settings',
+    { doubleClick: targetDc, statusFontScale: targetFs })
+  assert.equal(posted.status, 200, `POST 应成功，实际 ${posted.status}`)
+
+  const deadline = Date.now() + 4000
+  let hit = null
+  while (Date.now() < deadline) {
+    hit = sse.snapshots().slice(framesBefore).find(s =>
+      s.settings !== undefined &&
+      s.settings.doubleClick === targetDc &&
+      Math.abs(s.settings.statusFontScale - targetFs) < 0.001)
+    if (hit !== null && hit !== undefined) break
+    await new Promise(r => setTimeout(r, 25))
+  }
+  assert.ok(hit !== null && hit !== undefined,
+    `改完设置后没有广播带新值的快照 —— 设置页就永远看不到桌面端的改动。` +
+    `最近帧的 settings：${JSON.stringify(sse.snapshots().slice(-2).map(s => s.settings))}`)
+
+  // 其余字段不许被这一帧冲掉（合并语义：补丁只带两个键）
+  assert.equal(hit.settings.scale, before.scale, '合并语义：没动的 scale 必须原样保留')
+  assert.equal(hit.settings.voice, before.voice, '合并语义：没动的 voice 必须原样保留')
+
+  // 还原（别把用户的真实设置改掉）
+  await post2('/api/zhuang-fangyi/pet/settings',
+    { doubleClick: before.doubleClick, statusFontScale: before.statusFontScale })
+})
+
 await ok('派发 agent/status running → SSE 推 thinking', async () => {
   const before = sse.snapshots().length
   ctx.emit('agent/status', { agent: { id: 'e2e-1' }, status: 'running' })
@@ -2285,12 +2378,28 @@ await ok('派发 agent/status running → SSE 推 thinking', async () => {
   assert.ok(hit, `未推送 thinking。最近帧：${JSON.stringify(sse.snapshots().slice(-2))}`)
 })
 
-await ok('派发 session/event tool/call → 推 working', async () => {
+await ok('派发 session/event tool/call → 先不动，满 2 秒最短驻留才推 working', async () => {
+  // ⚠️ 这里断言的是**加了最短驻留之后**的行为（用户 2026-10-07 定的 2 秒）。
+  //
+  // 背景：`thinking` 与 `working` 是交替的 —— `tool/call` 进来就变 working，
+  // `tool/result` 出去又回 thinking，而一次本地工具常常只有几百毫秒。
+  // 每次切换都换图 ⇒ 桌面上一直在抖。所以过程态加了最短驻留：
+  // 刚进入 thinking 不到 2 秒时，**工具来了也不换图**。
+  //
+  // 这里用**真实时钟等**（不用假时钟）：e2e 跑的就是线上配置，
+  // 把这 2 秒等出来顺带证明了"生产环境确实生效"，而不是只在单测的假时钟里绿。
+  const before = sse.snapshots().length
   ctx.emit('session/event', { id: 'e2e-1' }, {
     type: 'tool/call',
     data: { turn: 1, step: 1, callId: 'c-e2e', name: 'bash', arguments: '{}' }
   })
-  const deadline = Date.now() + 4000
+  // ① 立刻不该变成 working
+  await new Promise(r => setTimeout(r, 200))
+  const early = sse.snapshots().slice(before)
+  assert.ok(!early.some(s => s.petState === 'working'),
+    `驻留期内不该推 working（实际推了：${early.map(s => s.petState).join(',')}）`)
+  // ② 等满 2 秒就该切过去
+  const deadline = Date.now() + 6000
   let hit = false
   while (Date.now() < deadline) {
     if (sse.snapshots().some(s => s.petState === 'working')) {
@@ -2299,7 +2408,7 @@ await ok('派发 session/event tool/call → 推 working', async () => {
     }
     await new Promise(r => setTimeout(r, 25))
   }
-  assert.ok(hit, `未推送 working。最近帧：${JSON.stringify(sse.snapshots().slice(-2))}`)
+  assert.ok(hit, `满 2 秒后仍未推送 working。最近帧：${JSON.stringify(sse.snapshots().slice(-2))}`)
 })
 
 /* ── ⭐⭐ 聊天回复 → 气泡（用户报的 bug 就在这里）───────────────────────────
@@ -2539,7 +2648,8 @@ await ok('降级时其余功能照常（状态、素材、路由都可用）', a
   assert.equal(state.status, 200)
   assert.equal(atlas.status, 200)
   const body = JSON.parse(atlas.body)
-  assert.equal(body.report.coveredStates.length, 9, '素材仍应完整')
+  // 8 个而不是 9：`listening` 已降级为纯气泡（2026-10-07 用户决定），不算主体覆盖。
+  assert.equal(body.report.coveredStates.length, 8, '素材仍应完整')
 })
 
 /* ── 总开关必须真的停掉桌面那只 ──────────────────────────────────────────

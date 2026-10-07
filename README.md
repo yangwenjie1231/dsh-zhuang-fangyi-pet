@@ -111,97 +111,96 @@ powershell -NoProfile -File tools\deploy.ps1
 
 ---
 
-## 四、素材：PNG 优先，抠图交给你
+## 四、素材：一份台账说了算
 
-素材来源 `庄方宜素材\10-表情包\` 与 `fromQQ\新表情包\`，分四类：
+### 素材知识只有一处：`assets/catalog.json`
 
-| 类别 | 文件 | 处置 |
+| 目录 | 内容 | 处置 |
 |---|---|---|
-| **已透明 PNG** | `wx\*.png`（8 张，240×240） | **首选**，直接用 |
-| **已透明 GIF** | `QQ表情\*.gif` 中干净的 **10 张** | 本体动画 |
-| **已抠图** | `cutout\`（17 张，1000×1000） | ✅ **已全部进池**（`bubble/08…25`） |
-| **黑白线稿贴纸** | `fromQQ\新表情包\庄方宜(未扣背景)\*.png`（20 张） | ✅ **已进池**（`bubble/new/*`） |
+| **素材台账** | `assets/catalog.json` | **唯一真相**：改归属 / 加素材 / 改气泡情境都只改它 |
+| 已透明 PNG | `庄方宜素材\wx\*.png`（8 张） | 首选，直接用 |
+| 动态 GIF | `庄方宜素材\QQ表情\*.gif` | 主体动画 + 动态气泡 |
+| **你抠好的图** | `art/pet/src/cutout\`（17 张） | 抠图放这里，台账里 `source: "cutout/…"` |
+| 黑白线稿贴纸 | `fromQQ\新表情包\*.png`（20 张） | 不透明满幅贴纸，**不抠白底** |
+| 原始参考图 | `art/pet/src/raw\` | **你的工作台，脚本只写不覆盖** |
 
-### 哪些 GIF 能用，哪些不能用
-
-判据是**逐帧统计「alpha==0 的像素占比」** —— 因为桌宠的硬要求是
-「**任何一帧都不能铺满不透明像素**」，否则播放到那一帧会出现一个矩形色块。
-
-```
-干净（10 张，可用）：01 02 03 04 06 07 24 26 28 29
-有实心帧（2 张，排除）：05_星空公式（33/33 帧实心）、27_生气指人（10/18 帧实心）
-```
-
-> 这个判据是踩过坑才定下来的：bbox 会被"主体画到画面边缘"骗，
-> 洋红透过率会被"主体占满宽度"骗（02/26/29 都曾被误判为脏）。
-> 只有逐帧透明占比能直接回答"这一帧会不会显示成一个块"。
-
-### 当前素材状态
-
-**17 张手动抠图已全部完成并进池**（`art/pet/src/cutout/` → `bubble/08…25`）。
-`pet.json` 的 `missing` 只剩 **2 项**，都卡在同一件事上：
-
-```
-表情包_05_星空公式.gif   33/33 帧铺满不透明 → 播放会出现矩形块
-表情包_27_生气指人.gif   10/18 帧铺满不透明 → 同上
+```jsonc
+{ "id": "smile",                        // 语义键，全局唯一 → 产物名 <state>-<id>.png
+  "source": "QQ表情/表情包_07_微笑.gif", "role": "body",
+  "caption": "平静微笑，日常待机",        // ⭐ 认图结果（看中间帧写的）
+  "states": ["idle"] }                  // 一图一状态；第 1 个是主图
 ```
 
-这两张是**动画**，不能像静态图那样只抠一张 —— 要**逐帧**抠（33 帧 / 18 帧），
-成本比静态图高得多，所以一直挂着。**不做也不影响使用**：41 张气泡表情已覆盖
-全部 12 个情境池，9/9 状态都有主素材。
+当前：**主体 35 张（8 个状态，零复用、零闲置）+ 气泡 42 张**。
 
-### 还想加图的话
+要查"某张图用在哪"：
 
-抠好后**保留 alpha**（RGBA PNG，**不要 flatten、不要贴白底** —— 否则透明区
-残留 RGB 会变成彩色噪点），放进 `art/pet/src/cutout/`。
+- 📄 [`docs/素材台账.md`](docs/素材台账.md) —— 生成的表格（勿手改）
+- 🖼 [`docs/素材看板.html`](docs/素材看板.html) —— **双击打开，每张图都会动**
+- 🔊 [`docs/语音台账.md`](docs/语音台账.md) —— 20 个事件 × 137 条台词
 
-⚠️ **只丢文件进去是没用的** —— 管线按**显式表**收录，不扫目录。两种用途：
+### 一图一状态（2026-10-07 起的规矩）
 
-```
-art/pet/src/cutout/
-  state-sleeping.png    ← 覆盖该状态的主素材（`state-` 前缀，不会被当气泡图）
-  state-happy-2.png     ← 该状态的轮换变体
-  26-new-emote.png      ← 气泡表情，但**必须**在 prepare-pet.py 里登记
-```
+一张素材**只服务一个状态**。此前 5 张素材跨 2~3 个状态共用
+（"微笑"同时出现在 waking/idle/happy），于是"每个状态表情都不一样"从根上不成立，
+而且**没人看得出来**。台账校验会直接报错；确需复用写 `"shared": true`。
 
-气泡表情要在 `tools/prepare-pet.py` 的表里加一行，**并且显式写 `hasText`**：
+### 产物命名带语义 id
 
-```python
-BUBBLE_F2 = (
-    ...
-    ('new-emote', '26-new-emote.png', True),   # (语义名, 文件名, 图里是否自带文字)
-)
-```
+`idle-smile.png` / `thinking-starry-formula.png` / `error-listless.png`
+（canonical 也是这个形式，不再是 `idle.png`）。
 
-`hasText` **不能猜**：写 `True` 表示"文字已印在图上"，Host 就不会再叠一句
-（否则屏幕上会出现两段互相打架的文字）；不在表里的一律按 `False`。
+这是为了**看得懂 + 测得准**：产物名和 `pet.json` 的 `assets` 段都能对上
+"画的是什么"，于是 e2e 断言可以**按名字写**（`listless ∈ error`），
+而不是数张数（素材一换版就红、且看不出哪张挪去了哪）。
+⚠️ 两侧**都不得解析文件名** —— `file` / `variants` 是唯一真相。
 
-然后重跑管线并重载：
+### 不再作为门槛的两条判据（用户决定，别加回来）
+
+1. **不透明度**：原先"任何一帧都不能铺满不透明像素，否则桌面闪矩形块"的判据
+   已删除 —— 用户原话："透不透明影响不大呀，背景又不是无意义"。
+   `minT%` 照样算、照样进报告，只是不再据此排除素材。
+2. **画风家族**：F2/F3 不得当主体、F5 不得当气泡这类判断已被用户推翻。
+   现在 `role` 直接写明这张图当什么用。
+
+### 想加图 / 换图
 
 ```powershell
-python tools/prepare-pet.py
-# 然后在 DSH 里 POST /api/zhuang-fangyi/pet/command  {"command":"reload-art"}
+$py = 'C:\Users\A\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe'
+
+# 1. 抠好的图放进 art/pet/src/cutout/（透明底 RGBA，**不要 flatten、不要贴白底**）
+# 2. 在 assets/catalog.json 里加/改一条
+# 3. 跑管线（幂等；raw/ 里的抠图不会被覆盖）
+& $py tools/prepare-pet.py
+# 4. 校验：台账 ↔ 产物 ↔ 清单 三者一致
+& $py tools/prepare-pet.py --audit
+node tools/test-pet-assets.mjs
+# 5. 重载：POST /api/zhuang-fangyi/pet/command {"command":"reload-art"}
 ```
 
-详细规则见 `art/pet/src/README.md`。
+⚠️ **只丢文件进 `cutout/` 是没用的** —— 管线按台账收录，不扫目录。
+`hasText`（图里是否自带文字）也不能猜：写 `true` 表示"文字已印在图上"，
+Host 就不会再叠一句（否则屏幕上出现两段打架的文字）。
+
+详细规则见 [`art/pet/src/README.md`](art/pet/src/README.md)。
 
 ### ⚠️ 变体几何：`pet.json` 的 `files` 映射
 
 `variants` 里的素材**几何差异极大** —— 它混了「静态 PNG（1 帧）」与
-「动态 GIF（N 帧）」。实测 24 个变体里 **14 个**与所属状态的声明不符：
+「动态 GIF（N 帧）」：
 
 ```
-happy 声明 33帧 × 256px，但 happy-2 = 274px（1 帧）、happy-4 = 239px（1 帧）
+happy 主图 33帧 × 256px，但 happy-joy 是 274px（1 帧）、happy-muscle 是 256px（25 帧）
 ```
 
-若按状态的 `frames` 去切变体，`happy-4.png` 会变成 `239/33 = 7px` 的**碎条**。
+若按状态的 `frames` 去切变体，静态那张会变成 `274/33 = 8px` 的**碎条**。
 
 所以 `pet.json` 有一个顶层 **`files` 映射**，给**每个文件自己的**几何：
 
 ```jsonc
 "files": {
-  "happy.png":   { "frames": 33, "frameWidth": 256, "frameMs": 30 },
-  "happy-2.png": { "frames": 1,  "frameWidth": 274, "frameMs": 0  }
+  "happy-heart-eyes.png": { "frames": 33, "frameWidth": 256, "frameMs": 30 },
+  "happy-muscle.png":      { "frames": 25, "frameWidth": 256, "frameMs": 40 }
 }
 ```
 
@@ -215,13 +214,13 @@ files[<文件名>]  →  states[<state>]  →  图片实测（naturalWidth / fra
 
 ---
 
+
 ## 五、状态机
 
 | 状态 | 触发 |
 |---|---|
 | `waking` | 插件加载后的亮相（~1.5s，有真实活动即提前结束） |
 | `idle` | 默认 |
-| `listening` | 收到用户消息 / 新消息入队 |
 | `thinking` | `agent/status→running` 且无在飞工具 |
 | `working` | `tool/call` 在飞（按 `callId` 去重计数） |
 | `waiting` | 在等你审批 |
@@ -233,7 +232,7 @@ files[<文件名>]  →  states[<state>]  →  图片实测（naturalWidth / fra
 
 ```
 working(90) > waiting(80) > thinking(70) > error(60)
-           > happy(50) > listening(40) > waking(30) > idle(20) > sleeping(10)
+           > happy(50) > waking(30) > idle(20) > sleeping(10)
 ```
 
 两个刻意的排序，都有依据：
@@ -243,6 +242,22 @@ working(90) > waiting(80) > thinking(70) > error(60)
   否则一次失败之后桌宠会一直生气，与外壳行为不一致。
 - **`waiting` 高于 `thinking`** —— 被审批卡住的会话最该被看到，
   否则它看起来只是"在忙"。
+
+**⭐ `thinking` 与 `working` 是交替，不是阶段**：`tool/call` 进来就变 `working`，
+`tool/result` 出去又回 `thinking`，而一次本地工具常常只有几十~几百毫秒。
+每次切换都会换图（exe 换精灵条带），于是桌面上一直在抖 ——
+这正是"主体变化度少"的一半原因：变体轮换还没轮到就被抖回去了。
+
+所以过程态加了**最短驻留**（`minStateDwellMs`，默认 **2 秒**）：
+切到新状态不足 2 秒就继续显示上一个。**事件时刻立即生效、不被压 2 秒**：
+`happy` / `error` / `waiting` / `waking` / `sleeping`
+（"完成啦"晚 2 秒会让语音与画面对不上，"等你审批"晚 2 秒是拿提醒开玩笑）。
+它只影响"对外显示的状态"，语义状态机本身不变。
+
+**`listening` 保留在契约里但运行时不再产出**（2026-10-07 用户决定）：
+它原本只是"收到消息后 1.2 秒"的闩锁，优先级又低于 `thinking` ——
+agent 一开跑就被盖掉，实际几乎不作为主体状态出现；而且它那组图与 `idle` 撞脸。
+现在收到消息**只弹气泡**（专属气泡 + 文案照旧），老客户端与老设置零影响。
 
 **常亮提醒（attention，契约 §2）**：状态之上的另一层。`approval/asked`（等审批）
 或 `ask_user_question`（等你回答）期间，气泡**一直亮着直到处理完**，

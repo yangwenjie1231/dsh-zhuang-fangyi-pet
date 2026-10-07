@@ -311,3 +311,65 @@ console.log(`总 ${lines.length} 条 | real ${real} | synth ${synth}`)
 console.log('重名:', dup.length ? dup : '无')
 console.log('事件覆盖:')
 for (const [k, v] of Object.entries(events)) console.log('  ' + k.padEnd(24) + v + ' 条')
+
+// ── 语音台账（docs/语音台账.md）────────────────────────────────────────────
+//
+// 为什么要有：台词表在**代码里**（BASE_LINES），而"哪个事件有几条、每条是什么、
+// 是原声还是合成"这件事只能通读代码才看得清。于是曾经攒下过 **27 条永远不会被播**
+// 的台词（137 条的 20%）：台词表里有、代码里却没有对应的 `Speak()`，而
+// `Speak()` 找不到语音是**静默返回** —— 没有日志、没有报错。
+//
+// 这份台账把"事件 → 台词"摊平，配套的可达性检查在
+// `tools/test-pet-assets.mjs`（每个 event 必须在源码里出现）与
+// `pet/SelfTest.cs`（清单里的每个 event 必须在可说名单里）。
+writeLedger(lines)
+
+function writeLedger (all) {
+  const byEvent = new Map()
+  for (const l of all) {
+    if (!byEvent.has(l.event)) byEvent.set(l.event, [])
+    byEvent.get(l.event).push(l)
+  }
+  const out = []
+  out.push('# 语音台账（自动生成，勿手改）')
+  out.push('')
+  out.push('> 由 `tools/gen-voice-lines.cjs` 从台词表生成。重跑该脚本即刷新。')
+  out.push('>')
+  out.push('> 台词表（唯一真相）在 `tools/gen-voice-lines.cjs` 的 `BASE_LINES`；')
+  out.push('> 改台词 = 改那里 → 重跑本脚本 → `tools/synth-voice.ps1` 合成 → `tools/build-voice.ps1` 转码。')
+  out.push('')
+  out.push('- 共 %d 条（real %d / synth %d），覆盖 %d 个事件。'
+    .replace('%d', all.length).replace('%d', real).replace('%d', synth).replace('%d', byEvent.size))
+  out.push('- `source=real` 用素材里现成的真人语音；`source=synth` 用 GPT-SoVITS 合成。')
+  out.push('- 同一条台词可能有多个 **seed 变体**（名字带 `v2` 后缀）—— 换 seed 会得到')
+  out.push('  真实不同的语气/节奏，运行时按事件轮换，这就是"语音丰富度"的来源。')
+  out.push('')
+  out.push('| 事件 | 条数 | 台词 |')
+  out.push('|---|---|---|')
+  for (const [ev, list] of byEvent) {
+    const texts = list.map(l => {
+      const tag = l.source === 'real' ? '原声' : '合成'
+      const v = /^.+v\d$/.test(l.name) ? '（变体）' : ''
+      return `\`${l.name}\` ${l.text} · ${tag}${v}`
+    }).join('<br>')
+    out.push(`| \`${ev}\` | ${list.length} | ${texts} |`)
+  }
+  out.push('')
+  const why = all.filter(l => l.why)
+  if (why.length > 0) {
+    out.push('## 写作理由（`why`）')
+    out.push('')
+    out.push('每条台词为什么这么写 —— 尤其"为什么不用官方原声"这类判断，')
+    out.push('免得下次有人"顺手优化"回语义错配的老路。')
+    out.push('')
+    for (const l of why) {
+      const evs = l.event ? `\`${l.event}\`` : '—'
+      out.push(`- **${evs}** \`${l.name}\` ${l.text}\n  - ${l.why}`)
+    }
+    out.push('')
+  }
+  const target = path.join(__dirname, '..', 'docs', '语音台账.md')
+  fs.mkdirSync(path.dirname(target), { recursive: true })
+  fs.writeFileSync(target, out.join('\n'), 'utf8')
+  console.log('已生成: docs/语音台账.md')
+}
