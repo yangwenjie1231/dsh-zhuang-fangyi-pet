@@ -1895,20 +1895,66 @@ namespace DshZhuangFangyiPet
             Check(m.PickForEvent("nope/event", 0) == null && m.PickForEvent(null, 0) == null,
                   "没有该事件的语音 → null（不抛）", "nope/event → null");
 
+            // (4a) ⭐⭐ 状态 → 台词事件的对应表（抽成纯函数后逐条钉住）
+            //
+            // 为什么值得单测：这段判断原先埋在 `SpeakForSnapshot` 里（周围还塞着
+            // attention、番茄钟、空闲计时三个分支），漏一条的后果是
+            // **台词表里有、运行时永不播，且完全无声**。实测就是这样漏掉了
+            // `pet/wake` / `pet/sleeping` / `pomodoro/start` / `chat/reply` 共 27 条。
+            bool trig =
+                PetVoiceTrigger.ForStateTransition("idle", "error") == "agent/error" &&
+                PetVoiceTrigger.ForStateTransition("idle", "happy") == "turn/complete" &&
+                PetVoiceTrigger.ForStateTransition("thinking", "working") == "agent/working" &&
+                PetVoiceTrigger.ForStateTransition("idle", "working") == "agent/working" &&
+                PetVoiceTrigger.ForStateTransition(null, "working") == "agent/working" &&
+                PetVoiceTrigger.ForStateTransition("idle", "thinking") == "agent/thinking" &&
+                PetVoiceTrigger.ForStateTransition(null, "waking") == "pet/wake" &&
+                PetVoiceTrigger.ForStateTransition("idle", "sleeping") == "pet/sleeping";
+            Check(trig, "⭐⭐ 状态切换 → 台词事件（含此前漏掉的 pet/wake / pet/sleeping）",
+                  "error→agent/error, happy→turn/complete, working→agent/working, " +
+                  "thinking→agent/thinking, waking→pet/wake, sleeping→pet/sleeping");
+
+            // ⚠️ 两条"刻意不说话"是有意为之，不是遗漏：
+            //   · `working → thinking`：干活时已经报过幕，回到思考**不再重复**
+            //     （否则一轮里来回调三次"让我想想"，像复读机）；
+            //   · `idle`：最常见的状态，按状态出声必然变复读机。
+            bool trigSilent =
+                PetVoiceTrigger.ForStateTransition("idle", "idle") == null &&
+                PetVoiceTrigger.ForStateTransition("working", "thinking") == null &&
+                PetVoiceTrigger.ForStateTransition("sleeping", "sleeping") == null &&
+                PetVoiceTrigger.ForStateTransition("idle", "listening") == null &&  // 已降级为纯气泡
+                PetVoiceTrigger.ForStateTransition("idle", null) == null;
+            Check(trigSilent, "⭐ 这些切换**刻意**不出声（idle 不响、working→thinking 不重复、listening 已降级）",
+                  "idle→idle / working→thinking / sleeping→sleeping / idle→listening 均返回 null");
+
+            // 番茄钟「开始计时」那个此前缺失的时机
+            Check(PetVoiceTrigger.ForPomodoroStart(false) == "pomodoro/start" &&
+                  PetVoiceTrigger.ForPomodoroStart(true) == null,
+                  "⭐⭐ 番茄钟由停到跑 → pomodoro/start（此前根本没有这个触发点）",
+                  "wasRunning=false → pomodoro/start；已在跑 → null");
+
             // (4b) ⭐⭐ v2：exe 会说的**每一个**事件，台词表里都必须有货。
             //
             // 为什么必须断言这条：`Speak()` 找不到语音时**静默返回 false**
             //（那是正常的 —— 有些事件就是没有语音）。于是"改了事件名/删了台词"
             // 这类错误在运行时**完全无声**：用户只会觉得"某些时候她不出声"，
             // 永远定位不到。把清单与代码的契约钉在自检里。
-            string[] spokenEvents = new string[] {
-                "pet/wake", "pet/click", "agent/working", "agent/thinking",
-                "turn/complete", "agent/error", "attention/approval",
-                "attention/cleared", "pomodoro/start", "pomodoro/focus-end",
-                "pomodoro/break-end", "pomodoro/long-start", "pomodoro/long-end",
-                "pet/feed", "pet/praise", "pet/pet-head", "pet/sleeping",
-                "chat/reply", "session/start", "pet/idle-long"
-            };
+            //
+            // ⚠️ 名单改用 `PetVoiceTrigger.SpokenEvents`（v3）：原来这里**另抄了一份**，
+            //   于是抄漏的 `pet/wake` / `pet/sleeping` / `chat/reply` / `pomodoro/start`
+            //   在名单里躺着、代码里却一个 `Speak()` 都没有 —— 这条断言看着绿，
+            //   实际是**空的**（清单 137 条里有 27 条永远不会被播）。
+            //   触发点与名单现在同源，且下面 (4c) 反向再查一遍。
+            string[] spokenEvents = PetVoiceTrigger.SpokenEvents;
+            // 名单本身必须是**合法**的台词事件名（不能写错字却"自洽"地全绿）
+            bool listSane = spokenEvents.Length == 20 &&
+                            Array.IndexOf(spokenEvents, "pet/wake") >= 0 &&
+                            Array.IndexOf(spokenEvents, "pet/sleeping") >= 0 &&
+                            Array.IndexOf(spokenEvents, "chat/reply") >= 0 &&
+                            Array.IndexOf(spokenEvents, "pomodoro/start") >= 0;
+            Check(listSane,
+                  "⭐⭐ 可说事件名单就是那 20 个（含 pet/wake / pet/sleeping / chat/reply / pomodoro/start）",
+                  "20 个：" + string.Join(", ", spokenEvents));
             string manifestJson = null;
             try
             {
@@ -1939,6 +1985,35 @@ namespace DshZhuangFangyiPet
             else
             {
                 Check(true, "⭐ 代码事件覆盖（跳过：自检环境读不到 art/voice/voice.json）", "跳过");
+            }
+
+            // (4c) ⭐⭐ **反向**覆盖：台词表里的每个事件都必须真的会被播。
+            //
+            // (4b) 查的是"名单 ⊆ 清单"，查不出"名单里多了一个没人触发的事件"。
+            // 实测就是这样攒出 27 条闲置台词（137 条的 20%）—— 而症状是
+            // **完全无声**：没有报错、没有日志，用户只会觉得"她有时候不说话"。
+            // 这条把"清单事件 ⊆ 名单"钉住。
+            if (manifestJson != null)
+            {
+                PetVoiceManifest real = PetVoiceManifest.Parse(manifestJson);
+                List<string> orphans = new List<string>();
+                HashSet<string> known = new HashSet<string>(spokenEvents);
+                for (int i = 0; i < real.Lines.Count; i++)
+                {
+                    string ev = real.Lines[i].Event;
+                    if (string.IsNullOrEmpty(ev)) continue;      // 无归属条目：另有断言
+                    if (!known.Contains(ev)) orphans.Add(ev);
+                }
+                List<string> uniq = new List<string>();
+                for (int i = 0; i < orphans.Count; i++)
+                {
+                    if (!uniq.Contains(orphans[i])) uniq.Add(orphans[i]);
+                }
+                Check(uniq.Count == 0,
+                      "⭐⭐ 台词表里没有\"永远不会被播\"的事件（反向覆盖）",
+                      uniq.Count == 0
+                        ? ("清单 " + real.Count + " 条全部有触发点（" + spokenEvents.Length + " 个事件）")
+                        : ("这些事件没有任何 Speak() 调用：" + string.Join(", ", uniq.ToArray())));
             }
 
             // (5) ⭐⭐ 名字白名单（exe 侧也要挡：清单是网络来的，是跨进程信任边界）

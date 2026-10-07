@@ -268,6 +268,25 @@ namespace DshZhuangFangyiPet
         /// 但旧 Host 每条回复只发一个分片，所以行为与从前一致。
         /// </summary>
         public long SpeakUtterance;
+
+        /// <summary>
+        /// **动态语音没兜住时的固定台词提示**（契约 §2 `speak.fallback`）。
+        ///
+        /// Host 只在"确实想说话、但运行时合成不可用"时填它：TTS 子插件没装、
+        /// 超时、或合成失败。于是「聊天回复到达」这个时刻即使没有音频，
+        /// exe 也会说一句固定台词（`chat/reply`）—— 否则那个时刻**完全无声**。
+        ///
+        /// 为什么需要它：`art/voice/voice.json` 里 `chat/reply` 有 12 条台词，
+        /// 而 exe 此前**没有任何地方** `Speak("chat/reply")` —— 也就是说
+        /// TTS 一关，这 12 条就是死资源（"闲置台词"，见
+        /// <see cref="PetVoiceTrigger"/> 的说明）。
+        ///
+        /// 去重按 `FallbackSeq`：每次需要兜底就递增；exe 见到新值才播一次。
+        /// 旧 Host 没这个字段 → 恒为 0 → 保持沉默（与从前一致）。
+        /// </summary>
+        public long FallbackSeq;
+        public string FallbackEvent;
+
         public List<PetSessionInfo> Sessions = new List<PetSessionInfo>();
         public bool NativeAvailable = true;
         public string NativeError;
@@ -488,6 +507,13 @@ namespace DshZhuangFangyiPet
                 s.SpeakName = spk.Str("name", null);
                 s.SpeakDurationMs = (long)spk.Num("durationMs", 0);
                 s.SpeakUtterance = (long)spk.Num("utterance", 0);
+                // `fallback` 是**可选**子块：Host 只在"想说话但合成没兜住"时才给。
+                PetJson.JVal fb = spk.Get("fallback");
+                if (fb != null && fb.IsObj)
+                {
+                    s.FallbackSeq = (long)fb.Num("seq", 0);
+                    s.FallbackEvent = fb.Str("event", null);
+                }
             }
 
             PetJson.JVal sess = root.Get("sessions");

@@ -736,6 +736,7 @@ namespace DshZhuangFangyiPet
             SpeakForSnapshot(snap);
             SpeakForSessionSet(snap);   // v2：新会话出现时招呼一声
             ApplySpeech(snap);          // v3：AI 回答的合成语音
+            ApplySpeechFallback(snap);   // 合成没兜住时用固定台词顶一下
 
             // v9：好感度 + 互动语音
             ApplyInteract(snap);
@@ -1069,7 +1070,6 @@ namespace DshZhuangFangyiPet
                     string evt = PetVoiceTrigger.ForStateTransition(prev, st);
                     if (evt != null) { Speak(evt); return; }
                 }
-                }
 
                 // ④ ⭐ 长时间空闲（v2 新增，低频）：她"守不住闲"，闲久了会主动搭话。
                 //
@@ -1209,6 +1209,34 @@ namespace DshZhuangFangyiPet
             {
                 PetLog.Warn("动态语音播放失败（已忽略）: " + PetLog.Describe(ex));
             }
+        }
+
+        /// <summary>最近播过的兜底台词 seq（去重：同一个 seq 只播一次）。</summary>
+        private long _lastFallbackSeq;
+
+        /// <summary>
+        /// **动态语音没兜住时**播一句固定台词（契约 §2 `speak.fallback`）。
+        ///
+        /// 场景：聊天回复到了，但 TTS 子插件没装 / 超时 / 合成失败 ——
+        /// Host 会把 `speak.fallback = {seq, event:'chat/reply'}` 塞进快照，
+        /// 这里见到新 seq 就播一次固定台词，让"回复到达"这个时刻不至于完全无声。
+        ///
+        /// ⚠️ 两条不许越界的：
+        ///   · **有**动态语音时不播（否则一句回复说两遍）；
+        ///   · 事件名只接受清单里有的，且必须是白名单里的（见 <see cref="Speak"/>）。
+        /// </summary>
+        private void ApplySpeechFallback(PetSnapshot snap)
+        {
+            if (snap == null) return;
+            if (snap.FallbackSeq <= 0 || snap.FallbackEvent == null) return;
+            if (snap.FallbackSeq == _lastFallbackSeq) return;
+            _lastFallbackSeq = snap.FallbackSeq;
+            // 有动态音频 = 已经念过正文了，不必再补一句。
+            if (!string.IsNullOrEmpty(snap.SpeakName)) return;
+            if (!_voiceOn || _voices == null) return;
+            PetLog.Info("动态语音不可用 → 兜底台词 " + snap.FallbackEvent +
+                        "（#" + snap.FallbackSeq + "）");
+            Speak(snap.FallbackEvent);
         }
 
         /// <summary>语音开关（设置页/托盘）。关掉时立刻停掉正在播的。</summary>
