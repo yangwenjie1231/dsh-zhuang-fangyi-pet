@@ -1108,6 +1108,48 @@ namespace DshZhuangFangyiPet
             Check(hideBlank && showUsed,
                   "「今天」行的显隐：一次没用过 → 隐藏；用过 → 显示",
                   "空白隐藏 / 有番茄显示");
+
+            // (15) ⭐⭐ 三个手势开关：缺键 ≠ 用户设成 false。
+            //
+            // 这是"升级插件后手势失灵"的根因：旧 Host 的快照里根本没有这三个键，
+            // 而 `flingEnabled` / `longPress` 的**默认是 true**。
+            // 若实现直接 `Bool("flingEnabled", false)`，旧 Host 会让它们变 false
+            // —— 用户甩不动她、按不住她，且**没有任何报错**。
+            // 真正的守卫是 `Has*` 标记：没有键 = "不动现状"。
+            PetSnapshot noGestureKeys = PetSnapshot.Parse("{\"rev\":1,\"petState\":\"idle\",\"settings\":{\"scale\":1}}");
+            bool absentOk = noGestureKeys != null && noGestureKeys.Settings != null &&
+                            !noGestureKeys.Settings.HasLongPress &&
+                            !noGestureKeys.Settings.HasFling &&
+                            !noGestureKeys.Settings.HasHoverReact &&
+                            !noGestureKeys.Settings.HasPomodoroBreath;
+            Check(absentOk, "⭐⭐ 旧 Host 快照缺手势键 → Has* 全为 false（= 不动现状，手势仍然可用）",
+                  "缺键时不会把默认开的手势关掉");
+
+            PetSnapshot withGestureKeys = PetSnapshot.Parse(
+                "{\"rev\":1,\"petState\":\"idle\",\"settings\":{\"longPress\":false," +
+                "\"flingEnabled\":true,\"hoverReact\":true,\"pomodoroBreath\":true}}");
+            bool presentOk = withGestureKeys != null && withGestureKeys.Settings != null &&
+                             withGestureKeys.Settings.HasLongPress && !withGestureKeys.Settings.LongPress &&
+                             withGestureKeys.Settings.HasFling && withGestureKeys.Settings.FlingEnabled &&
+                             withGestureKeys.Settings.HasHoverReact && withGestureKeys.Settings.HoverReact &&
+                             withGestureKeys.Settings.HasPomodoroBreath && withGestureKeys.Settings.PomodoroBreath;
+            Check(presentOk, "显式给的手势开关按原值解析（false 就是 false）",
+                  "longPress=false / fling=true / hover=true / breath=true");
+
+            // (15b) ⭐⭐ 缺省值必须**只有一处真相**，且方向正确。
+            //
+            // 这一条是被回滚验证逼出来的：我原先断言"把 hoverReact 的缺省写成
+            // true 会变红"，结果改坏了**仍然全绿** —— 因为那个常量在解析里是
+            // 死代码（进到那一支时键一定存在），真正的缺省值活在 Program 的
+            // 字段初始化里。同一个语义两份、其中一份不可达 = 假断言。
+            // 现在缺省值收进 `PetSettingsInfo.Default*()`，两边都读它，
+            // 所以直接断言这几个函数就是断言了真实行为。
+            Check(PetSettingsInfo.DefaultLongPress() &&
+                  PetSettingsInfo.DefaultFlingEnabled() &&
+                  !PetSettingsInfo.DefaultHoverReact() &&
+                  !PetSettingsInfo.DefaultPomodoroBreath(),
+                  "⭐⭐ 手势开关缺省值唯一真相：长按/抛掷默认开，悬停/呼吸默认关",
+                  "longPress=1 fling=1 hover=0 breath=0");
         }
 
         /// <summary>

@@ -826,6 +826,8 @@ namespace DshZhuangFangyiPet
         private void StartHoldTimer()
         {
             StopHoldTimer();
+            // v10：用户关掉了长按摸头 → 根本不起计时器（见 LongPressEnabled 的说明）。
+            if (!_longPressEnabled) return;
             _holdTimer = new DispatcherTimer(DispatcherPriority.Input);
             // 检查间隔取 PatStepMs 的一半：间隔等于步长时，抖动会让某一级
             // 被跳过（用户按住 1.2 秒只看到 1 级）。半速检查让每一级都稳。
@@ -863,6 +865,32 @@ namespace DshZhuangFangyiPet
 
         /// <summary>长按到第 <paramref name="level"/> 级（Program 装配成上报一次互动）。</summary>
         public Action<int> PatInvoked = delegate { };
+
+        /// <summary>
+        /// 长按摸头总开关（v10，来自 `settings.longPress`）。
+        ///
+        /// ⚠️ 关掉时**必须停掉计时器**，不能只是"上报前判一下"：
+        /// 计时器每 300ms 醒一次、什么都不做是纯粹的耗电，而且
+        /// "关掉开关后她还在后台数着级数"这种事一旦被发现就很难解释。
+        /// </summary>
+        private bool _longPressEnabled = true;
+        public bool LongPressEnabled
+        {
+            get { return _longPressEnabled; }
+            set
+            {
+                _longPressEnabled = value;
+                if (!value) StopHoldTimer();
+            }
+        }
+
+        /// <summary>
+        /// 抛掷总开关（v10，来自 `settings.flingEnabled`）。
+        ///
+        /// 关掉之后**甩动会被当成普通拖动** —— 她直接停在松手的位置。
+        /// 这正是"关掉"该有的语义：不是"甩了没反应"，而是"根本没有这个动作"。
+        /// </summary>
+        public bool FlingEnabled = true;
 
         // ------------------------------------------------------------------
         // v10：抛掷（预先算轨迹 → 回放）
@@ -1154,7 +1182,11 @@ namespace DshZhuangFangyiPet
 
             // v10：抛掷。**只有**在拖动真的发生过、且速度达标时才飞 ——
             // `Classify` 已经在坏数据上回落 Click/Drag，这里不再重复判断。
-            if (kind == PetGestureKind.Fling)
+            //
+            // ⚠️ `FlingEnabled` 为 false 时**什么都不做**（= 当作普通拖动，
+            // 她停在松手的位置）。不是"飞了但不上报" —— 那会让用户看到
+            // "关了开关她还在飞"，以为开关坏了。
+            if (kind == PetGestureKind.Fling && FlingEnabled)
             {
                 // 初速方向取样本算出来的那一段（与判据同一个窗口，不会"判定用
                 // 这一段、飞行用另一段"）。

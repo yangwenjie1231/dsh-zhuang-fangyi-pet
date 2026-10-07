@@ -75,6 +75,24 @@ namespace DshZhuangFangyiPet
         /// </summary>
         public bool HasChatFontScale; public double ChatFontScale;
 
+        /**
+         * ── 契约 §2 v10：三个手势开关 ────────────────────────────────────
+         *
+         * ⚠️ **缺省值必须与宿主 `src/settings.js` 一致**，而且**不是同一个方向**：
+         *   · `longPress` / `flingEnabled` 默认 **true**（要主动做手势才触发，不是骚扰）；
+         *   · `hoverReact` 默认 **false**（唯一"她主动找你"的互动，默认开就是骚扰）。
+         *
+         * `Has*` 标记存在的理由与其它字段相同：旧 Host 的快照里根本没有这三个键，
+         * 而"缺省"与"用户显式设成 false"是**两回事** —— 没有标记的话，
+         * 旧 Host 会把 `flingEnabled` 当成 false，于是**手势整个失灵**
+         *（用户升级插件后甩不动她，且没有任何报错）。
+         */
+        public bool HasLongPress;   public bool LongPress;
+        public bool HasFling;       public bool FlingEnabled;
+        public bool HasHoverReact;  public bool HoverReact;
+        /// <summary>契约 §2 v10：专注时显示呼吸引导。旧快照缺省 = false。</summary>
+        public bool HasPomodoroBreath; public bool PomodoroBreath;
+
         /// <summary>非法/缺省值一律回落 focus-dsh（task-6 验收点）。</summary>
         public static string NormalizeDoubleClick(string v)
         {
@@ -88,6 +106,31 @@ namespace DshZhuangFangyiPet
             if (v == "light" || v == "dark") return v;
             return "auto";
         }
+
+        /**
+         * ── 三个手势开关的**缺省值**（v10，唯一真相）──────────────────────
+         *
+         * ⚠️ 为什么要有这几个函数，而不是直接在 `Bool(key, true)` 里写常量：
+         *
+         * 回滚验证抓到了我的一个**假断言** —— 我断言"把 hoverReact 的缺省值
+         * 写成 true 会让自检变红"，结果把它改坏之后**自检仍然全绿**。
+         * 原因是那段代码长这样：
+         *
+         *     if (st.Get("hoverReact") != null && Kind == TBool) { Bool("hoverReact", X) }
+         *
+         * —— `X` **永远用不到**（进到那一支时键一定存在、且一定是布尔）。
+         * 也就是说：**缺省值其实活在 `Program` 的字段初始化里**
+         *（`_hoverReactOn = false`），快照解析里的那个常量是**死代码**。
+         * 同一个语义写了两份，其中一份还不可达 —— 这正是本项目反复踩的
+         * "两个真相"。
+         *
+         * 所以：缺省值收进这里，解析与 `Program` 的字段初始化**都读它**。
+         * 这样自检能直接断言它们，回滚验证才真的有意义。
+         */
+        public static bool DefaultLongPress() { return true; }
+        public static bool DefaultFlingEnabled() { return true; }
+        public static bool DefaultHoverReact() { return false; }
+        public static bool DefaultPomodoroBreath() { return false; }
     }
 
     /// <summary>
@@ -497,6 +540,32 @@ namespace DshZhuangFangyiPet
                     if (cfs > 3.0) cfs = 3.0;
                     si.HasChatFontScale = true;
                     si.ChatFontScale = cfs;
+                }
+                // ── 契约 §2 v10：三个手势开关 + 呼吸引导 ──────────────────
+                //
+                // ⚠️ 三个 `Bool(key, 缺省)` 的缺省值**刻意不同**（见字段注释）：
+                // 前两个缺省 true、hoverReact 缺省 false。但真正的守卫是
+                // `Has*` 标记 —— 旧 Host 的帧里**根本没有这些键**，
+                // 而"没有键"必须解释成"不动现状"，不是"用户设成了 false"。
+                if (st.Get("longPress") != null && st.Get("longPress").Kind == PetJson.JVal.TBool)
+                {
+                    si.HasLongPress = true;
+                    si.LongPress = st.Bool("longPress", PetSettingsInfo.DefaultLongPress());
+                }
+                if (st.Get("flingEnabled") != null && st.Get("flingEnabled").Kind == PetJson.JVal.TBool)
+                {
+                    si.HasFling = true;
+                    si.FlingEnabled = st.Bool("flingEnabled", PetSettingsInfo.DefaultFlingEnabled());
+                }
+                if (st.Get("hoverReact") != null && st.Get("hoverReact").Kind == PetJson.JVal.TBool)
+                {
+                    si.HasHoverReact = true;
+                    si.HoverReact = st.Bool("hoverReact", PetSettingsInfo.DefaultHoverReact());
+                }
+                if (st.Get("pomodoroBreath") != null && st.Get("pomodoroBreath").Kind == PetJson.JVal.TBool)
+                {
+                    si.HasPomodoroBreath = true;
+                    si.PomodoroBreath = st.Bool("pomodoroBreath", PetSettingsInfo.DefaultPomodoroBreath());
                 }
                 s.Settings = si;
             }

@@ -339,6 +339,11 @@ namespace DshZhuangFangyiPet
             {
                 _hovering = over;
                 RefreshStatusLabel();
+                // v10：悬停反应（默认关）。**延迟 400ms 再发** ——
+                // 鼠标只是"路过"她（从屏幕一边移到另一边）不该触发互动，
+                // 而 400ms 足够把"路过"和"停在她身上"分开。
+                // 关掉时连计时器都不起（见 _hoverReactOn 的说明）。
+                if (_hoverReactOn) ScheduleHoverReact(over);
             };
 
             _bubble = new PetBubble();
@@ -864,6 +869,37 @@ namespace DshZhuangFangyiPet
                 changed = true;
             }
 
+            // ── 契约 §2 v10：三个手势开关 ────────────────────────────────
+            //
+            // ⚠️ 这三个必须**真的接到行为上**，否则设置页就是在骗人：
+            // 用户关掉「拖住甩出去」之后还能甩飞她，他会以为开关坏了。
+            //
+            // 逐字段 diff（值没变不动），与上面几个开关同一条纪律。
+            if (st.HasLongPress && st.LongPress != _longPressOn)
+            {
+                _longPressOn = st.LongPress;
+                _win.LongPressEnabled = _longPressOn;
+                PetLog.Info("settings: 长按摸头 → " + (_longPressOn ? "1" : "0"));
+            }
+            if (st.HasFling && st.FlingEnabled != _flingOn)
+            {
+                _flingOn = st.FlingEnabled;
+                _win.FlingEnabled = _flingOn;
+                PetLog.Info("settings: 抛掷 → " + (_flingOn ? "1" : "0"));
+            }
+            if (st.HasHoverReact && st.HoverReact != _hoverReactOn)
+            {
+                _hoverReactOn = st.HoverReact;
+                PetLog.Info("settings: 悬停反应 → " + (_hoverReactOn ? "1" : "0"));
+            }
+            if (st.HasPomodoroBreath && st.PomodoroBreath != _breathOn)
+            {
+                _breathOn = st.PomodoroBreath;
+                PetLog.Info("settings: 呼吸引导 → " + (_breathOn ? "1" : "0"));
+                // 正在跑的话立刻换显示（不必等下一帧）
+                try { RefreshPomodoro(); } catch { }
+            }
+
             if (st.HasTheme && st.Theme != _settingsTheme)
             {
                 _settingsTheme = st.Theme;
@@ -1266,6 +1302,21 @@ namespace DshZhuangFangyiPet
         /// <summary>今日番茄统计（v10，右键菜单「今天」一行用；块缺失 = null）。</summary>
         private PetTodayInfo _today;
 
+        // ── v10：手势开关的本地镜像 ─────────────────────────────────────────
+        //
+        // ⚠️ 缺省值**从 `PetSettingsInfo` 读**，不在这里写常量 ——
+        // 回滚验证抓到过：我原先在这里写 `= false`、在快照解析里也写一个
+        // 缺省值，而解析里那个是**死代码**（进到那一支时键一定存在）。
+        // 同一个语义两份、其中一份不可达 —— 假断言就是这么来的。
+        /// <summary>长按摸头。默认开（要主动按住才触发）。</summary>
+        private bool _longPressOn = PetSettingsInfo.DefaultLongPress();
+        /// <summary>抛掷。默认开（要主动甩才触发）。</summary>
+        private bool _flingOn = PetSettingsInfo.DefaultFlingEnabled();
+        /// <summary>悬停反应。默认关（唯一"她主动找你"的互动）。</summary>
+        private bool _hoverReactOn = PetSettingsInfo.DefaultHoverReact();
+        /// <summary>专注期呼吸引导。默认关。</summary>
+        private bool _breathOn = PetSettingsInfo.DefaultPomodoroBreath();
+
         /// <summary>
         /// 单击桌宠 → 记一次互动。
         ///
@@ -1302,7 +1353,49 @@ namespace DshZhuangFangyiPet
         }
 
         /// <summary>
-        /// v10：抛掷落地后上报**一次**。
+        /// v10：悬停反应 —— 停在她身上 400ms 后报一次 `hover` 互动。
+        ///
+        /// ⚠️ 为什么需要延迟：`HoverChanged` 在鼠标**扫过**她时也会触发
+        /// （从屏幕一边移到另一边必然会划过）。不延迟的话，每次鼠标路过
+        /// 都会让她"看你一眼" —— 那正是"默认关"要防的那种骚扰。
+        ///
+        /// ⚠️ 离开时必须**取消**计时器：不取消的话，鼠标划过她、400ms 后
+        /// 仍然会报一次（人早就走了，而气泡在她旁边冒出来）。
+        ///
+        /// 频率上限不在这里做：宿主的 `interactions.js` 有 `reactGapMs`（20 秒），
+        /// 那是唯一真相 —— exe 再判一次只会让两边口径分叉。
+        /// </summary>
+        private void ScheduleHoverReact(bool over)
+        {
+            if (_hoverTimer == null)
+            {
+                _hoverTimer = new DispatcherTimer(DispatcherPriority.Background);
+                _hoverTimer.Interval = TimeSpan.FromMilliseconds(400);
+                _hoverTimer.Tick += delegate
+                {
+                    _hoverTimer.Stop();
+                    // 触发时再确认一次"还悬停着"：计时器醒来时鼠标可能已经走了。
+                    if (!_hovering) return;
+                    if (!_hoverReactOn) return;
+                    try { if (_http != null) _http.PostInteract("hover"); } catch { }
+                    PetLog.Info("悬停反应 → 互动 hover");
+                };
+            }
+            if (over)
+            {
+                if (!_hoverTimer.IsEnabled) _hoverTimer.Start();
+            }
+            else
+            {
+                _hoverTimer.Stop();
+            }
+        }
+
+        /// <summary>悬停反应的延迟计时器（懒建；`_hoverReactOn` 关着时永不启动）。</summary>
+        private DispatcherTimer _hoverTimer;
+
+        /// <summary>
+        /// 抛掷落地后上报**一次**。
         ///
         /// 为什么在落地时上报、而不是松手时：松手到落地之间用户看到的还是
         /// "她还在飞"，此时弹气泡/播语音会与画面错位（气泡在她飞走之前的位置）。
