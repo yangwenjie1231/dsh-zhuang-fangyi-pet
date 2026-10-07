@@ -776,7 +776,19 @@ export function createHandler (deps) {
             })
             return
           }
-          const result = deps.interact.do(kind)
+          /**
+           * v10：长按级数（1..3）。**在路由层就夹**，理由与动作白名单相同 ——
+           * 跨进程信任边界，exe 侧夹过一次不代表这里可以信。
+           *
+           * ⚠️ 用 `Number.isFinite` 而不是 `|| 1`：后者会把 0 也当成"没传"
+           * （而 0 与 NaN 都该归到第 1 级，这是对的），但也会把字符串 `'2'`
+           * 悄悄转成数字放行 —— 这里显式只认数字。
+           */
+          const rawLevel = parsed?.level
+          const level = Number.isFinite(Number(rawLevel)) && rawLevel !== null && rawLevel !== ''
+            ? Math.min(3, Math.max(1, Math.trunc(Number(rawLevel))))
+            : 1
+          const result = deps.interact.do(kind, level)
           if (result === null || result.ok !== true) {
             sendJson(res, 400, {
               error: 'bad kind',
@@ -788,6 +800,25 @@ export function createHandler (deps) {
           return
         }
         sendJson(res, 405, { error: 'method not allowed' })
+        return
+      }
+
+      // ── 成长与今日统计（v10，additive）────────────────────────────────
+      //
+      // `GET /pet/growth` → 好感度 + 成长 + 今日统计（exe 的右键菜单与诊断用）。
+      //
+      // 为什么单独一个端点而不是塞进 `/pet/state`：快照是**每帧广播**的，
+      // 而成长数据（连续天数、里程碑、7 天趋势）变化很慢 —— 塞进快照等于
+      // 每次状态变化都重算一遍 `recentDays`。菜单打开时才拉一次更合适。
+      //
+      // ⚠️ 数据仍然**同时**在快照里（`growth` / `today` 块）—— 那是给
+      // overlay 与设置页用的，它们没有令牌、拉不了这个端点之外的东西。
+      if (route === '/growth' && req.method === 'GET') {
+        if (deps.growth === undefined || deps.growth === null) {
+          sendJson(res, 503, { error: 'unavailable', reason: '宿主未装配成长' })
+          return
+        }
+        sendJson(res, 200, deps.growth.snapshot())
         return
       }
 

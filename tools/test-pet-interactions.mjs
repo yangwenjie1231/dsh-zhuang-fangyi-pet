@@ -59,16 +59,39 @@ function makeClock (start = 1_700_000_000_000) {
 
 section('1. 契约值域（exe / 路由 / 语音共用）')
 
-ok('四个互动动作都有配置（用户点名的四项）', () => {
-  assert.deepEqual(INTERACT_KINDS.sort(), ['click', 'feed', 'praise', 'pet-head'].sort())
+/** v10 新增的**纯反应类**动作：收益恒为 0，只有"反应间隔"没有冷却。 */
+const REACT_ONLY_KINDS = ['fling', 'hover']
+
+/** 有收益的动作（会涨好感的那批）—— 防刷的三道闸只对它们有意义。 */
+const GAINING_KINDS = INTERACT_KINDS.filter(k => !REACT_ONLY_KINDS.includes(k))
+
+ok('⭐ 互动动作值域：4 个经典 + 3 个手势（v10 扩到 7 个）', () => {
+  assert.deepEqual([...INTERACT_KINDS].sort(),
+    ['click', 'feed', 'fling', 'hover', 'pat', 'praise', 'pet-head'].sort())
   for (const k of INTERACT_KINDS) {
     const cfg = interactConfig(k)
     assert.ok(cfg !== null, `${k} 缺配置`)
-    assert.equal(typeof cfg.gain, 'number')
-    assert.ok(cfg.cooldownMs > 0, `${k} 必须有正冷却（否则可以按住刷）`)
-    assert.ok(Array.isArray(cfg.diminish) && cfg.diminish.length > 0, `${k} 缺递减序列`)
+    assert.equal(typeof cfg.gain, 'number', `${k} 的 gain 必须是数字`)
     assert.equal(typeof cfg.label, 'string')
     assert.equal(typeof cfg.voice, 'string', `${k} 必须绑语音事件`)
+    assert.ok(Array.isArray(cfg.diminish) && cfg.diminish.length > 0, `${k} 缺递减序列`)
+  }
+})
+
+ok('⭐ 有收益的动作必须有正冷却与递减（纯反应类不需要）', () => {
+  // v10 把断言按类别拆开：`fling`/`hover` 收益恒为 0，给它们"正冷却"
+  // 是**没有意义**的（冷却保护的是"别一直涨分"，而它们不涨分）——
+  // 它们要的是 `reactGapMs`（别一直冒气泡）。
+  // 原先把这两条混在一起断言，加新动作时必然误报。
+  for (const k of GAINING_KINDS) {
+    const cfg = interactConfig(k)
+    assert.ok(cfg.cooldownMs > 0, `${k} 必须有正冷却（否则可以按住刷）`)
+    assert.ok(cfg.gain > 0, `${k} 必须有正收益（否则不该在"有收益"这一类里）`)
+  }
+  for (const k of REACT_ONLY_KINDS) {
+    const cfg = interactConfig(k)
+    assert.equal(cfg.gain, 0, `${k} 是纯反应类，收益必须恒为 0`)
+    assert.ok(cfg.reactGapMs > 0, `${k} 必须有反应间隔（否则气泡刷屏）`)
   }
 })
 
@@ -80,7 +103,11 @@ ok('⭐ 递减序列真的在递减（否则"递减"是假的）', () => {
   //
   // 正确的不变式是"**非递增**"，而且**必须真的递减过**（不能全是同一个数，
   // 那等于没有递减）。总量由 DAILY_CAP 兜住 —— 两道闸各管一件事。
-  for (const k of INTERACT_KINDS) {
+  //
+  // v10：只对**有收益**的动作断言。`fling`/`hover` 的序列是 `[0]`
+  //（只有一个元素，首尾相同）—— 它们根本没有收益可递减，拿这条去要求
+  // 它们只会逼着人往表里塞一个假的递减序列。
+  for (const k of GAINING_KINDS) {
     const seq = interactConfig(k).diminish
     for (let i = 1; i < seq.length; i++) {
       assert.ok(seq[i] <= seq[i - 1],
@@ -469,6 +496,136 @@ ok('dayKeyFor 用本地日期（用户感知的"今天"是本地的）', () => {
   const d3 = new Date(2026, 9, 7, 0, 30)
   assert.notEqual(dayKeyFor(d.getTime()), dayKeyFor(d3.getTime()))
   assert.equal(dayKeyFor(NaN), 'unknown')
+})
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * v10：手势动作（pat / fling / hover）
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+section('v10 手势动作：共用记账 / 反应间隔 / 分级文案')
+
+ok('⭐⭐ pat 与 pet-head 共用冷却与递减（不是新的加分水龙头）', () => {
+  // 为什么这条最重要：`pat` 是"按住不放"触发的，一次按下最多报 3 级。
+  // 给它独立的递减序列 = 开一个新水龙头，而好感度的设计不变式是
+  // "单日潜在收益要能跨过第二档、又不能靠一个动作刷满"。
+  const a = createAffection()
+  const t = 1_000_000
+  // 先摸头（pet-head），再长按摸头（pat）—— 第二次必须落在**同一条**递减线上
+  const r1 = a.interact('pet-head', t)
+  const r2 = a.interact('pat', t + 1000)
+  assert.equal(r1.gain, 2, '第一次摸头应该是满额')
+  assert.equal(r2.gain, 0, '紧接着长按摸头必须被同一个冷却挡住')
+  assert.equal(r2.accountKind, 'pet-head', 'pat 的记账键必须落到 pet-head')
+  assert.equal(r2.cooling, true, '应该报"冷却中"')
+  // 冷却期过了之后，递减序列接着往下走（第 2 次 → 2）
+  const r3 = a.interact('pat', t + 25_000)
+  assert.equal(r3.gain, 2, '第 2 次应该是序列的第 2 项')
+  const r4 = a.interact('pet-head', t + 50_000)
+  assert.equal(r4.gain, 1, '第 3 次应该掉到 1（证明两边共用同一条计数）')
+})
+
+ok('⭐⭐ 纯反应类动作不涨好感（甩她不是亲昵）', () => {
+  const a = createAffection()
+  const t = 2_000_000
+  for (const k of ['fling', 'hover']) {
+    const r = a.interact(k, t)
+    assert.equal(r.gain, 0, `${k} 不该涨好感`)
+    assert.equal(r.accepted, true, `${k} 仍必须"有反应"`)
+    assert.equal(a.internals.points, 0)
+  }
+})
+
+ok('⭐⭐ fling 的反应间隔：连甩只给一次反应，其余是"安静的确认"', () => {
+  const a = createAffection()
+  const t = 3_000_000
+  const r1 = a.interact('fling', t)
+  assert.equal(r1.quiet, false, '第一次应该有反应')
+  assert.ok(r1.text !== null, '第一次应该有文案')
+  assert.ok(r1.voice !== null, '第一次应该有语音')
+  // 1 秒后再甩（间隔 3000ms 没到）→ 安静
+  const r2 = a.interact('fling', t + 1000)
+  assert.equal(r2.quiet, true, '连甩应该被限速')
+  assert.equal(r2.text, null, '安静时不该有文案（否则气泡刷屏）')
+  assert.equal(r2.voice, null, '安静时不该有语音')
+  assert.equal(r2.accepted, true, '限速不等于拒绝（动作本身是成立的）')
+  // 过了间隔 → 又有反应
+  const r3 = a.interact('fling', t + 3500)
+  assert.equal(r3.quiet, false, '过了反应间隔应该恢复')
+})
+
+ok('hover 的反应间隔更长（20 秒，鼠标蹭来蹭去不该一直冒气泡）', () => {
+  const a = createAffection()
+  const t = 4_000_000
+  assert.equal(a.interact('hover', t).quiet, false)
+  assert.equal(a.interact('hover', t + 5000).quiet, true, '5 秒内应该被限速')
+  assert.equal(a.interact('hover', t + 19_000).quiet, true, '19 秒仍在限速窗口内')
+  assert.equal(a.interact('hover', t + 21_000).quiet, false, '超过 20 秒应该恢复')
+})
+
+ok('⭐ 反应间隔是**按动作**各算各的（甩一下不该把悬停也静音）', () => {
+  const a = createAffection()
+  const t = 5_000_000
+  assert.equal(a.interact('fling', t).quiet, false)
+  assert.equal(a.interact('hover', t + 100).quiet, false, 'hover 有它自己的间隔')
+})
+
+ok('⭐⭐ pat 的分级文案：1/2/3 级不同，越界夹到合法范围', () => {
+  const a = createAffection()
+  const t = 6_000_000
+  const seen = new Set()
+  for (const lv of [1, 2, 3]) {
+    const r = a.interact('pat', t + lv * 30_000, { level: lv })
+    seen.add(r.text.zh)
+  }
+  assert.equal(seen.size, 3, '三级文案应该互不相同')
+  // 越界：0/NaN → 第 1 级；99 → 最高级
+  const r0 = a.interact('pat', t + 200_000, { level: 0 })
+  assert.equal(r0.text.zh, '嗯…？', 'level=0 该回落第 1 级')
+  const r99 = a.interact('pat', t + 300_000, { level: 99 })
+  assert.equal(r99.text.zh, '好啦好啦，我快睡着了。', 'level=99 该夹到最高级')
+})
+
+ok('⭐ 情境倍率真的打折（且只作用在收益上，不改记账口径）', () => {
+  const a = createAffection()
+  const t = 7_000_000
+  // 满额摸头是 2；倍率 0.5 → 1
+  const r = a.interact('pet-head', t, { gainMul: 0.5 })
+  assert.equal(r.gain, 1, '0.5 倍应该得到 1 分')
+  assert.equal(r.gainMul, 0.5)
+  assert.equal(a.internals.points, 1, '点数必须是折后值（不是先记满再扣）')
+  assert.equal(a.internals.todayGain, 1, '今日已得也必须是折后值（两者不能分叉）')
+})
+
+ok('⭐⭐ 倍率被夹进 [0,1]（情境只能打折，绝不能加成）', () => {
+  // 允许加成的话，"单日潜在收益能跨过第二档"那条设计不变式就要按
+  // "所有情境同时生效"重算 —— 而那是算不出来的（情境互斥，组合未知）。
+  const a = createAffection()
+  const t = 8_000_000
+  const r1 = a.interact('praise', t, { gainMul: 99 })
+  assert.equal(r1.gain, 8, '倍率超过 1 必须被夹回 1（praise 满额 8）')
+  assert.equal(r1.gainMul, 1)
+  const r2 = a.interact('praise', t + 200_000, { gainMul: -5 })
+  assert.equal(r2.gain, 0, '负倍率夹到 0')
+  const r3 = a.interact('feed', t, { gainMul: NaN })
+  assert.equal(r3.gain, 5, 'NaN 倍率回落 1（不打折），而不是 0')
+})
+
+ok('倍率 0 时仍然"有反应"（睡着了摸她：不给分，但说话）', () => {
+  const a = createAffection()
+  const t = 9_000_000
+  const r = a.interact('pet-head', t, { gainMul: 0 })
+  assert.equal(r.gain, 0)
+  assert.equal(r.accepted, true)
+  assert.ok(r.text !== null, '倍率 0 不该把反应也一起吃掉')
+})
+
+ok('⭐ 未知动作仍然拒绝（不因为加了新动作就放宽）', () => {
+  const a = createAffection()
+  for (const bad of ['__proto__', 'toString', 'PRAISE', 'pat ', '', null]) {
+    const r = a.interact(bad, 1_000_000)
+    assert.equal(r.accepted, false, `${bad} 不该被接受`)
+    assert.equal(r.reason, 'unknown-kind')
+  }
 })
 
 /* ══════════════════════════════════════════════════════════════════════════

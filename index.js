@@ -38,7 +38,7 @@ import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 
 import { defaultSettings, normalizeSettings, SETTINGS_VERSION } from './src/settings.js'
-import { createPetState, DEFAULT_BUBBLE_STATES } from './src/pet/state.js'
+import { createPetState, DEFAULT_BUBBLE_STATES, EVENT_TEXT } from './src/pet/state.js'
 import { activityConfig } from './src/pet/activity.js'
 import { bridgeHostEvents } from './src/pet/events.js'
 import { loadAtlas, artForState, bubbleArtByFile, atlasReport } from './src/pet/atlas.js'
@@ -49,7 +49,9 @@ import { createHandler, newToken, ROUTE_PREFIX } from './src/pet/routes.js'
 import { createLauncher } from './src/pet/launcher.js'
 import { createPomodoro } from './src/pet/pomodoro.js'
 import { loadVoice, resolveVoice, voiceReport } from './src/pet/voice.js'
-import { createAffection, INTERACT_KINDS, interactText, interactLabel } from './src/pet/interactions.js'
+import { createAffection, INTERACT_KINDS, interactConfig, interactLabel, dayKeyFor } from './src/pet/interactions.js'
+import { moodFor, moodText } from './src/pet/mood.js'
+import { createStats, normalizeTask } from './src/pet/stats.js'
 import {
   loadPersonas, applyPersona, composePersona, loadShared,
   personaReport, DEFAULT_PERSONA_NAME
@@ -463,6 +465,43 @@ export function apply (ctx, config) {
     if (tickTimer !== null) clearTimeout(tickTimer)
   }, 'zhuang-fangyi-pet: idle ticker')
 
+  // ── 番茄钟统计（v10，用户："当前的番茄钟太简单了"）───────────────────────
+  //
+  // ⚠️ 位置要求：必须在 `pomodoro` **之前**。`onPomodoroTransition` 会读它，
+  // 而 `pomodoro.adopt()` 内部可能立刻触发一次 transition —— 若 `stats`
+  // 声明在后面，那条路径会踩**暂时性死区**（`Cannot access 'stats' before
+  // initialization`），而它只在"跨重启恢复时正好走到边界"才发生。
+  //
+  // 纯逻辑在 `src/pet/stats.js`。**与番茄钟自己的持久化完全分开**：
+  // `pomodoro.js` 的 `remainingMs <= 0` 在四处被当作"阶段已结束"，
+  // 往那份结构里加字段要同时照顾那四处 —— 而统计与它们毫无关系。
+  let statsStore = null
+  try {
+    statsStore = new JsonStore(path.join(dataDir, 'stats.json'), null, { log: null })
+  } catch (error) {
+    logger.warn?.(`zhuang-fangyi-pet: 番茄钟统计无法持久化（${error?.message ?? error}）`)
+  }
+
+  const stats = createStats()
+  if (statsStore !== null && statsStore.get() !== null) {
+    try {
+      stats.adopt(statsStore.get())
+    } catch (error) {
+      boot(`⚠️ 番茄钟统计恢复失败（已忽略）：${error?.message ?? error}`)
+    }
+  }
+
+  /** 统计落盘（阶段结束、改任务时调；**不是每秒**）。 */
+  const flushStats = (at = Date.now()) => {
+    if (statsStore === null) return
+    try {
+      statsStore.value = stats.persist(at)
+      statsStore.schedule()
+    } catch (error) {
+      logger.warn?.(`zhuang-fangyi-pet: 统计落盘失败（${error?.message ?? error}）`)
+    }
+  }
+
   // ── 番茄钟（用户点名："增加番茄钟提醒我休息"）─────────────────────────────
   //
   // 它是**独立于 AI 状态**的一条时间线（见 `pomodoro.js` 文件头），
@@ -517,18 +556,75 @@ export function apply (ctx, config) {
         return
       }
       if (event?.kind !== 'end') return
+
+      /**
+       * ── 统计与摸鱼点评（v10）──────────────────────────────────────────
+       *
+       * ⚠️ 顺序：**先记账，再决定说什么**。反过来的话，`record()` 里
+       * "本阶段打断次数"已经被清零，点评永远算出 0（"整整 25 分钟没碰我"
+       * 会在你明明摸了 7 次的时候说出来）。
+       *
+       * ⚠️ 只在**专注**结束时记账：休息结束不该增加"番茄数"。
+       */
+      let interrupts = 0
+      let freshMilestones = []
+      if (event.phase === 'focus') {
+        interrupts = stats.phaseInterrupts()
+        try {
+          const r = stats.record({
+            focusMs: pomodoro.config.focusMs,
+            interrupts,
+            task: stats.task()
+          }, Date.now())
+          freshMilestones = r.milestones ?? []
+        } catch (error) {
+          logger.warn?.(`zhuang-fangyi-pet: 番茄钟记账失败（${error?.message ?? error}）`)
+        }
+        flushStats()
+      }
+
       if (!pomodoroConfig().notify) return
+
       // 结束的三种：专注结束（该休息）、短休结束、长休结束。
+      //
+      // 专注结束按**摸鱼次数**分三档（v10）：这是把"互动"与"番茄钟"
+      // 真正连起来的那一条 —— 她不只是计时，她记得你中途碰了她几次。
       const key = event.phase === 'focus'
-        ? 'pomodoro/focus-end'
+        ? (interrupts === 0
+            ? 'pomodoro/focus-end-clean'
+            : (interrupts >= 4 ? 'pomodoro/focus-end-busted' : 'pomodoro/focus-end'))
         : (event.phase === 'long-break' ? 'pomodoro/long-end' : 'pomodoro/break-end')
       // 专注结束用 `waiting`（"该你动一下了"），休息结束用 `happy`（"回来啦"）。
+      //
+      // `-busted` 那条要**自己把次数填进文案**（`state.js` 的文案表里是 `{n}`）。
+      // 为什么不给 `notify()` 加一套模板机制：那要为它设计转义、缺参回落、
+      // 未知占位符处理 —— 而这里只有一个占位符、一个调用点。填字符串更简单，
+      // 而且"填错了"在测试里一眼就能看到（不必去验一个模板引擎）。
+      const text = key === 'pomodoro/focus-end-busted'
+        ? EVENT_TEXT['pomodoro/focus-end-busted'].zh.replace('{n}', String(interrupts))
+        : undefined
       machine.notify({
         key,
         state: event.phase === 'focus' ? 'waiting' : 'happy',
+        text,
         priority: 96,
         durationMs: 8000
       })
+
+      // 里程碑：达成时额外给一次更强的反馈（`happy` + 语音）。
+      // ⚠️ 只播**最新**那个：一次跳两级（比如从第 9 个直接到第 11 个）
+      // 会同时达成两个，连弹两条气泡反而像卡住了。
+      if (freshMilestones.length > 0) {
+        const m = freshMilestones[freshMilestones.length - 1]
+        machine.notify({
+          key: `milestone/${m.key}`,
+          state: 'happy',
+          text: `🏆 ${m.label.zh}`,
+          priority: 97,
+          durationMs: 9000
+        })
+        logger.info?.(`zhuang-fangyi-pet: 里程碑达成 ${m.key}`)
+      }
     } catch (error) {
       logger.warn?.(`zhuang-fangyi-pet: 番茄钟提醒失败（${error?.message ?? error}）`)
     }
@@ -567,6 +663,9 @@ export function apply (ctx, config) {
     }
   }
 
+  // ── 番茄钟统计 ────────────────────────────────────────────────────────────
+  // 声明在**上方**"番茄钟统计"那一节（必须在 `pomodoro` 之前 —— 见那里的注释）。
+
   /**
    * 最近一次互动（**给 exe 的一次性信号**）。
    *
@@ -576,6 +675,48 @@ export function apply (ctx, config) {
    */
   let lastInteract = null
   let interactSeq = 0
+
+  // ── 成长记账（v10，用户："互动当前方式…很奇怪" + 选了"她记得你"）──────────
+  //
+  // 三个计数器 + 一个"初次见面"时刻。**不单独一个模块**：它们只是"她记得
+  // 你几天、今天碰了几次"这种流水账，没有可穷举的判定逻辑 —— 真正的判定
+  // （跨天、里程碑）在 `stats.js` 里。为三个数字再开一个模块，测试成本
+  // 会比它本身还大。
+  //
+  // ⚠️ `todayByKind` 用**普通对象**而不是 Map：它要进快照（JSON），
+  // Map 会被 `JSON.stringify` 变成 `{}` —— 那种失败是静默的（客户端看到空对象）。
+  let firstMetAt = Date.now()
+  let todayInteracts = 0
+  let todayByKind = {}
+  let growthDayKey = dayKeyFor(Date.now())
+  let lastMilestone = null
+
+  /** 跨天就把今日计数清零（进程可能跨天不重启 —— 与 `interactions.js` 同一纪律）。 */
+  const rollGrowthDay = at => {
+    const key = dayKeyFor(at)
+    if (key !== growthDayKey) {
+      growthDayKey = key
+      todayInteracts = 0
+      todayByKind = {}
+      lastMilestone = null
+    }
+  }
+
+  /**
+   * 今天是第几天（初次见面当天算第 1 天）。
+   *
+   * 用**本地日期**差算，不用 `(now - firstMetAt) / DAY`：后者在跨夏令时、
+   * 或者用户在 23:59 开始用时会给出一整天的偏差。
+   */
+  const daysMet = at => {
+    const a = new Date(firstMetAt)
+    const b = new Date(at)
+    if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return 1
+    const dayA = Date.UTC(a.getFullYear(), a.getMonth(), a.getDate())
+    const dayB = Date.UTC(b.getFullYear(), b.getMonth(), b.getDate())
+    const diff = Math.floor((dayB - dayA) / (24 * 60 * 60 * 1000))
+    return Math.max(1, diff + 1)
+  }
 
   // ── 聊天（用户点名："可以与桌宠聊天"）───────────────────────────────────
   //
@@ -1624,12 +1765,50 @@ export function apply (ctx, config) {
    * ⚠️ **冷却中也要有反应**（`interactions.js` 的 `accepted` 语义）：
    * 点了没反应比"没涨分"更像坏了。只有未知动作才真的拒绝。
    *
-   * @param {string} kind - `pet-head` | `feed` | `praise` | `click`
+   * v10：加了**情境感应** —— 同一个动作在她不同状态下给不同的话。
+   * 判定在 `mood.js`（纯函数，7 情境 × 7 动作可穷举），这里只负责接线。
+   *
+   * @param {string} kind - `INTERACT_KINDS` 之一
+   * @param {number} [at]
+   * @param {object} [opts]
+   * @param {number} [opts.level] - 长按级数（1..3，只对 `pat` 有意义）
    * @returns {object} 给路由的响应体
    */
-  const doInteract = (kind, at = Date.now()) => {
-    const result = affection.interact(kind, at)
+  const doInteract = (kind, at = Date.now(), opts = {}) => {
+    // 情境要在**互动之前**取：`interact()` 可能改变档位（升级），
+    // 而"她当时是什么心情"该用动手那一刻的快照 —— 用之后的值会让
+    // "摸一下直接升级"的那一次用新档位的语气说话。
+    const moodCtx = {
+      petState: machine.snapshot(at)?.petState ?? null,
+      pomodoroPhase: pomodoro.snapshot(at)?.phase ?? null,
+      pomodoroRunning: pomodoro.snapshot(at)?.running === true,
+      tier: affection.snapshot(at)?.tier ?? null
+    }
+
+    // 情境化的反应（文案 / 语音 / 收益倍率）。判定是纯函数，不会抛。
+    //
+    // ⚠️ 倍率要**先算出来再交给 `interact()`**（而不是事后从点数里扣）：
+    // 事后扣会让 `points` 与 `todayGain` 有两条写入路径，少减一次就是
+    // "显示 37 分、今天却只涨了 20"，而那种分叉没有任何断言能自动发现。
+    const locale = settings.get().locale
+    const mood = moodFor(kind, moodCtx, {
+      locale,
+      level: opts.level,
+      fallback: { text: interactConfig(kind)?.text ?? null, voice: null }
+    })
+
+    const result = affection.interact(kind, at, { level: opts.level, gainMul: mood.gainMul })
     if (!result.accepted) return { ok: false, error: 'unknown-kind', allowed: INTERACT_KINDS }
+
+    // 成长记账（v10）：今天的互动次数与分类。
+    // ⚠️ 放在 `accepted` 之后 —— 未知动作不该计入"她记得你"。
+    rollGrowthDay(at)
+    todayInteracts += 1
+    todayByKind[kind] = (todayByKind[kind] ?? 0) + 1
+    // 好感度档位变化时记一条（供"她记得你"类文案与诊断用）。
+    if (result.tierChanged) {
+      lastMilestone = { key: `tier/${result.tier.key}`, label: result.tier.label, at }
+    }
 
     // 持久化（含冷却与今日记账 —— 缺了它们"重启刷新冷却"就成了后门）。
     if (affectionStore !== null) {
@@ -1637,21 +1816,35 @@ export function apply (ctx, config) {
       affectionStore.schedule()
     }
 
-    // 让桌宠说话。文案取自互动配置（click 故意为 null = 不弹气泡，
-    // 它太频繁，弹气泡会刷屏 —— 但它仍然有语音与表情）。
+    // 让桌宠说话。文案取自情境表（`quiet` 时为空 = 这次不出声）。
+    // `click` 故意为 null = 不弹气泡，它太频繁，弹气泡会刷屏 ——
+    // 但它仍然有语音与表情。
     try {
-      const locale = settings.get().locale
-      const text = interactText(kind, locale)
-      machine.notify({
-        key: `interact/${kind}`,
-        // 情绪：夸奖/投喂是开心的，摸摸头/打招呼是平静的。
-        state: kind === 'praise' || kind === 'feed' ? 'happy' : 'listening',
-        text: text ?? undefined,
-        priority: 94,
-        durationMs: 5000
-      })
+      const text = result.quiet ? null : moodText(mood.text, locale)
+      if (text !== null) {
+        machine.notify({
+          key: `interact/${kind}`,
+          // 情绪：夸奖/投喂是开心的，摸摸头/打招呼是平静的。
+          // v10：睡着了与出错了走各自的情绪（被吵醒不该"开心"）。
+          state: mood.context === 'asleep'
+            ? 'waking'
+            : (mood.context === 'trouble' ? 'error' : (kind === 'praise' || kind === 'feed' ? 'happy' : 'listening')),
+          text,
+          priority: 94,
+          durationMs: 5000
+        })
+      }
     } catch (error) {
       logger.warn?.(`zhuang-fangyi-pet: 互动气泡失败（${error?.message ?? error}）`)
+    }
+
+    // 摸鱼计数（v10）：番茄钟专注期间的互动会被记下来，阶段结束时点评。
+    // ⚠️ `hover` 不算 —— 悬停没碰到她（鼠标路过不该算你分心）。
+    let interrupts = null
+    if (mood.context === 'focus' && kind !== 'hover') {
+      try { interrupts = stats.interrupt(at) } catch (error) {
+        logger.warn?.(`zhuang-fangyi-pet: 摸鱼计数失败（${error?.message ?? error}）`)
+      }
     }
 
     // 语音：交给 exe 播（Host 只告诉它"哪个事件"）。
@@ -1660,8 +1853,10 @@ export function apply (ctx, config) {
     lastInteract = {
       seq: ++interactSeq,
       kind,
-      voice: result.voice,
+      voice: result.quiet ? null : mood.voice,
       label: interactLabel(kind),
+      /** v10：命中的情境（exe 的日志与诊断靠它分辨"她为什么这么说"）。 */
+      context: mood.context,
       at
     }
 
@@ -1669,14 +1864,19 @@ export function apply (ctx, config) {
       ok: true,
       kind,
       label: interactLabel(kind),
+      context: mood.context,
       gain: result.gain,
       cooling: result.cooling,
       dailyCapped: result.dailyCapped,
       tierChanged: result.tierChanged,
       affection: affection.snapshot(at),
       /** exe 据此播语音（`pet/*` 事件名）。 */
-      voice: result.voice,
-      text: result.text
+      voice: result.quiet ? null : mood.voice,
+      text: result.quiet ? null : moodText(mood.text, locale),
+      /** 本次是否被情境判定为"安静的确认"（连甩/连悬停时的限速）。 */
+      quiet: result.quiet === true,
+      /** 专注期间累计的摸鱼次数（非专注时为 null）。 */
+      interrupts
     }
   }
 
@@ -1975,6 +2175,37 @@ export function apply (ctx, config) {
       group: groupOf.get(entry.file) ?? null
     }))
   }
+  /**
+   * 成长快照（v10）。**每帧都带上**。
+   *
+   * ⚠️ 我一开始在这里写了"不要每帧算 7 天趋势，太浪费"，但代码仍然调了
+   * `stats.snapshot()`（它内部就算趋势）—— **注释与实现打架**。查了实际开销：
+   * `streakDays` 最多 32 次循环、`recentDays` 7 次，合计约 40 次迭代；而广播
+   * 只在状态变化时发生（不是每秒）。为省这 40 次迭代去拆一个"轻量版快照"，
+   * 代价是**两份形状** —— 而"两处各挑字段"正是本项目反复踩过的坑
+   *（数字静默变成 0）。所以保持一份，注释改成实情。
+   */
+  const growthSnapshot = () => {
+    const snap = affection.snapshot()
+    const today = stats.snapshot(Date.now())
+    return {
+      firstMetAt: firstMetAt,
+      /** 今天是第几天（初次见面当天算第 1 天）。 */
+      daysMet: daysMet(Date.now()),
+      streakDays: today.streakDays,
+      todayInteracts: todayInteracts,
+      todayByKind: { ...todayByKind },
+      /** 最近达成的里程碑（没有则为 null —— 前端判空即可，不必判 undefined）。 */
+      milestone: lastMilestone
+    }
+  }
+
+  /** 今日统计块（v10）。`/pet/growth` 用完整版，快照里用同一份。 */
+  const todaySnapshot = () => {
+    const s = settings.get()
+    return stats.snapshot(Date.now(), { goalCount: s.pomodoroGoalCount })
+  }
+
   /** 快照 + 设置 = 广播帧（exe 与 overlay 共用同一帧）。 */
   const withSettings = snap => ({
     ...snap,
@@ -1984,6 +2215,17 @@ export function apply (ctx, config) {
     pomodoro: pomodoro.snapshot(Date.now()),
     // 好感度（exe 显示档位；overlay 忽略）。
     affection: affection.snapshot(),
+    /**
+     * 成长（v10，additive）：她记得你几天、今天互动几次、最近达成了什么。
+     * 缺块（旧 Host）→ 旧客户端与 overlay 静默忽略（零回归）。
+     */
+    growth: growthSnapshot(),
+    /**
+     * 今日统计（v10，additive）：番茄数 / 专注时长 / 摸鱼次数 / 连续天数。
+     * ⚠️ 与 `/pet/growth` 里那份**同一份真相**（同一个 `stats.snapshot()`），
+     * 不是"快照一份、端点另一份" —— 两处各挑字段的话，迟早不一致。
+     */
+    today: todaySnapshot(),
     /**
      * 最近一次互动 —— exe 靠 `seq` 判"这是新的一次"从而**恰好播一次**语音。
      *
@@ -2469,11 +2711,26 @@ export function apply (ctx, config) {
           kind: k,
           label: interactLabel(k),
           /** 该动作有没有气泡文案（click 没有 —— 它太频繁）。 */
-          hasText: interactText(k, 'zh') !== null
+          hasText: interactConfig(k)?.text?.zh != null
         })),
         affection: affection.snapshot()
       }),
-      do: kind => doInteract(kind)
+      /** @param {number} [level] 长按级数（路由层已夹到 1..3）。 */
+      do: (kind, level) => doInteract(kind, Date.now(), level === undefined ? {} : { level })
+    },
+    /**
+     * 成长与今日统计（v10，契约 §3 新增）。
+     *
+     * `GET /pet/growth` —— exe 的右键菜单与诊断用。数据同时也每帧在快照里
+     * （`growth` / `today` 块），但那是给 overlay 与设置页的：它们没有令牌，
+     * 而这个端点是"打开菜单时拉一次"的按需读取。
+     */
+    growth: {
+      snapshot: () => ({
+        affection: affection.snapshot(),
+        growth: growthSnapshot(),
+        today: todaySnapshot()
+      })
     },
     /**
      * 聊天（契约 §3 新增）。

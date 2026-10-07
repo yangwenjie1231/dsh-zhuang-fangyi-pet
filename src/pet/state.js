@@ -119,6 +119,18 @@ export const EVENT_TEXT = {
   // 状态机里 —— 在 Host 拼字符串会让"中英切换"这件事有两个真相。
   'pomodoro/focus-start': { zh: '开始专注啦，加油～', en: 'Focus time — go!' },
   'pomodoro/focus-end': { zh: '专注结束，去休息一下吧', en: 'Focus done — take a break' },
+  /**
+   * v10：专注结束的两个极端档。
+   *
+   * 用户："当前的番茄钟太简单了"。这两个 key 是"互动 ↔ 番茄钟"真正连起来的
+   * 地方 —— 她不只是计时，她**记得你中途碰了她几次**。
+   *
+   * `-busted` 的文案里带 `{n}`：具体次数由调用方（`index.js`）填进去。
+   * 为什么不在这里写死"好几次"：含糊的说法没有杀伤力，而"你摸了我 7 次"
+   * 才是这个功能有趣的地方（用户要的就是"更有意思"）。
+   */
+  'pomodoro/focus-end-clean': { zh: '整整一轮，一次都没碰我。厉害。', en: 'A whole round — you never touched me. Nice.' },
+  'pomodoro/focus-end-busted': { zh: '这一轮你摸了我 {n} 次。', en: 'You poked me {n} times that round.' },
   'pomodoro/break-end': { zh: '休息结束，继续加油！', en: 'Break over — back to it!' },
   'pomodoro/long-end': { zh: '长休息结束，回来啦～', en: 'Long break over — welcome back!' }
 }

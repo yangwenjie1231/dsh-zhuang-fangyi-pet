@@ -1136,6 +1136,7 @@ section('5d. 互动路由（/pet/interact）')
 let affClock = 1_700_000_000_000
 const realAffection = createAffection({ now: () => affClock })
 const interactCalls = []
+const interactLevels = []
 const interactHandler = createHandler({
   snapshot,
   atlas: () => atlas,
@@ -1158,9 +1159,10 @@ const interactHandler = createHandler({
       })),
       affection: realAffection.snapshot(affClock)
     }),
-    do: kind => {
+    do: (kind, level) => {
       interactCalls.push(kind)
-      const r = realAffection.interact(kind, affClock)
+      interactLevels.push(level)
+      const r = realAffection.interact(kind, affClock, level === undefined ? {} : { level })
       if (!r.accepted) return { ok: false, allowed: INTERACT_KINDS }
       return {
         ok: true,
@@ -1170,9 +1172,18 @@ const interactHandler = createHandler({
         cooling: r.cooling,
         tierChanged: r.tierChanged,
         affection: realAffection.snapshot(affClock),
-        voice: r.voice
+        voice: r.voice,
+        /** 路由把 level 夹过之后传进来的是多少（测试靠它验证夹取）。 */
+        level: level === undefined ? null : level
       }
     }
+  },
+  growth: {
+    snapshot: () => ({
+      affection: realAffection.snapshot(affClock),
+      growth: { firstMetAt: 1_700_000_000_000, daysMet: 1, streakDays: 0, todayInteracts: 0, todayByKind: {}, milestone: null },
+      today: { dayKey: '2026-10-07', pomodoroCount: 0, focusMs: 0, interrupts: 0, streakDays: 0, goalCount: 8, byTask: [], recent: [] }
+    })
   }
 })
 const interactServer = http.createServer((req, res) => {
@@ -1299,6 +1310,94 @@ await okAsync('互动路由也受令牌/围栏保护（跨站请求被拒）', a
     headers: { 'sec-fetch-site': 'cross-site' }
   })
   assert.equal(res.status, 403, `跨站请求应 403，实际 ${res.status}`)
+})
+
+// ── v10：长按级数与成长端点 ──────────────────────────────────────────────
+
+await okAsync('⭐ POST /interact 的 level 透传到 do()（长按分级）', async () => {
+  interactLevels.length = 0
+  affClock += 10 * 60 * 1000
+  const r = await intCall('POST', { kind: 'pat', level: 2 })
+  assert.equal(r.status, 200, `状态码 ${r.status}`)
+  assert.deepEqual(interactLevels, [2], `level 应该透传成 2，实际 ${JSON.stringify(interactLevels)}`)
+})
+
+await okAsync('⭐⭐ level 在**路由层**就被夹到 1..3（跨进程信任边界）', async () => {
+  // exe 侧 `PetHttp.PostInteract` 已经夹过一次，但那是边界的另一侧 ——
+  // 路由层必须自己再挡一次（与动作白名单同一条纪律）。
+  const cases = [
+    [99, 3], [4, 3], [3, 3], [2, 2], [1, 1],
+    [0, 1], [-5, 1], [2.9, 2], ['2', 2],
+    [null, 1], [undefined, 1], ['x', 1], [NaN, 1]
+  ]
+  for (const [input, want] of cases) {
+    interactLevels.length = 0
+    affClock += 10 * 60 * 1000
+    const body = input === undefined ? { kind: 'pat' } : { kind: 'pat', level: input }
+    const r = await intCall('POST', body)
+    assert.equal(r.status, 200, `level=${JSON.stringify(input)} 应 200，实际 ${r.status}`)
+    assert.deepEqual(interactLevels, [want],
+      `level=${JSON.stringify(input)} 应夹成 ${want}，实际 ${JSON.stringify(interactLevels)}`)
+  }
+})
+
+await okAsync('level 只对 pat 有意义，但传了也不报错（别的动作忽略它）', async () => {
+  interactLevels.length = 0
+  affClock += 10 * 60 * 1000
+  const r = await intCall('POST', { kind: 'praise', level: 3 })
+  assert.equal(r.status, 200)
+  // praise 没有 textByLevel，级数不该改变它的文案
+  assert.deepEqual(interactLevels, [3], 'level 仍然透传（由 interactions.js 决定用不用）')
+})
+
+await okAsync('⭐ GET /growth 返回好感度 + 成长 + 今日统计', async () => {
+  const res = await fetch(`${INT_BASE}${ROUTE_PREFIX}/growth`, { headers: auth() })
+  assert.equal(res.status, 200, `状态码 ${res.status}`)
+  const body = JSON.parse(await res.text())
+  assert.ok(body.affection, '缺 affection 块')
+  assert.ok(body.growth, '缺 growth 块')
+  assert.ok(body.today, '缺 today 块')
+  // 成长块的必要字段（缺了客户端会显示 undefined）
+  assert.equal(typeof body.growth.firstMetAt, 'number')
+  assert.equal(typeof body.growth.daysMet, 'number')
+  assert.equal(typeof body.growth.streakDays, 'number')
+  assert.equal(typeof body.growth.todayInteracts, 'number')
+  assert.equal(typeof body.growth.todayByKind, 'object')
+  assert.ok('milestone' in body.growth, 'growth 必须**总是**带 milestone 键（null 也要有）')
+  // 今日块
+  assert.equal(typeof body.today.dayKey, 'string')
+  assert.equal(typeof body.today.pomodoroCount, 'number')
+  assert.ok(Array.isArray(body.today.byTask), 'byTask 应是数组')
+  assert.ok(Array.isArray(body.today.recent), 'recent 应是数组')
+})
+
+await okAsync('GET /growth 也受令牌/围栏保护', async () => {
+  const res = await fetch(`${INT_BASE}${ROUTE_PREFIX}/growth`, {
+    headers: { 'sec-fetch-site': 'cross-site' }
+  })
+  assert.equal(res.status, 403, `跨站请求应 403，实际 ${res.status}`)
+})
+
+await okAsync('未装配成长时 /growth 返回 503（不许假装成功）', async () => {
+  const bare = createHandler({
+    snapshot,
+    atlas: () => atlas,
+    artDir,
+    token: TOKEN,
+    hub,
+    logger: { warn () {}, debug () {}, info () {} },
+    connection: () => undefined,
+    onPosition: () => {},
+    onCommand: () => ({})
+  })
+  const srv = http.createServer((req, res) => {
+    bare(req, res).catch(() => { if (!res.headersSent) res.writeHead(500); res.end() })
+  })
+  await new Promise(resolve => srv.listen(0, '127.0.0.1', resolve))
+  const base = `http://127.0.0.1:${srv.address().port}`
+  const res = await fetch(`${base}${ROUTE_PREFIX}/growth`, { headers: auth() })
+  assert.equal(res.status, 503)
+  await new Promise(resolve => srv.close(resolve))
 })
 
 await new Promise(resolve => interactServer.close(resolve))
