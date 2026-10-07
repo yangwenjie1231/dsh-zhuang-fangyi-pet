@@ -926,6 +926,17 @@ export function apply (ctx, config) {
    * 先发的那句合成完会**盖住**后发的 —— 听起来就是"念了上一句"。
    */
   let speechGeneration = 0
+  /**
+   * 回复编号（"这是第几句回复"）—— 同一条回复的**所有分片共用一个号**。
+   *
+   * 与 `speechGeneration` 的区别：
+   *   · `speechGeneration` 是**取消**用的（旧回复的剩余分片直接放弃，不合成）；
+   *   · `speechUtterance` 是**排队**用的 —— exe 靠它区分
+   *     "这是同一句的下一段（排队续播）" 与 "这是新的一句（清空队列、立刻播）"。
+   *
+   * 少了它，分段播就会退化成互相抢占：第 2 段到达时会把还在播的第 1 段打断。
+   */
+  let speechUtterance = 0
 
   const ensureSpeechDir = () => {
     try {
@@ -1217,6 +1228,31 @@ export function apply (ctx, config) {
   /**
    * 念一句回复（fire-and-forget）。
    *
+   * ── 为什么是"分段"而不是"整段" ────────────────────────────────────────────
+   *
+   * 用户问过："为什么一次只能念 60 个字，别限制啊，它在 GPU 上很快"。
+   *
+   * 实测（常驻 + torch + GPU，本机）：
+   *
+   *     字符数   合成耗时   音频时长   倍速
+   *       30      3.4s      6.5s     1.9x
+   *       60      4.9s     13.6s     2.7x
+   *      150     10.7s     32.4s     3.0x
+   *      300     19.3s     48.8s     2.5x
+   *
+   * 所以 GPU 上是 **~3× 实时**，不是"秒出"。旧限制（`speechMaxChars`）
+   * 存在的真实原因不是"念不动"，而是**整段合成完才开始播** ——
+   * 60 字等 5 秒、300 字要干等 19 秒才开口。截断只是把痛苦藏起来
+   *（后半句干脆不念）。
+   *
+   * 现在改成：**按句分段 → 逐段合成 → 合成一段就交付一段**。
+   *   · 第一段合成完就开口（通常 2~3 秒），**总长度不再影响开口时间**；
+   *   · 后续段落在上一段播放期间合成（合成 3× 实时 > 播放 1× 实时），播完能接上；
+   *   · **整段回复都念**，不再有"只念前 60 字"。
+   *
+   * 每一段都带同一个 `utterance` 号 → exe 据此把同一次回复的分片**排成队列**
+   *（而不是互相抢占），换了新回复则清空队列。
+   *
    * @param {string} rawReply - **原始回复文本**（markdown，函数内部会清洗）
    */
   const speakReply = rawReply => {
@@ -1225,59 +1261,75 @@ export function apply (ctx, config) {
     if (settings.get().voice !== true) return
     const client = tts()
     // ⭐ 清洗：markdown 直接念会念出"星号星号"、代码、URL。
-    const text = client.sanitize(rawReply)
-    if (text === null) return   // 全是代码之类 —— 没东西可念，不硬念
+    //    `sanitizeFull` = **不截断**（截断只留前半句，后文直接丢）。
+    const full = client.sanitizeFull(rawReply)
+    if (full === null) return   // 全是代码之类 —— 没东西可念，不硬念
+    // 按句分段；`maxChars` 现在是"单段上限"，不再是"总共只念这么多"。
+    const chunks = client.chunk(full)
+    if (chunks.length === 0) return
     const gen = ++speechGeneration
+    const utterance = ++speechUtterance
     void (async () => {
       try {
         if (!ensureSpeechDir()) return
-        const key = client.cacheKey(text)
-        const file = path.join(SPEECH_DIR, `${key}.wav`)
-        let durationMs = 0
-        let fromCache = false
-        if (fs.existsSync(file)) {
-          try {
-            durationMs = wavDurationMs(fs.readFileSync(file))
-            fromCache = true
-          } catch { fromCache = false }
-        }
-        if (!fromCache) {
-          // ⭐ 两条路：
-          //   · 装了语音 DSH 插件 → 交给它的 `synthesize`（它自己管进程与常驻策略）
-          //   · 没装 → 桌宠自己起进程 + HTTP（"需要时才启动"）
-          // 全程在 fire-and-forget 的异步块里，chat 不受任何影响。
-          const svc = voiceService()
-          let r = null
-          if (svc !== null) {
-            const out = await svc.synthesize(text)
-            r = out === null ? null : { bytes: out.bytes, durationMs: out.durationMs }
-          } else {
-            await supervisor.ensure()
-            r = await client.synthesize(text)
-          }
-          if (r === null) {
-            // 服务没起 / 超时 / 返回垃圾 —— 退回固定台词（exe 侧会播 chat/reply）。
-            boot('动态语音合成不可用 → 退回固定台词')
+        for (let i = 0; i < chunks.length; i++) {
+          // ⭐ 代际检查放在**每段开始前**：有更新的回复来了就立刻停手，
+          //   不用把剩下的段落白合成一遍（那是几秒到几十秒的 GPU 时间）。
+          if (gen !== speechGeneration) {
+            boot(`动态语音已过期（有更新的回复）→ 丢弃剩余 ${chunks.length - i} 段`)
             return
           }
-          try {
-            fs.writeFileSync(file, r.bytes)
-          } catch (error) {
-            logger.warn?.(`zhuang-fangyi-pet: 语音写入失败：${error?.message ?? error}`)
+          const piece = chunks[i]
+          const key = client.cacheKey(piece)
+          const file = path.join(SPEECH_DIR, `${key}.wav`)
+          let durationMs = 0
+          let fromCache = false
+          if (fs.existsSync(file)) {
+            try {
+              durationMs = wavDurationMs(fs.readFileSync(file))
+              fromCache = true
+            } catch { fromCache = false }
+          }
+          if (!fromCache) {
+            // ⭐ 两条路：
+            //   · 装了语音 DSH 插件 → 交给它的 `synthesize`（它自己管进程与常驻策略）
+            //   · 没装 → 桌宠自己起进程 + HTTP（"需要时才启动"）
+            // 全程在 fire-and-forget 的异步块里，chat 不受任何影响。
+            const svc = voiceService()
+            let r = null
+            if (svc !== null) {
+              const out = await svc.synthesize(piece)
+              r = out === null ? null : { bytes: out.bytes, durationMs: out.durationMs }
+            } else {
+              await supervisor.ensure()
+              r = await client.synthesize(piece)
+            }
+            if (r === null) {
+              // 服务没起 / 超时 / 返回垃圾 —— 这一段之后的都放弃
+              //（退回固定台词，exe 侧会播 chat/reply）。
+              boot(`动态语音合成不可用 → 第 ${i + 1}/${chunks.length} 段起放弃`)
+              return
+            }
+            try {
+              fs.writeFileSync(file, r.bytes)
+            } catch (error) {
+              logger.warn?.(`zhuang-fangyi-pet: 语音写入失败：${error?.message ?? error}`)
+              return
+            }
+            durationMs = r.durationMs
+          }
+          // 合成完再查一次代际：合成期间用户可能又发了一条。
+          if (gen !== speechGeneration) {
+            boot('动态语音已过期（有更新的回复）→ 丢弃')
             return
           }
-          durationMs = r.durationMs
+          // 交付：seq 递增 → exe 看到变化就去取。
+          // `utterance` 相同表示"还是同一句回复的后续分片" → exe 排队而不是抢占。
+          speechSeq += 1
+          speechLatest = { seq: speechSeq, name: key, durationMs, text: piece, utterance }
+          boot(`动态语音就绪（${fromCache ? '缓存' : '新合成'}，${durationMs}ms，第 ${i + 1}/${chunks.length} 段）：${piece.slice(0, 24)}`)
+          hub.broadcast(withSettings(machine.snapshot()))
         }
-        // ⭐ 代际检查：这条已经不是最新的了 → 丢掉（别盖住更新的那句）。
-        if (gen !== speechGeneration) {
-          boot('动态语音已过期（有更新的回复）→ 丢弃')
-          return
-        }
-        // 交付：seq 递增 → exe 看到变化就去取。
-        speechSeq += 1
-        speechLatest = { seq: speechSeq, name: key, durationMs, text }
-        boot(`动态语音就绪（${fromCache ? '缓存' : '新合成'}，${durationMs}ms）：${text.slice(0, 24)}`)
-        hub.broadcast(withSettings(machine.snapshot()))
       } catch (error) {
         logger.warn?.(`zhuang-fangyi-pet: 动态语音失败（已忽略）：${error?.message ?? error}`)
       }
@@ -2573,7 +2625,9 @@ export function apply (ctx, config) {
             const key = cacheKey ?? speechCacheKey(probeText, `probe:${backend ?? ''}`)
             fs.writeFileSync(path.join(SPEECH_DIR, `${key}.wav`), bytes)
             speechSeq += 1
-            speechLatest = { seq: speechSeq, name: key, durationMs, text: probeText }
+            // 探针每次都给一个**新的 utterance**：它是一条独立的试听，
+            // 不该被 exe 当成"上一句的后续分片"排队等着（那样点第二下没声音）。
+            speechLatest = { seq: speechSeq, name: key, durationMs, text: probeText, utterance: ++speechUtterance }
             hub.broadcast(withSettings(machine.snapshot()))
             delivered = true
             boot('动态语音探测成功，已交付 exe 播放')

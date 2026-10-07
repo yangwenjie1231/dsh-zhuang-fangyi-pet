@@ -83,6 +83,17 @@ namespace DshZhuangFangyiPet
         public int DroppedCount { get; private set; }
         /// <summary>被"动态回复"抢占而中断的条数（固定台词居多）。</summary>
         public int PreemptedCount { get; private set; }
+        /// <summary>因"换了一句新回复"而被打断的条数（含上一条回复的剩余分片）。</summary>
+        public int InterruptedCount { get; private set; }
+
+        /// <summary>正在播的是不是"回复分片"（决定新分片是排队还是抢占）。</summary>
+        private bool _playingIsReply;
+
+        /// <summary>待播的回复分片（同一次回复的后续段，按序播完）。</summary>
+        private readonly Queue<byte[]> _replyQueue = new Queue<byte[]>();
+        private readonly Queue<int> _replyDurations = new Queue<int>();
+        /// <summary>当前队列属于哪一次回复（换号 = 新的一句 → 清空）。</summary>
+        private long _replyUtterance = -1;
 
         public PetVoicePlayer(Dispatcher ui, string cacheDir)
         {
@@ -134,9 +145,7 @@ namespace DshZhuangFangyiPet
             //
             // `interrupt=false`（固定台词）→ 丢弃：给点击/状态配的拟声词迟几秒
             //   再响毫无意义，排队只会让它滞后于事件。
-            // `interrupt=true`（AI 回复）→ **抢占**：这是用户在等的那句话，
-            //   不能因为正好有条固定台词在响就把它丢掉（丢了就再也不会播 ——
-            //   重试只发生在上游来帧的时候，idle 时没有帧）。见类头注释。
+            // `interrupt=true` → **抢占**（回复语音专用路径，见 `DeliverReply`）。
             if (IsPlaying)
             {
                 if (!interrupt)
@@ -151,8 +160,89 @@ namespace DshZhuangFangyiPet
                 PetLog.Info("语音抢占：动态回复打断上一条（第 " + PreemptedCount + " 次）");
             }
 
+            return StartCore(bytes, eventKey, durationMs, now, reply: false);
+        }
+
+        /// <summary>
+        /// 交付**一段**回复语音（AI 回答的分片）。
+        ///
+        /// ── 为什么要"队列"而不是"每段都抢占" ─────────────────────────────────
+        ///
+        /// 用户问"为什么一次只能念 60 个字，别限制啊" —— 去掉总长度限制的办法是
+        /// **按句分段、边合成边播**（见 `chunkForSpeech`）。于是同一句回复会
+        /// 陆续到达好几段。如果每段都当"新的一句话"去抢占，第 2 段一到就把
+        /// 还在播的第 1 段打断 —— 听起来就是**每句只念开头几个字**。
+        ///
+        /// 所以用 `utterance` 区分：
+        ///   · **同一个 utterance** → 入队，等上一段播完自动续播；
+        ///   · **换了 utterance**（用户又发了新消息）→ 清空队列并立刻播新的
+        ///     （旧的答案已经没意义了）。
+        ///
+        /// 固定台词不管哪种情况都让位（回复优先）—— 那是"嗯哼"式的点缀。
+        /// </summary>
+        /// <param name="bytes">mp3/wav 字节</param>
+        /// <param name="durationMs">预期时长（≤0 用 3 秒兜底）</param>
+        /// <param name="utterance">回复编号；同一条回复的所有分片相同</param>
+        public void DeliverReply(byte[] bytes, int durationMs, long utterance)
+        {
+            if (_disposed) { DroppedCount++; return; }
+            if (!Enabled) { DroppedCount++; return; }
+            if (bytes == null || bytes.Length == 0) { DroppedCount++; return; }
+
+            // `utterance <= 0` = 上游没给这个字段（旧 Host，或"试一句"探针）——
+            // 这时**当成每次都换句**，保持与从前一致（单条替换），
+            // 免得把互不相干的两条当成"同一句的后续分片"排队等着。
+            if (utterance <= 0 || utterance != _replyUtterance)
+            {
+                _replyUtterance = utterance;
+                _replyQueue.Clear();
+                _replyDurations.Clear();
+                // 新的一句：打断正在播的（无论是上一条回复还是固定台词）。
+                if (IsPlaying)
+                {
+                    InterruptedCount++;
+                    _playingUntil = 0;
+                    PetLog.Info("语音换句：清空队列并打断上一条（第 " + InterruptedCount + " 次）");
+                }
+            }
+            _replyQueue.Enqueue(bytes);
+            _replyDurations.Enqueue(durationMs);
+            DrainReplies();
+        }
+
+        /// <summary>
+        /// 队列非空且当前空闲 → 播下一片。
+        ///
+        /// ⚠️ 必须由**定时器**周期性调用（见 `Program`），不能只靠"下一帧"：
+        /// 上游只在状态变化时推帧，桌宠 idle 之后就没有帧了 ——
+        /// 只依赖帧会让队列永远排不出去（这正是"回复语音被拖 51 秒/
+        /// 永久丢失"那个 bug 的成因）。
+        /// </summary>
+        public void DrainReplies()
+        {
+            if (_disposed || !Enabled) return;
+            if (IsPlaying) return;                 // 还在播：等播完，定时器会再来
+            if (_replyQueue.Count == 0) return;
+            byte[] bytes = _replyQueue.Dequeue();
+            int ms = _replyDurations.Dequeue();
+            if (!StartCore(bytes, "speech", ms, Environment.TickCount, reply: true))
+            {
+                // 起播失败（落盘失败等）→ 这一片丢掉，但**不能卡住队列**：
+                // 剩下的分片仍然要能播，否则整段回复只念第一句。
+                DroppedCount++;
+                PetLog.Warn("回复分片起播失败（已跳过，队列继续）");
+            }
+        }
+
+        /// <summary>待播的回复分片数（自检/诊断用）。</summary>
+        public int PendingReplies { get { return _replyQueue.Count; } }
+
+        /// <summary>②③④ 的实际动作：节流 → 落盘 → 派发到 UI 线程起播。</summary>
+        private bool StartCore(byte[] bytes, string eventKey, int durationMs, int now, bool reply)
+        {
             // ② 高频道事件节流：连点十下不该叠十条。
-            if (eventKey != null)
+            //    （回复分片不走节流：同一次回复的每段都是必须念的内容。）
+            if (!reply && eventKey != null)
             {
                 int last;
                 if (_lastFired.TryGetValue(eventKey, out last) &&
@@ -185,6 +275,7 @@ namespace DshZhuangFangyiPet
             // 预留 120ms 余量：`durationMs` 是 ffprobe 的实测值，
             // 但解码起播有延迟，不留余量会把"刚播完"误判成"还在播"。
             _playingUntil = unchecked(now + dur + 120);
+            _playingIsReply = reply;
 
             try
             {
@@ -198,12 +289,17 @@ namespace DshZhuangFangyiPet
                         _player.Open(new Uri(path, UriKind.Absolute));
                         _player.Play();
                         PlayedCount++;
+                        if (_playingIsReply)
+                        {
+                            PetLog.Info("回复分片起播（队列剩 " + _replyQueue.Count + "）");
+                        }
                     }
                     catch (Exception ex)
                     {
                         // 播放失败不该影响任何功能（也许没装音频设备）。
                         PetLog.Warn("语音播放失败: " + PetLog.Describe(ex));
                         _playingUntil = 0;
+                        _playingIsReply = false;
                     }
                 };
                 if (_ui != null && !_ui.CheckAccess()) _ui.BeginInvoke(DispatcherPriority.Normal, start);
@@ -213,6 +309,7 @@ namespace DshZhuangFangyiPet
             {
                 PetLog.Warn("语音派发失败: " + PetLog.Describe(ex));
                 _playingUntil = 0;
+                _playingIsReply = false;
                 DroppedCount++;
                 return false;
             }
@@ -223,6 +320,9 @@ namespace DshZhuangFangyiPet
         public void Stop()
         {
             _playingUntil = 0;
+            // 一并清掉"正在播的是回复分片"这个标记：否则停掉之后
+            // 新来的分片会被当成"续播"而排队等着一条已经不存在的音频。
+            _playingIsReply = false;
             try
             {
                 if (_player != null)

@@ -1886,6 +1886,54 @@ namespace DshZhuangFangyiPet
                   "⭐ 抢占路径不该**同时**记一次丢弃（那是两条互斥的路）",
                   "Dropped 保持 " + droppedBefore);
 
+            // (9c) ⭐⭐ 同一条回复的**后续分片要排队**，不能互相抢占
+            //
+            // 去掉"只念 60 字"的限制靠的是"按句分段、边合成边播"。
+            // 于是同一句回复会有好几段陆续到达。若每段都当新的一句去抢占，
+            // 第 2 段一到就把还在播的第 1 段打断 —— 听起来就是每句只念开头几个字。
+            player.DiagSetPlayingUntil(0);
+            player.Stop();
+            long utt = 4242;
+            player.DeliverReply(fakeMp3, 1000, utt);        // 第一段：空闲 → 立刻播
+            bool firstPlaying = player.IsPlaying;
+            player.DeliverReply(fakeMp3, 1000, utt);        // 第二段：上一段还在播 → 入队
+            player.DeliverReply(fakeMp3, 1000, utt);        // 第三段：同上
+            Check(firstPlaying && player.PendingReplies == 2,
+                  "⭐⭐ 同一次回复的后续分片**排队**（不抢占）—— 否则每段只念开头几个字",
+                  "第 1 段起播=" + firstPlaying + "，队列剩 " + player.PendingReplies);
+
+            // (9d) ⭐⭐ 换一句（新 utterance）→ 清空队列并打断
+            int intBefore = player.InterruptedCount;
+            long utt2 = 4243;
+            player.DeliverReply(fakeMp3, 1000, utt2);
+            Check(player.InterruptedCount > intBefore && player.PendingReplies == 0,
+                  "⭐⭐ 换了新的一句 → 清空旧队列并打断（旧答案已经没意义了）",
+                  "Interrupted " + intBefore + " → " + player.InterruptedCount +
+                  "，队列 " + player.PendingReplies);
+
+            // (9e) ⭐ 队列会按序排出去（续播泵调用的就是它）
+            //
+            // ⚠️ 注意第一段是**立刻播**的（空闲时不等），所以"队列长度"要
+            //    在第 2 段之后才开始涨。我第一版断言写的是"入队后 ≥2"，
+            //    忘了这一点 → 误报。**测试错了也要当 bug 查。**
+            player.Stop();
+            long utt3 = 4244;
+            player.DeliverReply(fakeMp3, 1000, utt3);        // 第 1 段：空闲 → 立刻播（队列 0）
+            player.DeliverReply(fakeMp3, 1000, utt3);        // 第 2 段：排队
+            player.DeliverReply(fakeMp3, 1000, utt3);        // 第 3 段：排队
+            int qAfterEnqueue = player.PendingReplies;       // 期望 2
+            player.Stop();                                   // 模拟"上一段播完了"
+            player.DrainReplies();                           // 泵一次 → 播第 2 段
+            int qAfterDrain = player.PendingReplies;         // 期望 1
+            Check(qAfterEnqueue == 2 && qAfterDrain == 1,
+                  "⭐ 续播泵每滴一次推进一段（队列不会卡住）",
+                  "队列入队后 " + qAfterEnqueue + " → 泵一次后 " + qAfterDrain);
+            // 收尾：清干净，别让残留队列影响后面的用例
+            player.Stop();
+            player.DrainReplies();
+            player.Stop();
+            player.DrainReplies();
+
             // (10) ⭐ 高频道事件节流（连点十下不叠十条）
             //
             // ⚠️ 这条也被回退验证修过：原先两次 Play 之间**没有清掉"正在播"**，

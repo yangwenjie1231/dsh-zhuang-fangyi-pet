@@ -23,6 +23,7 @@ import { fileURLToPath } from 'node:url'
 
 import {
   sanitizeForSpeech,
+  chunkForSpeech,
   speechCacheKey,
   wavDurationMs,
   createTtsClient,
@@ -161,6 +162,72 @@ ok('maxChars 可配置，默认 60', () => {
 ok('正常中文短句原样通过（不误伤）', () => {
   assert.equal(sanitizeForSpeech('我看看，这个思路可行。'), '我看看，这个思路可行。')
   assert.equal(sanitizeForSpeech('好。'), '好。')
+})
+
+/* ── 1b. 分段（"别限制 60 字"这件事的实现）──────────────────────────────── */
+
+ok('⭐⭐ truncate:false → 不截断（整段都要念）', () => {
+  // 用户问："为什么一次只能念 60 个字，别限制啊，它在 GPU 上很快。"
+  // 旧行为是**硬截断**（后半句直接丢），实测 122 字的回复只念了 55 字。
+  // 现在改为分段念完，所以清洗阶段不能截断。
+  const long = '第一句话在这里。第二句话在这里。第三句话在这里。第四句话在这里。'
+  const cut = sanitizeForSpeech(long, { maxChars: 12 })
+  const full = sanitizeForSpeech(long, { maxChars: 12, truncate: false })
+  assert.ok(cut.length <= 13, `默认应截断，实际 ${cut.length}`)
+  assert.equal(full, long, 'truncate:false 应原样保留全文')
+  // 兼容性：默认行为不变（还有调用方依赖截断）
+  assert.equal(sanitizeForSpeech(long, { maxChars: 12 }), cut, '不传 truncate 时行为必须与从前一致')
+})
+
+ok('⭐⭐ 分段：按句切开，且**一个字都不丢**', () => {
+  const text = '第一句。第二句长一点点。第三句。'
+  const chunks = chunkForSpeech(text, 8)
+  assert.ok(chunks.length > 1, `应切成多段，实际 ${chunks.length}`)
+  for (const c of chunks) assert.ok(c.length <= 8, `每段应 ≤ 8 字，实际 ${c.length}：${c}`)
+  assert.equal(chunks.join(''), text, '拼回去必须与原文完全一致（一个字都不许丢）')
+  // 每段都该是完整句子（以句末标点收尾），而不是半句
+  for (const c of chunks.slice(0, -1)) {
+    assert.ok(/[。！？；]$/.test(c), `非末段应在句末断开，实际 ${JSON.stringify(c)}`)
+  }
+})
+
+ok('⭐ 分段：空/纯空白 → 空数组（不产生空合成请求）', () => {
+  assert.deepEqual(chunkForSpeech('', 60), [])
+  assert.deepEqual(chunkForSpeech('   ', 60), [])
+  assert.deepEqual(chunkForSpeech(null, 60), [])
+})
+
+ok('⭐ 分段：单句超过上限时退到逗号断，不会把句子切碎成几个字', () => {
+  const one = '这是一个非常长的句子没有句末标点只有逗号，后面还有更多内容继续说下去，再补一点让它更长一些'
+  const chunks = chunkForSpeech(one, 20)
+  assert.ok(chunks.length >= 2, '超长单句应被切开')
+  assert.equal(chunks.join(''), one, '拼回去仍要一字不差')
+  for (const c of chunks) {
+    assert.ok(c.length <= 20, `每段 ≤ 20，实际 ${c.length}`)
+    assert.ok(c.length >= 8, `不该切得太碎（软停顿太靠前就不用），实际 ${c.length}：${c}`)
+  }
+})
+
+ok('⭐⭐ 分段：真实长度的回复不再被砍掉一半', () => {
+  // 复刻实测那条 122 字回复：旧行为只念 55 字（不到一半）。
+  const long = '管理员今天要检查第三批的成型曲线，昨天那条线终于压稳了。实验室的温度一直保持在二十二度左右，湿度也没有大波动。我把数据重新跑了一遍，结果和上次一致，误差在千分之三以内。接下来要写一份简短的报告，把这三天的曲线放在一起对比，标出异常点并给出解释。'
+  const old = sanitizeForSpeech(long, { maxChars: 60 })
+  const chunks = chunkForSpeech(sanitizeForSpeech(long, { maxChars: 60, truncate: false }), 60)
+  const spoken = chunks.join('')
+  assert.ok(old.length < long.length, '（前置事实）旧行为确实截断了')
+  assert.equal(spoken.length, long.length, `现在应念完整段（${long.length} 字），实际 ${spoken.length}`)
+  assert.ok(chunks.length >= 2, '应切成多段（这正是"能边合成边播"的前提）')
+  for (const c of chunks) assert.ok(c.length <= 60, `每段 ≤ 60，实际 ${c.length}`)
+})
+
+ok('⭐ 客户端暴露 chunk / sanitizeFull（宿主走的是这条）', () => {
+  const client = createTtsClient({ baseUrl: 'http://127.0.0.1:1', maxChars: 10 })
+  assert.equal(typeof client.chunk, 'function', '应有 chunk()')
+  assert.equal(typeof client.sanitizeFull, 'function', '应有 sanitizeFull()')
+  const long = '一二三四五六。七八九十甲乙。'
+  assert.equal(client.sanitizeFull(long), long, 'sanitizeFull 不截断')
+  assert.ok(client.sanitize(long).length <= 11, 'sanitize 仍截断（旧接口不变）')
+  assert.equal(client.chunk(long).join(''), long, 'chunk 拼回去一字不差')
 })
 
 /* ══════════════════════════════════════════════════════════════════════════

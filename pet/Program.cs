@@ -257,6 +257,8 @@ namespace DshZhuangFangyiPet
         private PetPomodoroInfo _lastPomodoro;
         /// <summary>倒计时窗每秒重绘的定时器（Host 不每秒推帧，见下）。</summary>
         private DispatcherTimer _pomoTimer;
+        /// <summary>回复语音队列的续播泵（见 Init 里的说明）。</summary>
+        private DispatcherTimer _replyPumpTimer;
 
         private static readonly string[] PreviewStates = new string[]
         {
@@ -515,6 +517,20 @@ namespace DshZhuangFangyiPet
             _pomoTimer.Interval = TimeSpan.FromSeconds(1);
             _pomoTimer.Tick += OnPomodoroTick;
             _pomoTimer.Start();
+
+            // 回复语音队列的续播泵。
+            //
+            // ⚠️ **不能只靠"上游来帧"驱动**。上游（Host）只在状态变化时推帧，
+            // 桌宠 idle 之后就没有帧了 —— 而一段回复会被切成好几段陆续送达
+            //（去掉 60 字限制后，见 `chunkForSpeech`）。若只靠帧，
+            // 第一段播完后队列里剩下的分片会**永远排不出去**。
+            //
+            // 250ms 足够跟上"上一段刚播完"（多等最多 0.25 秒起播），
+            // 又远小于任何一段的时长，不会空转出噪音。
+            _replyPumpTimer = new DispatcherTimer(DispatcherPriority.Background);
+            _replyPumpTimer.Interval = TimeSpan.FromMilliseconds(250);
+            _replyPumpTimer.Tick += OnReplyPumpTick;
+            _replyPumpTimer.Start();
 
             if (_http != null) _http.Start();
 
@@ -1130,17 +1146,20 @@ namespace DshZhuangFangyiPet
                 int ms = snap.SpeakDurationMs > 0
                     ? (int)Math.Min(snap.SpeakDurationMs, int.MaxValue)
                     : 0;
-                // ⭐ `interrupt: true` —— **回复语音可以打断固定台词**。
+                // ⭐ 走 `DeliverReply` 而不是 `Play(interrupt:true)` ——
+                // **同一条回复的多个分片要排队续播，而不是每段都抢占**。
                 //
-                // 不加这个参数的话，只要音频到达时正好有条固定台词在响，
-                // 回复就被静默丢掉，而且再也不会播（重试只发生在上游来帧时，
-                // 桌宠 idle 之后没有帧）。实测：一次拖了 51.4 秒才播，
-                // 另一次 20 秒内一声没出、那句就永久丢了。
-                if (_voicePlayer.Play(bytes, "speech", ms, interrupt: true))
-                {
-                    _lastSpeakName = snap.SpeakName;
-                    PetLog.Info("动态语音播放: " + snap.SpeakName + "（" + ms + "ms）");
-                }
+                // 去掉"只念 60 字"的限制后，一段回复会被切成好几段陆续到达
+                //（见 `chunkForSpeech`）。若每段都抢占，第 2 段一到就把还在播的
+                // 第 1 段打断 —— 听起来就是每句只念开头几个字。
+                // `utterance` 相同 → 入队等前一段播完；换号 → 清空队列播新的。
+                _voicePlayer.DeliverReply(bytes, ms, snap.SpeakUtterance);
+                // ⚠️ 措辞是"交付"不是"播放" —— 这一段可能只是**入了队**
+                //    （上一段还在播）。真正起播时 `PetVoicePlayer` 会再记一条
+                //    "回复分片起播"。之前这里写"播放"，于是日志会显示
+                //    "播放"了好几条却只有一条真在响 —— 诊断自己骗自己。
+                PetLog.Info("动态语音交付: " + snap.SpeakName + "（" + ms + "ms，第 " +
+                            snap.SpeakUtterance + " 句，队列 " + _voicePlayer.PendingReplies + "）");
             }
             catch (Exception ex)
             {
@@ -1717,6 +1736,27 @@ namespace DshZhuangFangyiPet
             // 托盘标题也带倒计时 —— 但每 5 秒刷一次就够（菜单没打开时刷新是白做功）。
             if ((DateTime.Now.Second % 5) == 0) _tray.Refresh();
         }
+
+        /// <summary>
+        /// 回复语音队列的续播泵（250ms 一次）。
+        ///
+        /// 队列非空且当前空闲 → 播下一片。**必须有这个泵**：上游只在状态变化时
+        /// 推帧，桌宠 idle 之后就没有帧了，而一段回复会被切成多段陆续送达
+        ///（去掉 60 字限制后）—— 只靠帧的话，第一段播完剩下的分片会永远排不出去。
+        ///
+        /// 空闲时它什么都不做（一次 `Queue.Count` 判断），开销可忽略。
+        /// </summary>
+        private void OnReplyPumpTick(object sender, EventArgs e)
+        {
+            try
+            {
+                if (_voicePlayer != null) _voicePlayer.DrainReplies();
+            }
+            catch (Exception ex)
+            {
+                PetLog.Warn("回复续播失败（已忽略）: " + PetLog.Describe(ex));
+            }
+        }
         /// <summary>
         /// 桌宠移动时让输入窗跟着走。
         ///
@@ -2004,6 +2044,7 @@ namespace DshZhuangFangyiPet
         {
             // 定时器先停：不然退出过程中还可能触发一次 Tick（访问已释放的窗口）。
             try { if (_pomoTimer != null) _pomoTimer.Stop(); } catch { }
+            try { if (_replyPumpTimer != null) _replyPumpTimer.Stop(); } catch { }
             try { if (_retryTimer != null) _retryTimer.Stop(); } catch { }
             try { if (_diagTimer != null) _diagTimer.Stop(); } catch { }
             try { if (_scalePostTimer != null) _scalePostTimer.Stop(); } catch { }

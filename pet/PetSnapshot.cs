@@ -257,6 +257,17 @@ namespace DshZhuangFangyiPet
         public long SpeakSeq;
         public string SpeakName;
         public long SpeakDurationMs;
+        /// <summary>
+        /// 回复编号：**同一条回复的所有分片相同**，换一句就变。
+        ///
+        /// exe 靠它区分"这是同一句的下一段（排队续播）"与"这是新的一句
+        ///（清空队列、立刻播）"。没有它，分段播会退化成每段互相抢占 ——
+        /// 听起来就是每句只念开头几个字。
+        ///
+        /// 旧 Host 没这个字段 → 恒为 0 → 所有分片都被当成同一句排队，
+        /// 但旧 Host 每条回复只发一个分片，所以行为与从前一致。
+        /// </summary>
+        public long SpeakUtterance;
         public List<PetSessionInfo> Sessions = new List<PetSessionInfo>();
         public bool NativeAvailable = true;
         public string NativeError;
@@ -476,6 +487,7 @@ namespace DshZhuangFangyiPet
                 s.SpeakSeq = (long)spk.Num("seq", 0);
                 s.SpeakName = spk.Str("name", null);
                 s.SpeakDurationMs = (long)spk.Num("durationMs", 0);
+                s.SpeakUtterance = (long)spk.Num("utterance", 0);
             }
 
             PetJson.JVal sess = root.Get("sessions");

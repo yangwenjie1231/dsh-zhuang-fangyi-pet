@@ -241,7 +241,16 @@ window.__ModuleLoader__.load({
         speakReplies: '把 AI 的回答念出来',
         speakRepliesHint: '合成需要几秒（GPU 约 3 秒/句），气泡会先显示文字',
         ttsUrl: '合成服务地址',
-        speechMaxChars: '每次朗读字数上限',
+        speechMaxChars: '每段朗读字数',
+        /**
+         * 说明文字。
+         *
+         * ⚠️ 这个设置**不再是"总共只念多少字"**。以前它是硬上限，超出直接截断
+         *（后半句就不念了）—— 用户问过"为什么一次只能念 60 个字，别限制啊"。
+         * 现在回复是**按句分段、边合成边播**，整段都会念完；
+         * 这个值只决定"每段多长"，也就是**多久开口**。
+         */
+        speechMaxCharsHint: '一段念多少字。整段回复都会念完，这个值只影响"多久开口"：调小开口更快，调大合成次数更少',
         ttsResident: '让语音模型常驻',
         ttsResidentHint: '常驻：启动一次后一直留在显存里，每次合成立刻开始（占显存）。关闭：空闲后自动停掉释放显存，但每次会话第一次合成要等模型加载',
         ttsIdleStopSec: '空闲多少秒后释放（秒，0 = 不停）',
@@ -421,7 +430,8 @@ window.__ModuleLoader__.load({
         speakReplies: 'Speak AI replies aloud',
         speakRepliesHint: 'Synthesis takes seconds (≈3 s/sentence on GPU); the bubble shows text first',
         ttsUrl: 'TTS service URL',
-        speechMaxChars: 'Max characters per utterance',
+        speechMaxChars: 'Characters per segment',
+        speechMaxCharsHint: 'How many characters per segment. The whole reply is always spoken — this only controls how soon the first audio starts: smaller = starts sooner, larger = fewer synthesis calls',
         ttsResident: 'Keep the voice model resident',
         ttsResidentHint: 'Resident: load once and stay in VRAM — every synthesis starts instantly (uses VRAM). Off: unload when idle to free VRAM, but the first synthesis of each session waits for model load',
         ttsIdleStopSec: 'Unload after idle (seconds, 0 = never)',
@@ -1905,7 +1915,8 @@ window.__ModuleLoader__.load({
                 max: 300,
                 defaultValue: String(settings.speechMaxChars ?? 60),
                 onBlur: e => set({ speechMaxChars: Number(e.target.value) })
-              })
+              }),
+              h('span', { key: 'h', className: 'zf-pet-row__hint' }, t('speechMaxCharsHint'))
             ]),
             h('div', { key: 'speakBtns', className: 'zf-pet-settings__btns' }, [
               h('button', {

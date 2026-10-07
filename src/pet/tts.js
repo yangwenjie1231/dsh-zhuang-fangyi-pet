@@ -68,17 +68,30 @@ export const MAX_SPEECH_BYTES = 8 * 1024 * 1024
  *   · 加粗/斜体/标题/引用/列表符号 → 去掉标记，保留文字
  *   · 表格分隔行、水平线 → 删掉
  *   · emoji / 制表符 / 连续空白 → 归一
- *   · 超长 → 在**句子边界**截断（截到半个词更糟）
+ *   · 超长 → 在**句子边界**截断（截到半个词更糟）—— 可用 `truncate:false` 关掉
  *
  * @param {string} raw - AI 的原始回复（markdown）
  * @param {object} [opts]
  * @param {number} [opts.maxChars]
+ * @param {boolean} [opts.truncate=true] - 是否截断到 `maxChars`
  * @returns {string|null} 可朗读文本；洗不出东西（比如回复全是代码）→ null
  */
 export function sanitizeForSpeech (raw, opts = {}) {
   const maxChars = Number.isFinite(opts.maxChars) && opts.maxChars > 0
     ? Math.floor(opts.maxChars)
     : DEFAULT_MAX_SPEECH_CHARS
+  /**
+   * 是否截断。
+   *
+   * ⚠️ 默认 `true` 是**旧行为**，但现在桌宠走的是**分段逐句合成**
+   *（见 `chunkForSpeech`）—— 整段都要念完，截断只会把后半段丢掉。
+   * 所以 `index.js` 传 `truncate:false`，只清洗不截断。
+   *
+   * 保留这个开关而不是直接删掉截断：这是**对外契约**（`/pet/speech` 的
+   * `maxChars`、单测、以及别处可能直接调 `sanitizeForSpeech` 的地方），
+   * 删掉会静默改变语义。
+   */
+  const truncate = opts.truncate !== false
   if (typeof raw !== 'string') return null
 
   let t = raw
@@ -138,8 +151,8 @@ export function sanitizeForSpeech (raw, opts = {}) {
 
   if (t === '') return null
 
-  // ⑩ 截断到句子边界（避免念到一半断掉）。
-  if (t.length > maxChars) {
+  // ⑩ 截断到句子边界（避免念到一半断掉）。`truncate:false` 时跳过 —— 见上方说明。
+  if (truncate && t.length > maxChars) {
     const head = t.slice(0, maxChars)
     // 找最后一个句末标点；找不到就退回逗号；再找不到就硬截。
     const lastStop = Math.max(
@@ -158,6 +171,107 @@ export function sanitizeForSpeech (raw, opts = {}) {
   }
 
   return t === '' ? null : t
+}
+
+/** 句末标点：在这里断开最自然（硬停顿）。 */
+const HARD_STOPS = ['。', '！', '？', '；', '!', '?', ';', '\n']
+/** 句中标点：单句超长时退而求其次的断点（软停顿）。 */
+const SOFT_STOPS = ['，', ',', '、', '：', ':']
+
+/**
+ * 把（已清洗的）文本切成**可逐段合成**的分片。
+ *
+ * ── 为什么需要它：用户问"为什么一次只能念 60 个字，别限制啊，GPU 很快" ──
+ *
+ * 实测（常驻 + torch + GPU，本机）：
+ *
+ *     字符数   合成耗时   音频时长   倍速
+ *       30      3.4s      6.5s     1.9x
+ *       60      4.9s     13.6s     2.7x
+ *      150     10.7s     32.4s     3.0x
+ *      300     19.3s     48.8s     2.5x
+ *
+ * 所以 GPU 上是 **~3× 实时**，不是"秒出"。原先的限制（`speechMaxChars`）
+ * 存在的真实原因是：**整段合成完才开始播** —— 60 字要等 5 秒，
+ * 300 字要**干等 19 秒**才开口。截断只是把痛苦藏起来（后半句干脆不念）。
+ *
+ * 正确做法是**分段**：切成句子 → 逐段合成 → 合成一段就交付一段。
+ * 于是：
+ *   · 第一段（≈一句）合成完就开口（2~3 秒），**总长度不再影响开口时间**；
+ *   · 后面每段在上一段播放期间合成（合成 3× 实时 > 播放 1× 实时），
+ *     所以播完能接上，不会断；
+ *   · **整段回复都念**，不再有"只念前 60 字"。
+ *
+ * 切法：优先在句末标点断（`。！？；`），贪心地把短句合并到接近 `maxChars`
+ * 以减少合成次数；单句本身超过 `maxChars` 时，退到逗号断，再不行才硬切。
+ *
+ * @param {string} text - 已清洗的文本（`sanitizeForSpeech(..., {truncate:false})`）
+ * @param {number} [maxChars] - 单段上限（同时是"最小合并目标"）
+ * @returns {string[]} 分片；没有可念内容 → 空数组
+ */
+export function chunkForSpeech (text, maxChars) {
+  const limit = Number.isFinite(maxChars) && maxChars > 0
+    ? Math.floor(maxChars)
+    : DEFAULT_MAX_SPEECH_CHARS
+  const src = String(text ?? '').trim()
+  if (src === '') return []
+
+  // ① 先按硬停顿切句（标点跟着前一句，念出来才有语气）。
+  const sentences = []
+  let buf = ''
+  for (const ch of src) {
+    if (ch === '\n') {
+      if (buf.trim() !== '') sentences.push(buf.trim())
+      buf = ''
+      continue
+    }
+    buf += ch
+    if (HARD_STOPS.includes(ch)) {
+      if (buf.trim() !== '') sentences.push(buf.trim())
+      buf = ''
+    }
+  }
+  if (buf.trim() !== '') sentences.push(buf.trim())
+
+  // ② 贪心合并相邻短句到接近 limit（减少合成次数 = 减少总等待）。
+  const out = []
+  let cur = ''
+  const flush = () => { const s = cur.trim(); if (s !== '') out.push(s); cur = '' }
+  for (const s of sentences) {
+    if (s.length > limit) {
+      flush()
+      for (const piece of splitOversized(s, limit)) out.push(piece)
+      continue
+    }
+    if ((cur + s).length > limit) flush()
+    cur += s
+  }
+  flush()
+  return out.filter(s => s !== '')
+}
+
+/** 单句超过上限 → 先找软停顿，再硬切。 */
+function splitOversized (s, limit) {
+  const out = []
+  let buf = ''
+  for (const ch of s) {
+    buf += ch
+    if (buf.length < limit) continue
+    // 到了上限：回头找一个软停顿断开（太靠前就不用，避免碎成一两个字）。
+    let cut = -1
+    for (let i = buf.length - 1; i >= Math.floor(limit * 0.5); i--) {
+      if (SOFT_STOPS.includes(buf[i])) { cut = i + 1; break }
+    }
+    if (cut > 0) {
+      out.push(buf.slice(0, cut).trim())
+      buf = buf.slice(cut)
+    } else {
+      out.push(buf.trim())
+      buf = ''
+    }
+  }
+  if (buf.trim() !== '') out.push(buf.trim())
+  return out.filter(x => x !== '')
 }
 
 /**
@@ -334,7 +448,15 @@ export function createTtsClient (opts = {}) {
     health,
     synthesize,
     maxChars,
+    /** 清洗 + 截断（旧接口，保留给"只想念一小段"的调用方与单测）。 */
     sanitize: raw => sanitizeForSpeech(raw, { maxChars }),
+    /**
+     * 清洗但**不截断** —— 供"整段都要念"的路径用（桌宠的回复朗读）。
+     * 截断会把后半段直接丢掉，而现在的做法是分段念完（见 `chunk`）。
+     */
+    sanitizeFull: raw => sanitizeForSpeech(raw, { maxChars, truncate: false }),
+    /** 把（已清洗的）文本切成可逐段合成的分片。 */
+    chunk: text => chunkForSpeech(text, maxChars),
     cacheKey: text => speechCacheKey(text, identity),
     get identity () { return identity }
   }
