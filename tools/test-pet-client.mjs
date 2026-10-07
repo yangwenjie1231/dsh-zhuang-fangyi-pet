@@ -1076,6 +1076,37 @@ okAsync('⭐ 宿主写盘失败（HTTP 200 + ok:false）必须如实报错，不
     `应如实报出失败原因，实际提示：${joined}`)
 })
 
+ok('⭐ 滑杆单位也必须走字典（不许写死英文 s/min）', () => {
+  // 真机症状：同一个面板里并排出现「空闲多久后睡觉 5min」和
+  // 「专注时长 25 分钟」—— 因为秒/分钟那几处是写死的 `'s'` / `'min'`，
+  // 而番茄钟那几处走 `t('minutes')`。单位也是文案。
+  const tree = renderSectionTree({ pomodoro: true })
+  const sliders = collectByType(tree, 'Slider').map(n => n.props)
+  const raw = sliders.filter(s => s.suffix === 's' || s.suffix === 'min')
+  assert.deepEqual(raw.map(s => s.label), [],
+    '这些滑杆的单位写死了英文，应与其它单位一样走字典：' + raw.map(s => `${s.label}=${s.suffix}`).join(', '))
+  // 中文字典里必须有这两个键，且不能是英文
+  //（`DICT` 这个 `const` 在后面的第 9 节才解构，这里直接从模块出口取）
+  const dict = loaded.exports.__test.DICT
+  assert.equal(dict.zh.unitSec, '秒')
+  assert.equal(dict.zh.unitMin, '分钟')
+  assert.equal(dict.en.unitSec, 's')
+  assert.equal(dict.en.unitMin, 'min')
+})
+
+ok('⭐ 行分隔线要用看得见的档位（l1 只有 4% 不透明度，等于没画）', () => {
+  // 我第一版抄了外壳 settings-form 的"发丝线"写法，但把颜色档位写成了
+  // `--dsw-alias-border-l1`（rgba(0,0,0,.04)）—— 浅色主题下肉眼几乎看不见，
+  // 于是"加了分隔线"这件事在验收时是不成立的。外壳自己用的是 l2（.1）。
+  const css = loaded.exports.__test.styleText()
+  const rule = css.match(/\.zf-pet-row\s*\+\s*\.zf-pet-row\{[^}]*\}/)
+  assert.ok(rule, '应有"相邻行加分隔线"的规则')
+  assert.ok(!/border-l1/.test(rule[0]),
+    `分隔线不该用 border-l1（4% 不透明度，看不见），实际：${rule[0]}`)
+  assert.ok(/border-l2/.test(rule[0]),
+    `分隔线应与外壳 settings-form 同档（border-l2），实际：${rule[0]}`)
+})
+
 /* ══════════════════════════════════════════════════════════════════════════
  * 6. 渲染：定位约束（最容易挡住整个界面的地方）
  * ═════════════════════════════════════════════════════════════════════════ */

@@ -203,6 +203,17 @@ window.__ModuleLoader__.load({
         pomodoroReset: '重置',
         minutes: '分钟',
         rounds: '轮',
+        /**
+         * 秒 / 分钟的单位。
+         *
+         * ⚠️ 原先气泡时长、开心时长、睡眠时长这几个滑杆的单位是**写死英文**的
+         * （`suffix: 's'` / `suffix: 'min'`），而番茄钟那几个走的是
+         * `t('minutes')`（中文"分钟"）。于是同一个面板里
+         * 「空闲多久后睡觉 5min」和「专注时长 25 分钟」并排出现 —— 不一致。
+         * 单位也是文案，必须走同一份字典。
+         */
+        unitSec: '秒',
+        unitMin: '分钟',
         // ── 语音（v3）───────────────────────────────────────────────────────
         groupVoice: '语音',
         voice: '让庄方宜说话',
@@ -381,6 +392,8 @@ window.__ModuleLoader__.load({
         pomodoroReset: 'Reset',
         minutes: 'min',
         rounds: 'rounds',
+        unitSec: 's',
+        unitMin: 'min',
         // ── Voice (v3) ──────────────────────────────────────────────────────
         groupVoice: 'Voice',
         voice: 'Let her speak',
@@ -1706,7 +1719,7 @@ window.__ModuleLoader__.load({
               min: 1,
               max: 20,
               step: 1,
-              suffix: 's',
+              suffix: t('unitSec'),
               onChange: v => set({ bubbleMs: v * 1000 })
             }),
             h(Slider, {
@@ -1716,7 +1729,7 @@ window.__ModuleLoader__.load({
               min: 0,
               max: 60,
               step: 1,
-              suffix: 's',
+              suffix: t('unitSec'),
               hint: t('bubbleGapHint'),
               onChange: v => set({ bubbleGapMs: v * 1000 })
             }),
@@ -1772,7 +1785,7 @@ window.__ModuleLoader__.load({
               min: 1,
               max: 30,
               step: 1,
-              suffix: 's',
+              suffix: t('unitSec'),
               onChange: v => set({ happyMs: v * 1000 })
             }),
             h(Slider, {
@@ -1782,7 +1795,7 @@ window.__ModuleLoader__.load({
               min: 1,
               max: 60,
               step: 1,
-              suffix: 'min',
+              suffix: t('unitMin'),
               onChange: v => set({ sleepMs: v * 60000 })
             }),
             h('label', { key: 'theme', className: 'zf-pet-row' }, [
@@ -2313,6 +2326,15 @@ window.__ModuleLoader__.load({
      * 样式（唯一来源；原生窗口用不到它）
      * ------------------------------------------------------------------ */
 
+    /**
+     * ⚠️ 下面这个返回值是**模板字符串**（反引号），所以 CSS 注释里
+     * **绝不能出现反引号** —— 一个 `` ` `` 就会提前结束字符串，
+     * 报出来的是 `SyntaxError: Unexpected identifier`，指向的是注释内容
+     * 而不是"这里有个反引号"，很容易看错地方。
+     *
+     * 这个坑踩过**两次**（都在给设置页加注释时）。要强调某个 CSS 属性名，
+     * 直接写 `border-l2` 那样的裸词或用「」，别用反引号。
+     */
     function styleText () {
       return `
 /* 桌宠容器：**必须 fixed**（overlay 被 grid 挤到隐式第 2 行，absolute 会偏一屏）。
@@ -2588,7 +2610,11 @@ window.__ModuleLoader__.load({
   padding:6px 0;
   font-size:13px;color:var(--dsw-alias-label-primary);
 }
-.zf-pet-row + .zf-pet-row{ border-top:.5px solid var(--dsw-alias-border-l1, rgba(0,0,0,.05)); }
+/* 行分隔线。
+ * ⚠️ 用 border-l2（外壳 settings-form 用的同一档），**不是 l1** ——
+ * l1 是 rgba(0,0,0,.04)，在浅色主题下几乎看不见，等于没画。
+ * 我第一版就是抄了"发丝线"的形、用错了档位，肉眼验收时才发现。 */
+.zf-pet-row + .zf-pet-row{ border-top:.5px solid var(--dsw-alias-border-l2, rgba(0,0,0,.1)); }
 .zf-pet-row__label{ min-width:0; }
 
 /* 控件容器：滑杆 + 数值**同一行**（见 'Slider' 的注释：原先数值被挤到第二行）。 */
