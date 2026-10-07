@@ -3015,6 +3015,47 @@ input[type=number].zf-pet-row__input:focus-visible{
         }
       }
 
+      /**
+       * 把快照里的 `settings` **并进**本地设置状态。
+       *
+       * ⚠️ 这里就是"桌面端改完，设置页不跟着变"的根因。
+       *
+       * 改造前 `state.settings` 只有**两个**写入点：
+       *   ① 挂载时 `GET /settings` 拉一次；
+       *   ② 设置页自己 `updateSettings(patch)`（乐观 emit + POST）。
+       * 而宿主**每一帧快照都带着 `settings`**（`exeSettings()`：scale / opacity /
+       * clickThrough / topmost / bubble / doubleClick / theme / hint / statusAlways /
+       * statusFontScale / chatFontScale / pomodoroCountdown / voice）——
+       * 客户端拿到了却**从来不读**。于是任何"不是设置页发起"的改动都到不了界面上：
+       *   · 桌面端**滚轮缩放**（exe 去抖 300ms 后 POST /pet/settings）；
+       *   · 桌面端**托盘菜单**改主题 / 状态显示 / 番茄钟 / 语音 / 缩放 / 穿透 / 置顶 / 气泡；
+       *   · 宿主侧对值的夹取或回落（界面显示的值与磁盘上的分叉）。
+       * 用户看到的就是"我在桌面端调完，设置页还显示旧值"。
+       *
+       * 为什么不无脑 emit：快照**每帧**都来（状态一变就广播）。
+       * 无脑 emit 会让设置页每帧重渲染一次，而且重渲染的内容"看起来没变"，
+       * 排查起来极费劲 —— 逐字段浅比较（设置是平的）足够，与宿主侧
+       * `#emitIfChanged()` 同一套判据。
+       */
+      const applySnapshotSettings = snap => {
+        const incoming = snap?.settings
+        if (incoming === null || typeof incoming !== 'object') return
+        // 合并而不是替换：快照只带 exe 关心的子集，其余字段必须保持现状。
+        const merged = normalizePet({ ...state.settings, ...incoming })
+        for (const k of Object.keys(merged)) {
+          if (!Object.is(merged[k], state.settings[k])) {
+            emit({ settings: merged })
+            return
+          }
+        }
+      }
+
+      /** 一帧快照 → 通知订阅者 + 把里面的设置并进来（SSE 与轮询共用一条路）。 */
+      const applySnapshot = (snap, source) => {
+        emit({ snapshot: snap, source })
+        applySnapshotSettings(snap)
+      }
+
       /** 订阅 SSE；失败则退化为轮询。 */
       function connect () {
         if (disposed) return
@@ -3027,12 +3068,12 @@ input[type=number].zf-pet-row__input:focus-visible{
         }
         es.addEventListener('hello', event => {
           try {
-            emit({ snapshot: JSON.parse(event.data), source: 'sse' })
+            applySnapshot(JSON.parse(event.data), 'sse')
           } catch { /* 坏帧忽略 */ }
         })
         es.addEventListener('state', event => {
           try {
-            emit({ snapshot: JSON.parse(event.data), source: 'sse' })
+            applySnapshot(JSON.parse(event.data), 'sse')
           } catch { /* 坏帧忽略 */ }
         })
         es.addEventListener('error', () => {
@@ -3047,7 +3088,7 @@ input[type=number].zf-pet-row__input:focus-visible{
         const poll = async () => {
           try {
             const res = await fetch(`${ROUTE}/state`)
-            if (res.ok) emit({ snapshot: await res.json(), source: 'poll' })
+            if (res.ok) applySnapshot(await res.json(), 'poll')
           } catch { /* 下一轮再试 */ }
         }
         void poll()

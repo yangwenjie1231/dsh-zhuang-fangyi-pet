@@ -405,13 +405,32 @@ namespace DshZhuangFangyiPet
                 }
                 catch (Exception ex) { PetLog.Warn("气泡联动失败: " + PetLog.Describe(ex)); }
             };
-            _tray.SetClickThrough = delegate(bool on) { _win.SetClickThrough(on); };
-            _tray.SetTopmost = delegate(bool on) { _win.SetTopmost(on); _tray.SetTopmostCheck(on); };
-            _tray.SetScale = delegate(double s) { _win.SetScale(s); _win.ReclampPosition(false); _bubble.SetScale(s); _status.SetScale(s); _pomo.SetScale(s); };
+            _tray.SetClickThrough = delegate(bool on)
+            {
+                _win.SetClickThrough(on);
+                ReportSettingFlags(clickThrough: on);
+            };
+            _tray.SetTopmost = delegate(bool on)
+            {
+                _win.SetTopmost(on);
+                _tray.SetTopmostCheck(on);
+                ReportSettingFlags(topmost: on);
+            };
+            // ⚠️ 托盘缩放**必须走 OnScaleAdjusted**：它负责去抖上报（300ms）
+            // 与气泡/状态/番茄钟几个独立窗口的同比缩放。原先这里自己抄了一份
+            // SetScale 调用、**没有上报** —— 于是"托盘里改成 120%，设置页还
+            // 显示 80%"，而且气泡缩放那几行也漏了。
+            _tray.SetScale = delegate(double s)
+            {
+                _win.SetScale(s);
+                _win.ReclampPosition(false);
+                OnScaleAdjusted(s);
+            };
             _tray.SetBubble = delegate(bool on)
             {
                 _bubbleOn = on;
                 if (!on) _bubble.HideNow();
+                ReportSettingFlags(bubble: on);
             };
             _tray.ResetPosition = delegate { _win.ReclampPosition(true); };
             // 状态显示：本地立即生效 + 回报宿主持久化（与主题同一条链路）。
@@ -986,6 +1005,22 @@ namespace DshZhuangFangyiPet
 
                 // ② 番茄钟阶段切换（专注结束该休息了 —— 用户点名的功能）。
                 PetPomodoroInfo p = snap.Pomodoro;
+                bool pomoOn = p != null && p.Enabled && p.Show && p.Running;
+                // ②b 「开始计时」这个时机 v3 之前**根本没有**：阶段切换分支只覆盖
+                //    结束与切段，"从没在跑 → 开始跑"一个事件都不发 ——
+                //    于是台词表里的 `pomodoro/start` 是一条永远不会被播的闲置台词。
+                //    单独判一次（只在"由停到跑"的边沿上）。
+                if (pomoOn != _lastPomoRunning)
+                {
+                    bool wasRunning = _lastPomoRunning;
+                    _lastPomoRunning = pomoOn;
+                    if (pomoOn)
+                    {
+                        string startEvt = PetVoiceTrigger.ForPomodoroStart(wasRunning);
+                        _lastPomoPhase = p.Phase;      // 别让同一次开始再被当成阶段切换
+                        if (startEvt != null) { Speak(startEvt); return; }
+                    }
+                }
                 if (p != null && p.Enabled && p.Show)
                 {
                     string phaseKey = p.Running ? p.Phase : (p.Phase + ":paused");
@@ -1029,14 +1064,11 @@ namespace DshZhuangFangyiPet
                 {
                     string prev = _lastVoiceState;
                     _lastVoiceState = st;
-                    // 只对**有意义**的几种出声：出错、完成、开始干活、开始思考。
-                    // idle/waking 太频繁，出声会吵。
-                    if (st == "error") { Speak("agent/error"); return; }
-                    if (st == "happy" && prev != "happy") { Speak("turn/complete"); return; }
-                    if (st == "working" && (prev == "thinking" || prev == "idle")) { Speak("agent/working"); return; }
-                    // ⭐ 思考（v2 新增）：「让我想想……」的正确位置 ——
-                    // v1 把它放在**回复到达**时，时序倒置（话都说完了才说这句）。
-                    if (st == "thinking" && prev != "working") { Speak("agent/thinking"); return; }
+                    // 状态 → 台词事件的对应表抽成了纯函数（`PetVoiceTrigger`），
+                    // 好让"哪个状态该说什么"能被单测钉住 —— 见那里的说明。
+                    string evt = PetVoiceTrigger.ForStateTransition(prev, st);
+                    if (evt != null) { Speak(evt); return; }
+                }
                 }
 
                 // ④ ⭐ 长时间空闲（v2 新增，低频）：她"守不住闲"，闲久了会主动搭话。
@@ -1077,6 +1109,8 @@ namespace DshZhuangFangyiPet
         public static long IdleTalkAfterMs = 20 * 60 * 1000L;
         private long _idleSinceMs;
         private long _lastIdleTalkMs;
+        /// <summary>上一帧番茄钟是否在跑（判定「开始计时」那个边沿，见 ②b）。</summary>
+        private bool _lastPomoRunning;
 
         /// <summary>
         /// 会话集合变化 → 新会话出现时招呼一声（v2 新增）。
@@ -1482,6 +1516,24 @@ namespace DshZhuangFangyiPet
             try { RefreshPomodoro(); } catch { }
         }
 
+        /// <summary>
+        /// 开关类设置改了 → 立即回报宿主持久化（POST /pet/settings，只带改动的字段）。
+        ///
+        /// 与缩放不同，开关**不需要去抖**：一次点击就是一个终值，没有连续拖动的中间态。
+        /// 托盘菜单与桌宠右键菜单都走这里，保证"本地改了 → 宿主知道 → 设置页跟着变"。
+        /// 失败只记日志（`PostJson` 的既有语义）：宿主不在时不该弹框打断用户。
+        /// </summary>
+        private void ReportSettingFlags(bool? clickThrough = null, bool? topmost = null, bool? bubble = null)
+        {
+            if (_http == null) return;
+            try
+            {
+                _http.PostSettingsFlags(clickThrough, topmost, bubble);
+                PetLog.Info("设置已上报 /pet/settings " + PetHttp.BuildSettingsFlagsBody(clickThrough, topmost, bubble));
+            }
+            catch (Exception ex) { PetLog.Warn("设置回报失败: " + PetLog.Describe(ex)); }
+        }
+
         private void OnScalePostTick(object sender, EventArgs e)
         {
             _scalePostTimer.Stop();
@@ -1489,7 +1541,7 @@ namespace DshZhuangFangyiPet
             if (_http != null)
             {
                 _http.PostSettingsScale(_pendingScalePost);
-                PetLog.Info("滚轮缩放已上报 /pet/settings scale=" +
+                PetLog.Info("设置已上报 /pet/settings scale=" +
                             _pendingScalePost.ToString("0.##", CultureInfo.InvariantCulture));
             }
             _pendingScalePost = double.NaN;
@@ -2011,6 +2063,9 @@ namespace DshZhuangFangyiPet
                 _win.SetClickThrough(!_win.ClickThrough);
                 ct.IsChecked = _win.ClickThrough;
                 _tray.Refresh();
+                // 与托盘里那一项**走同一条回报**：右键菜单改了不回报，
+                // 设置页就与本地分叉（用户看到"设置页还是旧值"）。
+                ReportSettingFlags(clickThrough: _win.ClickThrough);
             };
             m.Items.Add(ct);
 

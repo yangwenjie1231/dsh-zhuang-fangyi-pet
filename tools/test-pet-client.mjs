@@ -157,6 +157,18 @@ function makeStorageStub () {
 function loadClient (options = {}) {
   const react = makeReactStub()
   const storage = makeStorageStub()
+  // 每次装载都换一份"实例账本"：测试据此找到那个 EventSource 并**手动推帧**。
+  const EventSourceStub = class {
+    constructor (url) {
+      this.url = url
+      this.readyState = 0
+      this.handlers = {}
+      EventSourceStub.instances.push(this)
+    }
+    addEventListener (name, fn) { this.handlers[name] = fn }
+    close () { this.readyState = 2 }
+  }
+  EventSourceStub.instances = []
   const calls = {
     registered: [],
     effects: [],
@@ -181,14 +193,7 @@ function loadClient (options = {}) {
     localStorage: storage,
     addEventListener () {},
     removeEventListener () {},
-    EventSource: class {
-      constructor (url) {
-        this.url = url
-        this.readyState = 0
-      }
-      addEventListener () {}
-      close () {}
-    }
+    EventSource: EventSourceStub
   }
 
   let captured = null
@@ -256,7 +261,7 @@ function loadClient (options = {}) {
     throw new Error(`未桩化的依赖：${name}`)
   })
 
-  return { exports: module, ctx, calls, react, storage, sandboxWindow }
+  return { exports: module, ctx, calls, react, storage, sandboxWindow, EventSource: EventSourceStub }
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -2487,6 +2492,52 @@ ok('订阅者能收到快照推送', () => {
   // 手动触发一次 emit（走内部 state 赋值路径）。
   off()
   assert.ok(Array.isArray(seen))
+})
+
+/* ── 桌面端 ↔ 设置页 的同步（用户报："滚轮调完大小，设置页不跟着变"）──────
+ *
+ * 根因：`state.settings` 原先只有两个写入点 —— 挂载时 GET 一次、设置页自己
+ * `updateSettings`。而宿主**每帧快照都带着 settings**（exe 关心的那 13 个字段），
+ * 客户端拿到了却从来不读 → 任何"不是设置页发起"的改动都到不了界面上。
+ * 下面这条推真帧进去验，而不是读代码"确认它有写"。 */
+
+ok('⭐⭐⭐ 宿主快照里的 settings 必须并进本地状态（桌面端改完设置页要跟着变）', () => {
+  const l = loadClient()
+  l.exports.apply(l.ctx)
+  const rt = l.exports.__test.runtime
+  rt.connect()
+  const es = l.EventSource.instances[0]
+  assert.ok(es, '应建立 EventSource（否则推帧都无从谈起）')
+  assert.equal(typeof es.handlers.state, 'function', '应监听 state 帧')
+
+  // 先给本地一份"设置页刚加载完"的状态（含一个快照里没有的字段）
+  rt.__state.settings = l.exports.__test.normalizePet({ scale: 0.8, ttsUrl: 'http://127.0.0.1:8765' })
+  const settingsEvents = []
+  rt.subscribe(next => { if (next.settings !== undefined) settingsEvents.push(next.settings) })
+
+  // ① 桌面端滚轮缩放 → exe 去抖后 POST /pet/settings → 宿主广播带新 scale 的快照
+  es.handlers.state({ data: JSON.stringify({ rev: 9, petState: 'idle', settings: { scale: 1.4 } }) })
+  assert.equal(rt.settings.scale, 1.4,
+    '快照里的 scale 必须并进本地设置 —— 否则「桌面端滚轮调完、设置页还显示旧值」')
+  assert.equal(rt.settings.ttsUrl, 'http://127.0.0.1:8765',
+    '合并而不是替换：快照只带 exe 子集，其余字段必须原样保留')
+  assert.equal(settingsEvents.length, 1, '这一次变化应该只 emit 一次设置')
+
+  // ② 同一帧再来一次（宿主每帧都带 settings）→ **不许**再 emit
+  //    否则设置页每帧重渲染一次，而且"看起来没变"，排查极费劲。
+  es.handlers.state({ data: JSON.stringify({ rev: 10, petState: 'happy', settings: { scale: 1.4 } }) })
+  assert.equal(settingsEvents.length, 1,
+    '快照里 settings 与原值相同时不许再 emit（否则每帧一次无意义的重渲染）')
+
+  // ③ 托盘改成"总在最前 = 关" → 同样要跟着变
+  es.handlers.state({ data: JSON.stringify({ rev: 11, settings: { topmost: false } }) })
+  assert.equal(rt.settings.topmost, false, '托盘改的开关也要跟着走')
+  assert.equal(rt.settings.scale, 1.4, '其它字段不能被这一帧冲掉')
+
+  // ④ 快照里没有 settings 块（老 Host / 空帧）→ 不许把本地设置抹成默认
+  const before = rt.settings
+  es.handlers.state({ data: JSON.stringify({ rev: 12, petState: 'idle' }) })
+  assert.equal(rt.settings, before, '没有 settings 块的帧不该动本地设置')
 })
 
 /* ══════════════════════════════════════════════════════════════════════════

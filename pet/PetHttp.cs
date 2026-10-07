@@ -686,6 +686,51 @@ namespace DshZhuangFangyiPet
         }
 
         /// <summary>
+        /// 托盘 / 右键菜单改了**开关类**设置之后回报宿主持久化
+        /// （POST /pet/settings，body 只带真正改动的那几个字段）。
+        ///
+        /// 为什么必须有这一条：托盘菜单里「点击穿透 / 总在最前 / 显示气泡」
+        /// 原先**只改本地**，从不回报宿主 —— 症状就是用户说的
+        /// "桌面端调完了，DSH 的设置页还是旧值"。设置页读的是宿主的那份，
+        /// 本地改完不回报，两边永远分叉（而且没有任何报错）。
+        ///
+        /// 合并语义：宿主侧 `/pet/settings` 是**合并补丁**，只带部分字段不会
+        /// 抹掉其它设置（这条曾经踩过，见 Host 的注释）。
+        /// 三个参数都是可空的：只报本次真的变了的那几个。
+        /// </summary>
+        public void PostSettingsFlags(bool? clickThrough, bool? topmost, bool? bubble)
+        {
+            string body = BuildSettingsFlagsBody(clickThrough, topmost, bubble);
+            // 一个字段都没有就别发 —— 空 body `{}` 会被宿主当成一次空补丁，
+            // 白白触发一次广播（而广播会让 exe 再走一遍"应用设置"）。
+            if (body == null) return;
+            PostJson("/api/zhuang-fangyi/pet/settings", body);
+        }
+
+        /// <summary>
+        /// 构造开关类补丁 body 的**纯函数**（SelfTest 直接断言，不必起服务）。
+        /// 只包含显式给出的字段；一个都没有时返回 null（调用方据此不发请求）。
+        /// </summary>
+        internal static string BuildSettingsFlagsBody(bool? clickThrough, bool? topmost, bool? bubble)
+        {
+            StringBuilder sb = new StringBuilder("{");
+            bool any = false;
+            AppendFlag(sb, ref any, "clickThrough", clickThrough);
+            AppendFlag(sb, ref any, "topmost", topmost);
+            AppendFlag(sb, ref any, "bubble", bubble);
+            sb.Append('}');
+            return any ? sb.ToString() : null;
+        }
+
+        private static void AppendFlag(StringBuilder sb, ref bool any, string key, bool? value)
+        {
+            if (!value.HasValue) return;
+            if (any) sb.Append(',');
+            any = true;
+            sb.Append('"').Append(key).Append("\":").Append(value.Value ? "true" : "false");
+        }
+
+        /// <summary>
         /// 契约 §3 新增：番茄钟动作（POST /pet/pomodoro）。
         ///
         /// ⚠️ **动作名必须在 exe 侧就是常量**（`start`/`pause`/...），

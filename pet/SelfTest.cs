@@ -78,6 +78,7 @@ namespace DshZhuangFangyiPet
                 TestBubbleOpaqueAndDark();
                 TestSettingsScaleDoubleClickTheme();
                 TestPositionReportBody();
+                TestSettingsFlagsReportBody();
                 TestSendCapabilityAndBody();
                 SpriteSheet sheet = TestSprite(artDir, atlas);
                 TestFilesMapCompat();
@@ -815,6 +816,41 @@ namespace DshZhuangFangyiPet
                             body.IndexOf("\"bubbleX\":56", StringComparison.Ordinal) >= 0 &&
                             body.IndexOf("\"bubbleY\":78", StringComparison.Ordinal) >= 0;
             Check(noScale && fieldsOk, "位置上报 body 不含 scale（回响环修复：位置/设置通道分离）", body);
+        }
+
+        /// <summary>
+        /// 「桌面端改了设置、DSH 设置页不跟着变」那一轮：
+        /// 托盘 / 右键菜单的开关类改动必须**只带改动的字段**回报宿主，
+        /// 且**一个字段都没有时不许发空 body**（空补丁会白触发一次广播）。
+        ///
+        /// 纯函数单测 —— 托盘/右键菜单的点击无法脚本化，但它俩最终都调这一个构造器。
+        /// </summary>
+        private static void TestSettingsFlagsReportBody()
+        {
+            // (1) 只报一个字段 → body 里只有它（合并语义：其余字段靠宿主保持不动）
+            string one = PetHttp.BuildSettingsFlagsBody(null, true, null);
+            bool oneOk = one == "{\"topmost\":true}";
+            Check(oneOk, "开关类设置上报 body 只含改动字段（合并语义）", one ?? "(null)");
+
+            // (2) 三个字段 → 顺序固定、逗号正确、布尔是 JSON 字面量
+            string three = PetHttp.BuildSettingsFlagsBody(false, true, false);
+            bool threeOk = three == "{\"clickThrough\":false,\"topmost\":true,\"bubble\":false}";
+            Check(threeOk, "三个开关一起报 → 逗号/布尔都正确", three ?? "(null)");
+
+            // (3) 一个都不给 → null（调用方据此**不发请求**）
+            //     为什么单独立一条：空 body `{}` 会被宿主当成一次空补丁，
+            //     白白广播一帧，而广播又会让 exe 再走一遍"应用设置"。
+            string none = PetHttp.BuildSettingsFlagsBody(null, null, null);
+            Check(none == null, "没有任何开关变化 → 不构造 body（不发空补丁）", none ?? "(null)");
+
+            // (4) 键名必须与 Host 的设置字段同名（大小写敏感）——
+            //     写错一个键宿主会静默忽略（合并语义下缺键 ≠ 报错）。
+            bool keysOk = three != null &&
+                          three.IndexOf("\"clickThrough\"", StringComparison.Ordinal) >= 0 &&
+                          three.IndexOf("\"topmost\"", StringComparison.Ordinal) >= 0 &&
+                          three.IndexOf("\"bubble\"", StringComparison.Ordinal) >= 0;
+            Check(keysOk, "三个键名与 Host 设置字段完全一致（写错会被静默忽略）",
+                  "clickThrough / topmost / bubble");
         }
 
         /// <summary>
