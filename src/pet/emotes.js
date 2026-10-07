@@ -68,7 +68,6 @@ export const EMOTE_BY_KEY = {
   // ── 思考中：懵、过载、无聊 ───────────────────────────────────────────────
   thinking: [
     'bubble/18-confused.png',               // 有点懵
-    'bubble/starry-formula.gif',            // 星空公式（满屏公式的"看不懂"；动图）
     'bubble/new/06-brain-overload.png',
     'bubble/new/01-bored.png',              // 庄很无聊
     'bubble/25-reading.png'

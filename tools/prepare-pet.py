@@ -222,7 +222,9 @@ CUTOUT_EXTRA = (
 # 所以这两张**整段保留为动画**，不做任何抠图、也不取单帧。
 BUBBLE_ANIM = (
     # (语义名, 源文件名, hasText)   —— `opaque` 由指标自动判定，见 OPAQUE_MIN
-    ('starry-formula', '表情包_05_星空公式.gif', False),   # 33/33 帧铺满 → 自动判为 opaque
+    # ⚠️ `05_星空公式` 已于 2026-10-07 按用户要求**撤出气泡池**（"把这张图从
+    # 气泡里挪开"）—— 它同时是 thinking 的主体变体（语义名 `gif:05`，见
+    # `BODY_EXTRA_BY_FILE`），一张图两个角色太重复。只剩 `27_生气指人`。
     ('angry-charge',   '表情包_27_生气指人.gif', False),  # 半数帧透明 → 自动判为不 opaque
 )
 
@@ -308,15 +310,16 @@ F5_BODY_BY_FILE = {
 BUBBLE_ANIM = BUBBLE_ANIM + BUBBLE_F5
 ANIM_BY_FILE.update(F5_BY_FILE)
 
-# ── F3b 里**同时**当主体的那些 ──────────────────────────────────────────────
+# ── F3b 里被点名**当主体**的那张 ────────────────────────────────────────────
 #
 # 用户 2026-10-07："这张图应该用于思考的时候"（指 `05_星空公式`）+ "这两个
-# 都并存"（与思考里原有的星星眼 `starry` 并存）。
+# 都并存"（与思考里原有的星星眼 `starry` 并存）；随后又要求"把这张图从气泡里
+# 挪开" → 现在它**只**当 thinking 主体，不再进气泡池。
 #
-# ⚠️ 语义名必须用 `gif:05` 而不是复用 `starry-formula`：`by_semantic` 按
-# 语义名建索引，同一个语义名只能有一条 —— 若主体条目复用气泡的语义名，
-# 气泡池会拿到 kind=gif 的条目，**动态气泡退化成静态首帧**。
-# 两条并存：`starry-formula`（气泡，GIF 原样）+ `gif:05`（主体条带）。
+# ⚠️ 语义名用 `gif:05`（= 源文件名编号），**不要**写成 `starry-formula` ——
+# `by_semantic` 按语义名建索引，历史上气泡用过那个名字；语义名只要不变，
+# 万一将来想让它回气泡池，也不至于和主体条目撞键（撞键 = 气泡拿到 kind=gif
+# 的条目 = 动态气泡退化成静态首帧）。
 BODY_EXTRA_BY_FILE = {
     '表情包_05_星空公式.gif': {'semantic': 'gif:05'},
 }
@@ -678,12 +681,12 @@ def discover():
                            'path': p, 'minT': mt, 'frames': len(frames),
                            'frameMs': median_ms(durations),
                            'opaque': median_opaque_ratio(frames) >= OPAQUE_MIN})
-            # F3b 里被用户点名"该用于思考"的那张，**同时**登记为主体候选
-            #（语义名用 `gif:NN`，避免与气泡条目在 `by_semantic` 里撞键 ——
-            #  撞键会让气泡池拿到 kind=gif 的条目，动态气泡退化成静态首帧）。
-            if base in BODY_EXTRA_BY_FILE:
-                usable.append({'kind': 'gif', 'semantic': BODY_EXTRA_BY_FILE[base]['semantic'],
-                               'name': base, 'path': p, 'minT': mt, 'frames': len(frames)})
+            continue
+        # 不在气泡表、但在 `BODY_EXTRA_BY_FILE` 里的（星空公式）：只做主体。
+        #（它曾一度"气泡 + 主体"两边都用，2026-10-07 用户要求从气泡挪开。）
+        if base in BODY_EXTRA_BY_FILE:
+            usable.append({'kind': 'gif', 'semantic': BODY_EXTRA_BY_FILE[base]['semantic'],
+                           'name': base, 'path': p, 'minT': mt, 'frames': len(frames)})
             continue
         usable.append({'kind': 'gif', 'semantic': 'gif:' + idx, 'name': base,
                        'path': p, 'minT': mt, 'frames': len(frames)})

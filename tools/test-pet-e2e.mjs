@@ -1908,18 +1908,16 @@ await ok('⭐ "吐彩虹"那张归属**出错**，不在思考（用户点名）
     `error 应为 4 张（吐彩虹 + 墨镜流泪），实际 ${error.length}：${error.join(', ')}`)
 })
 
-await ok('⭐ 星空公式当**思考主体**且气泡不退化（用户点名"这张用于思考"）', async () => {
-  // 用户 2026-10-07："这张图应该用于思考的时候" + "这两个都并存"（与星星眼）+
-  // "不需要抠背景……背景又不是无意义"。
+await ok('⭐ 星空公式**只在思考主体**，已撤出气泡池（用户点名）', async () => {
+  // 用户 2026-10-07："这张图应该用于思考的时候" → 进 thinking（与星星眼并存）；
+  // 随后 "把这张图从气泡里挪开" → 气泡池不再有它。
   //
-  // 三个要点：
-  //   ① thinking 里多出一张 **33帧/30ms** 的条带（星空公式的几何指纹）——
-  //     原先 thinking 只有一张 33帧/30ms（gif:04 戳脸颊），现在应是两张。
-  //     （几何指纹在这里够用：只判"多了一张"，不判"是哪张"。）
-  //   ② 它**带背景**（全幅不透明）—— 用户明确"不需要抠背景"。
-  //   ③ 气泡池里的 `starry-formula.gif` **不得退化**：它同时是气泡（GIF 原样）
-  //     和主体（条带），`by_semantic` 若撞键会让气泡拿到 kind=gif 的条目，
-  //     33 帧动图退化成静态首帧 —— 这是实现上最可能翻车的地方。
+  // ① thinking 里应有**两张** 33帧/30ms 的条带（戳脸颊 + 星空公式）——
+  //   原先只有一张（gif:04 戳脸颊）。几何指纹在这里够用：只判"多了张"。
+  //   （它带背景 —— 全幅不透明，用户明确"不需要抠背景"，公式就画在背景上。）
+  // ② 气泡池**不得**再有 starry-formula —— 挪开了就是挪开了，别让它漂回来。
+  // ③ 它同时曾登记为气泡（kind=anim）+ 主体（kind=gif），`by_semantic`
+  //   撞键会让一边拿到另一边的条目 —— 这里的帧数断言就是那道防线。
   const atlas = JSON.parse((await get('/api/zhuang-fangyi/pet/atlas')).body)
   const thinking = atlas.variants?.thinking ?? []
   const big33 = thinking.filter(f => {
@@ -1929,11 +1927,9 @@ await ok('⭐ 星空公式当**思考主体**且气泡不退化（用户点名"�
   assert.equal(big33.length, 2,
     `thinking 应有 2 张 33帧/30ms（戳脸颊 + 星空公式），实际 ${big33.length}：${big33.join(', ')}`)
 
-  // ③ 气泡仍是 33 帧动图
   const bubble = (atlas.bubble ?? []).find(b => String(b.file).includes('starry-formula'))
-  assert.ok(bubble, '气泡池里应有 starry-formula')
-  assert.equal(bubble.frames, 33, `气泡 starry-formula 应为 33 帧动图，实际 ${bubble.frames}`)
-  assert.equal(bubble.frameMs, 30, `气泡 starry-formula frameMs 应为 30，实际 ${bubble.frameMs}`)
+  assert.ok(bubble === undefined,
+    '气泡池里不该再有 starry-formula（用户要求从气泡挪开）')
 })
 
 await ok('9 个状态全部有专属素材（覆盖率 9/9）', async () => {
@@ -1965,8 +1961,10 @@ await ok('⭐ 动态气泡：GIF 能取到字节、MIME 正确、清单声明与
   // 两处都只有走真实 HTTP 这一跳才暴露 —— 所以这里用真实产物验，不用假 fixture。
   const body = JSON.parse((await get('/api/zhuang-fangyi/pet/atlas')).body)
   const animated = (body.bubble ?? []).filter(b => (b.frames ?? 1) > 1)
-  assert.ok(animated.length >= 2,
-    `清单里应至少 2 张动态气泡（starry-formula / angry-charge），实际 ${animated.length}`)
+  // 2026-10-07 星空公式按用户要求撤出气泡池后，动图气泡只剩 angry-charge 一张
+  //（星空公式转做 thinking 主体条带，见"星空公式只在思考主体"那条）。
+  assert.ok(animated.length >= 1,
+    `清单里应至少 1 张动态气泡（angry-charge），实际 ${animated.length}`)
 
   for (const b of animated) {
     assert.match(b.file, /\.gif$/, `动态气泡应交付 GIF，实际 ${b.file}`)

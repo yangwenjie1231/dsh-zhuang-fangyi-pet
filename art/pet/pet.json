@@ -148,15 +148,6 @@
       "w": 256
     },
     {
-      "file": "bubble/starry-formula.gif",
-      "frameMs": 30,
-      "frames": 33,
-      "h": 256,
-      "hasText": false,
-      "opaque": true,
-      "w": 256
-    },
-    {
       "file": "bubble/angry-charge.gif",
       "frameMs": 60,
       "frames": 18,
