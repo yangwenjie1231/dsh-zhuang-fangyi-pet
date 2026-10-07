@@ -1532,6 +1532,15 @@ export function apply (ctx, config) {
        * 现在独立成一项：桌宠可以小，字照样看得清。
        */
       statusFontScale: s.statusFontScale,
+      /**
+       * **气泡正文**的字号倍率（1.0 = 基准）。
+       *
+       * 用户点名："你对话里面的文字大小也需要可调呀"。
+       * 与 `statusFontScale` 同一个道理：字号原先只跟 `scale` 走，用户把桌宠
+       * 调小是为了不占地，正文却被一起缩到读不了（实测 scale=0.5 → 6.5px）。
+       * 与状态文字**分开**是因为需求不同：状态文字扫一眼，正文要读。
+       */
+      chatFontScale: s.chatFontScale,
       // 番茄钟倒计时是否常显（独立于 statusAlways：那是"状态文字"，
       // 这是用户主动开的计时器，两者可以各自开关）。
       pomodoroCountdown: s.pomodoroCountdown,

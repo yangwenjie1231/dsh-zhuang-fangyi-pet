@@ -157,6 +157,8 @@ window.__ModuleLoader__.load({
         groupBubble: '气泡',
         bubble: '显示气泡',
         bubbleImages: '气泡显示表情图',
+        chatFontScale: '对话文字大小',
+        chatFontScaleHint: '只影响气泡里的对话正文，与上面「大小」（桌宠本体）无关 —— 桌宠可以调小、字照样读得清',
         bubbleMs: '气泡显示时长',
         bubbleGapMs: '两条气泡最小间隔',
         bubbleGapHint: '调大可减少刷屏；0 = 不限',
@@ -333,6 +335,8 @@ window.__ModuleLoader__.load({
         groupBubble: 'Bubble',
         bubble: 'Show bubbles',
         bubbleImages: 'Show expression images in bubbles',
+        chatFontScale: 'Chat text size',
+        chatFontScaleHint: 'Affects the chat text inside bubbles only, not the pet size above — the pet can be small while the text stays readable',
         bubbleMs: 'Bubble duration',
         bubbleGapMs: 'Min gap between bubbles',
         bubbleGapHint: 'Raise it to reduce spam; 0 = unlimited',
@@ -558,6 +562,12 @@ window.__ModuleLoader__.load({
          * 与 Host 的 `src/settings.js` 同默认值。
          */
         statusFontScale: 1,
+        /**
+         * 气泡**对话正文**的字号倍率（1.0 = 基准）。
+         * 与 `statusFontScale` 分开：状态文字扫一眼、正文要读，需求不同。
+         * 与 Host 的 `src/settings.js` 同默认值、同范围（0.5~3.0）。
+         */
+        chatFontScale: 1,
         /** AI 完成一回合时弹提醒。 */
         notifyComplete: true,
         /** 授权/提问常亮提醒（Host 用它决定 attention；独立于 bubble 总开关）。 */
@@ -594,6 +604,10 @@ window.__ModuleLoader__.load({
       // 两处口径必须一致，否则"设置页能选的值"和"宿主接受的值"会分叉。
       if (Number.isFinite(input.statusFontScale)) {
         out.statusFontScale = Math.min(3, Math.max(0.5, input.statusFontScale))
+      }
+      // 气泡正文字号倍率：与 Host 同范围同口径（0.5~3.0）。
+      if (Number.isFinite(input.chatFontScale)) {
+        out.chatFontScale = Math.min(3, Math.max(0.5, input.chatFontScale))
       }
       for (const k of ['clickThrough', 'topmost', 'bubble', 'bubbleImages',
         'hint', 'statusAlways', 'notifyComplete', 'attentionReminder',
@@ -1028,7 +1042,11 @@ window.__ModuleLoader__.load({
               className: 'zf-pet__bubble'
                 + (bubble.imageOpaque ? ' zf-pet__bubble--opaque' : '')
                 + (bubble.kind === 'attention' ? ' zf-pet__bubble--attention' : ''),
-              'data-zf-pet-bubble-kind': bubble.kind
+              'data-zf-pet-bubble-kind': bubble.kind,
+              // 对话正文字号倍率（契约 §2 settings.chatFontScale）。
+              // overlay 是**冻结的兜底**，但这只是把它已有的字号乘一个系数、
+              // 不引新交互；不跟着变的话，用户切换显示方式会看到两种大小。
+              style: { fontSize: `${(13 * (Number(settings.chatFontScale) || 1)).toFixed(1)}px` }
             }, [
               // 待处理计数徽标（同时两处要处理时显示 "2"）——
               // 常亮提醒最怕"只看见一个，其实有俩"。
@@ -1532,6 +1550,22 @@ window.__ModuleLoader__.load({
               label: t('bubbleImages'),
               value: settings.bubbleImages,
               onChange: v => set({ bubbleImages: v })
+            }),
+            // ⭐ 对话正文字号（用户点名"你对话里面的文字大小也需要可调呀"）。
+            //
+            // 与「大小」（桌宠本体）分开：用户把桌宠调小是为了不占地，
+            // 而正文是**要读的** —— 跟着一起缩就本末倒置（实测 scale=0.5 时被
+            // 下限夹到 6.5px，基本读不了）。独立成项后"桌宠小、正文清楚"。
+            h(Slider, {
+              key: 'chatFontScale',
+              label: t('chatFontScale'),
+              hint: t('chatFontScaleHint'),
+              value: settings.chatFontScale ?? 1,
+              min: 0.5,
+              max: 3,
+              step: 0.1,
+              suffix: '×',
+              onChange: v => set({ chatFontScale: v })
             }),
             h(Slider, {
               key: 'bubbleMs',

@@ -87,6 +87,16 @@ namespace DshZhuangFangyiPet
         /// <summary>当前缩放（0.3~3.0，与本体一致）。</summary>
         private double _scale = 1.0;
 
+        /// <summary>
+        /// 对话正文的**独立字号倍率**（1.0 = 基准）。
+        ///
+        /// 用户点名："你对话里面的文字大小也需要可调呀"。
+        /// 与状态栏同一个道理：字号原先只乘 `_scale`（桌宠大小），用户把桌宠调到
+        /// 0.5 是为了不占地，正文却被一起缩到 6.5px（下限兜底值）—— 读不了。
+        /// 独立成项后可以"桌宠小、正文清楚"。
+        /// </summary>
+        private double _fontScale = 1.0;
+
         // ⚠️ **必须有初值**（= scale 1.0 时的基准值）。
         // 踩过：把常量改成字段时漏了初值，字段默认全 0 → 图片上限 0（图片被压成 0 高，
         // 表现为"气泡里什么都没有"）、内边距/边框 0（没有底色）——
@@ -117,6 +127,12 @@ namespace DshZhuangFangyiPet
 
         /// <summary>自检诊断用：正文当前字号（缩放断言用）。</summary>
         internal double DiagTextFontSize { get { return _text == null ? 0 : _text.FontSize; } }
+
+        /// <summary>
+        /// 自检诊断用：正文当前 MaxWidth。
+        /// 字号放大时它必须跟着放大，否则文字会挤成又窄又高的竖条。
+        /// </summary>
+        internal double DiagTextMaxWidth { get { return _text == null ? 0 : _text.MaxWidth; } }
         /// <summary>
         /// 自检诊断用：窗口屏幕矩形（物理像素）[x,y,w,h]。
         /// 用 WPF 的 Left/Top/ActualWidth（不引 P/Invoke），DPI 换算后返回。
@@ -791,14 +807,24 @@ namespace DshZhuangFangyiPet
         {
             double s = _scale;
             if (s <= 0) s = 1.0;
-            // 下限保护：字太小会糊成一团，小到 0.3× 时字号仍有 ~6.5pt 可读
-            double fs = Math.Max(6.5, BaseFontSize * s);
+            // 字号 = 基准 × 桌宠缩放 × **独立字号倍率**（用户点名要能单独调大）。
+            //
+            // 下限保护：字太小会糊成一团。注意它夹的是**最终值** ——
+            // 所以"scale 很小 + fontScale 很大"时，字照样能大到可读
+            //（这正是用户要的：桌宠小、正文清楚）。
+            double fs = Math.Max(6.5, BaseFontSize * s * _fontScale);
             _text.FontSize = fs;
-            _text.MaxWidth = Math.Max(120, BaseTextMaxW * s);
-            _badgeText.FontSize = Math.Max(7, BaseBadgeFontSize * s);
-            _goText.FontSize = Math.Max(7, BaseGoFontSize * s);
+            // ⚠️ MaxWidth 也必须跟着字号走，否则字放大了却还挤在旧宽度里，
+            // 会变成又窄又高的竖条。用"最终字号 / 基准字号"这个比值最直观。
+            double textRatio = fs / BaseFontSize;
+            _text.MaxWidth = Math.Max(120, BaseTextMaxW * textRatio);
+            // 徽标/按钮字号同比例放大（它们是气泡的一部分，只放大正文会显得割裂）。
+            _badgeText.FontSize = Math.Max(7, BaseBadgeFontSize * s * _fontScale);
+            _goText.FontSize = Math.Max(7, BaseGoFontSize * s * _fontScale);
 
-            DefaultPadding = new Thickness(BasePaddingX * s, BasePaddingY * s, BasePaddingX * s, BasePaddingY * s);
+            // 内边距同理按最终字号比例走 —— 否则正文放大后会贴着气泡边缘。
+            DefaultPadding = new Thickness(BasePaddingX * textRatio, BasePaddingY * textRatio,
+                                           BasePaddingX * textRatio, BasePaddingY * textRatio);
             DefaultBorderWidth = new Thickness(Math.Max(0.5, BaseBorderWidth * s));
             // 气泡上限 = 桌宠显示尺寸 × 比例（见 BubbleToPetRatio 的注释：
             // 写死绝对像素会在高 DPI 下反超桌宠）。
@@ -812,6 +838,28 @@ namespace DshZhuangFangyiPet
             OpaqueCornerRadius = Math.Max(3, BaseOpaqueCornerRadius * s);
             _badge.CornerRadius = new CornerRadius(Math.Max(2, 8 * s));
             _goBtn.CornerRadius = new CornerRadius(Math.Max(2, 6 * s));
+        }
+
+        /// <summary>
+        /// 对话正文的独立字号倍率（0.5~3.0，与状态栏同一口径）。
+        ///
+        /// 正在显示的气泡会立即重排 —— 用户拖滑杆时应该马上看到效果，
+        /// 而不是等下一个气泡（与 `SetScale` 同一处理：先铺外壳再测量再定位）。
+        /// </summary>
+        public void SetFontScale(double fontScale)
+        {
+            double fs = fontScale <= 0 ? 1.0 : fontScale;
+            if (Math.Abs(fs - _fontScale) < 0.001) return;
+            _fontScale = fs;
+            UpdateMetrics();
+            try
+            {
+                ApplyCurrentChrome();
+                _root.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                UpdateLayout();
+                PlaceNearPet();
+            }
+            catch (Exception ex) { PetLog.Warn("气泡字号应用失败: " + PetLog.Describe(ex)); }
         }
 
         /// <summary>

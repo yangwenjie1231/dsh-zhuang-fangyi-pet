@@ -64,6 +64,13 @@ export const OPACITY_MAX = 1.0
 export const STATUS_FONT_MIN = 0.5
 export const STATUS_FONT_MAX = 3.0
 
+/**
+ * 字号倍率范围 —— 状态文字与气泡正文**共用**同一套上下限。
+ *
+ * 两处口径必须一致：它们都是"给人读的字"，没有理由一个能到 3× 另一个只到 2×。
+ * 上限 3.0 足够大（正文 13px → 39px），下限 0.5 保证还读得出来。
+ */
+
 /** 气泡一次显示多久（ms）。 */
 export const BUBBLE_MS_MIN = 1000
 export const BUBBLE_MS_MAX = 20000
@@ -166,6 +173,18 @@ export function defaultSettings () {
      * 范围与 clamp 见 `normalizeSettings`（0.5 ~ 3.0）。
      */
     statusFontScale: 1.0,
+    /**
+     * **气泡正文**的字号倍率（1.0 = 基准 13px）。
+     *
+     * 用户点名："你对话里面的文字大小也需要可调呀"。
+     * 与 `statusFontScale` 同一个道理、同一套范围：字号原先只跟 `scale` 走，
+     * 用户把桌宠调小是为了不占地，正文却被一起缩到读不了
+     *（实测 scale=0.5 时正文被下限夹到 6.5px）。
+     *
+     * 为什么与状态文字**分开**：状态文字是"她现在在干嘛"（扫一眼），
+     * 正文是"她说了什么"（要读）—— 两者需求本来就可能不同。
+     */
+    chatFontScale: 1.0,
     /** AI 完成一回合并时弹一条提醒气泡（force，绕过静默期）。 */
     notifyComplete: true,
     /**
@@ -333,6 +352,8 @@ export function normalizeSettings (input) {
   // 下限 0.5（再小读不了，与 `PetStatusLabel.MinFontSize` 的兜底意图一致）；
   // 上限 3.0（再大字会把面板/桌面占满，且远超"看得清"的需求）。
   out.statusFontScale = clamp(input.statusFontScale, STATUS_FONT_MIN, STATUS_FONT_MAX, base.statusFontScale)
+  // 气泡正文字号倍率：与状态文字**同范围同口径**（用户可能只调其中一个）。
+  out.chatFontScale = clamp(input.chatFontScale, STATUS_FONT_MIN, STATUS_FONT_MAX, base.chatFontScale)
 
   for (const key of ['clickThrough', 'topmost', 'bubble', 'bubbleImages',
     'hint', 'statusAlways', 'notifyComplete', 'attentionReminder',

@@ -1303,7 +1303,7 @@ ok('⭐ 重排后每个设置控件都还在（防"功能悄悄消失"）', () =
   const joined = texts.join('|')
   const expected = [
     '启用桌宠', '显示方式', '大小', '不透明度', '总在最前', '点击穿透',
-    '显示气泡', '气泡显示表情图', '气泡显示时长', '两条气泡最小间隔',
+    '显示气泡', '气泡显示表情图', '对话文字大小', '气泡显示时长', '两条气泡最小间隔',
     'AI 完成时弹提醒', '审批/提问常亮提醒', '双击桌宠',
     '活跃度', '完成后的开心时长', '空闲多久后睡觉', '深浅色主题',
     '悬停时显示状态', '桌宠下方常显状态', '状态文字大小',
@@ -1351,6 +1351,42 @@ ok('⭐ 状态文字大小：独立滑杆，能改到设置（用户要"调大�
   // 客户端归一化也要夹取（与 Host 的 0.5~3.0 同口径，否则两端分叉）
   assert.equal(normalizePet({ statusFontScale: 99 }).statusFontScale, 3, '越界应夹到 3')
   assert.equal(normalizePet({ statusFontScale: 0.01 }).statusFontScale, 0.5, '越界应夹到 0.5')
+})
+
+ok('⭐ 对话文字大小：独立滑杆（用户点名"对话里的文字大小也要能调"）', () => {
+  // 与状态文字同一个坑：字号原先只跟"大小"（桌宠本体）走 ——
+  // 用户把桌宠调到 0.5 是为了不占地，正文却被一起缩到 6.5px，读不了。
+  const l = loadClient()
+  l.exports.apply(l.ctx)
+  const { Section, runtime } = l.exports.__test
+  runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 1 } } }
+  runtime.__state.snapshot = { petState: 'idle', label: '', bubble: null, nativeAvailable: true }
+  runtime.__state.settings = normalizePet({ chatFontScale: 2.4, statusFontScale: 1.2 })
+  l.react.resetHooks()
+  const tree = Section({ close () {} })
+
+  const sliders = []
+  const walk = n => {
+    if (n === null || n === undefined) return
+    if (Array.isArray(n)) { n.forEach(walk); return }
+    if (typeof n !== 'object') return
+    if (typeof n.type === 'function' && n.type.name === 'Slider') sliders.push(n)
+    if (n.props) walk(n.props.children)
+  }
+  walk(tree)
+  const chatSlider = sliders.find(s => s.props.label === '对话文字大小')
+  assert.ok(chatSlider, '应有「对话文字大小」滑杆')
+  assert.equal(chatSlider.props.value, 2.4, '滑杆应反映当前值')
+  assert.ok(chatSlider.props.min <= 0.5 && chatSlider.props.max >= 3,
+    `范围应覆盖 0.5~3，实际 ${chatSlider.props.min}~${chatSlider.props.max}`)
+  // ⭐ 两个字号滑杆必须**各管各的**：不能绑到同一个值
+  const statusSlider = sliders.find(s => s.props.label === '状态文字大小')
+  assert.ok(statusSlider, '状态文字滑杆应仍在')
+  assert.notEqual(chatSlider.props.value, statusSlider.props.value,
+    '两个滑杆应各自反映自己的设置（对话 2.4 / 状态 1.2），不能是同一个值')
+
+  assert.equal(normalizePet({ chatFontScale: 99 }).chatFontScale, 3, '越界应夹到 3')
+  assert.equal(normalizePet({ chatFontScale: 0.01 }).chatFontScale, 0.5, '越界应夹到 0.5')
 })
 
 ok('⭐ 分组按"用户找东西的心智"排序（不再是开发历史顺序）', () => {

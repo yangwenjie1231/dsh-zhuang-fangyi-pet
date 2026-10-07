@@ -2504,6 +2504,57 @@ namespace DshZhuangFangyiPet
                       "；图片上限 " + imgBefore.ToString("0") + " → " + imgSmall.ToString("0") +
                       " → " + imgBig.ToString("0"));
 
+                // ⭐⭐ 对话正文**独立字号**（用户点名"你对话里面的文字大小也需要可调呀"）。
+                //
+                // 与状态栏同一个道理：字号原先只乘 scale，用户把桌宠调到 0.5 是为了
+                // 不占地，正文却被一起缩到 6.5px（下限兜底）—— 读不了。
+                // 这里验三件事：
+                //   ① 独立倍率真的生效（且在 scale 很小时也能把字撑大）；
+                //   ② `MaxWidth` 跟着字号走 —— 否则字放大了仍挤在旧宽度里，变成竖条；
+                //   ③ 内边距跟着字号走 —— 否则字贴边。
+                {
+                    // ⚠️ 用**独立实例**：这块所在的 bubble 可能已被前面的用例关掉，
+                    // 关闭后 Show 会抛（"关闭 Window 之后…无法调用 Show"），
+                    // 那会把同一 try 块后面的断言全带崩（实测掉了 5 条）。
+                    PetBubble fsBubble = null;
+                    try
+                    {
+                        fsBubble = new PetBubble();
+                        fsBubble.Opacity = 0;
+                        fsBubble.SetScale(0.5);      // 用户的实际档位
+                        // 内边距要**先铺外壳**才落到 `_border` 上（`UpdateMetrics` 只算
+                        // `DefaultPadding`，由 `ApplyCurrentChrome` 应用）—— 所以走
+                        // `Show` 的真实路径，而不是只读 `UpdateMetrics` 的结果。
+                        PetBubbleInfo fsInfo = new PetBubbleInfo();
+                        fsInfo.Id = 991001;
+                        fsInfo.Kind = "both";
+                        fsInfo.Text = "这是一句用来量字号与内边距的对话正文。";
+                        fsInfo.DurationMs = 600000;
+                        fsBubble.Show(fsInfo, MakeSolidBubbleBitmap(24));
+                        Pump(150);
+                        double smallFont = fsBubble.DiagTextFontSize;
+                        double smallMaxW = fsBubble.DiagTextMaxWidth;
+                        double smallPad = fsBubble.DiagPaddingLeft;
+                        fsBubble.SetFontScale(3.0);
+                        Pump(150);
+                        double bigFont = fsBubble.DiagTextFontSize;
+                        double bigMaxW = fsBubble.DiagTextMaxWidth;
+                        double bigPad = fsBubble.DiagPaddingLeft;
+                        bool grew = bigFont > smallFont;
+                        bool maxWGrew = bigMaxW > smallMaxW;
+                        bool padGrew = bigPad > smallPad;
+                        Check(grew && maxWGrew && padGrew,
+                              "⭐⭐ 对话文字可独立调大（MaxWidth/内边距同比，不挤成竖条、不贴边）",
+                              "字号 " + smallFont.ToString("0.#") + " → " + bigFont.ToString("0.#") +
+                              "；MaxWidth " + smallMaxW.ToString("0") + " → " + bigMaxW.ToString("0") +
+                              "；内边距 " + smallPad.ToString("0.#") + " → " + bigPad.ToString("0.#"));
+                    }
+                    finally
+                    {
+                        try { if (fsBubble != null) fsBubble.ForceClose(); } catch { }
+                    }
+                }
+
                 // ⭐ 深浅色主题：气泡外壳必须真的换色（原先只换贴纸图，白框在深色桌面上刺眼）。
                 PetTheme.BubblePalette darkPal = PetTheme.BubblePalette.For(true);
                 PetTheme.BubblePalette lightPal = PetTheme.BubblePalette.For(false);

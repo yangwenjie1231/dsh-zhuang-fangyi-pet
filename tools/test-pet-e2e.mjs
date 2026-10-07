@@ -1624,6 +1624,50 @@ await ok('⭐ 状态文字字号：设置 → 快照 → 边界夹取（用户�
     } })
   })
 })
+
+await ok('⭐ 对话文字大小：设置 → 快照 → 与"桌宠大小"互不干扰', async () => {
+  // 用户点名："你对话里面的文字大小也需要可调呀"。
+  // 与状态文字同一类问题：字号原先只跟 `scale` 走，用户把桌宠调小是为了不占地，
+  // 正文却被一起缩到读不了（实测 scale=0.5 → 6.5px）。
+  const before = JSON.parse((await get('/api/zhuang-fangyi/pet/settings')).body).settings
+
+  await fetch(`${ROUTE}/settings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: { chatFontScale: 2.2 } })
+  })
+  let snap = JSON.parse((await get('/api/zhuang-fangyi/pet/state')).body)
+  assert.equal(snap.settings.chatFontScale, 2.2,
+    `快照应透传 chatFontScale，实际 ${snap.settings.chatFontScale}`)
+
+  // 与 scale 独立；也与 statusFontScale 独立（两者是分开的两项）
+  await fetch(`${ROUTE}/settings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: { scale: 0.5, statusFontScale: 1.0 } })
+  })
+  snap = JSON.parse((await get('/api/zhuang-fangyi/pet/state')).body)
+  assert.equal(snap.settings.chatFontScale, 2.2,
+    '改桌宠大小/状态文字字号都不该影响对话文字大小（三项独立）')
+
+  // 越界夹取
+  for (const [input, want] of [[99, 3], [0.01, 0.5]]) {
+    await fetch(`${ROUTE}/settings`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ settings: { chatFontScale: input } })
+    })
+    snap = JSON.parse((await get('/api/zhuang-fangyi/pet/state')).body)
+    assert.equal(snap.settings.chatFontScale, want,
+      `chatFontScale=${input} 应夹到 ${want}，实际 ${snap.settings.chatFontScale}`)
+  }
+
+  await fetch(`${ROUTE}/settings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: {
+      chatFontScale: before.chatFontScale ?? 1,
+      scale: before.scale ?? 1,
+      statusFontScale: before.statusFontScale ?? 1
+    } })
+  })
+})
 await ok('⭐ GET /pet/gallery 返回全部表情（能主动看全，不再靠随机撒）', async () => {
   const r = await get('/api/zhuang-fangyi/pet/gallery')
   assert.equal(r.status, 200)

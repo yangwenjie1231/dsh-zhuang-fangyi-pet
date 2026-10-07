@@ -236,6 +236,8 @@ namespace DshZhuangFangyiPet
         private bool _hintOn;
         /// <summary>状态文字字号倍率（1.0 = 基准）。用户点名"字太小了，想调大"。</summary>
         private double _statusFontScale = 1.0;
+        /// <summary>气泡正文字号倍率（1.0 = 基准）。用户点名"对话里的文字大小也要能调"。</summary>
+        private double _chatFontScale = 1.0;
         private string _doubleClick = "focus-dsh";     // 'focus-dsh' | 'emote' | 'none'
 
         // task-7：发消息（悬停 ✎ → 输入窗 → POST /pet/send）
@@ -674,6 +676,8 @@ namespace DshZhuangFangyiPet
             // 字号倍率同理由首帧对齐（与 `scale` 同理：`ApplySettings` 的 diff 会把
             // "启动时就已经等于快照值"的情况跳过，于是字号一直停在默认 1.0）。
             try { _status.SetFontScale(_statusFontScale); } catch { }
+            // 气泡正文字号同理由首帧对齐（同理：diff 会把"启动时就等于快照值"跳过）。
+            try { _bubble.SetFontScale(_chatFontScale); } catch { }
             try { _pomo.SetScale(_win.Scale); } catch { }
             try { RefreshStatusLabel(); } catch { }
             try { RefreshPomodoro(); } catch { }
@@ -805,6 +809,14 @@ namespace DshZhuangFangyiPet
                 PetLog.Info("settings: 状态文字字号 → " + _statusFontScale.ToString("0.##") + "×");
                 try { _status.SetFontScale(_statusFontScale); } catch (Exception ex) { PetLog.Warn("状态字号应用失败: " + PetLog.Describe(ex)); }
                 RefreshStatusLabel();
+            }
+            // 气泡正文字号（用户点名"对话里的文字大小也要能调"）。
+            // 正在显示的气泡会立即重排 —— 拖滑杆时马上看到效果，不用等下一个气泡。
+            if (st.HasChatFontScale && Math.Abs(st.ChatFontScale - _chatFontScale) > 0.001)
+            {
+                _chatFontScale = st.ChatFontScale;
+                PetLog.Info("settings: 气泡正文字号 → " + _chatFontScale.ToString("0.##") + "×");
+                try { _bubble.SetFontScale(_chatFontScale); } catch (Exception ex) { PetLog.Warn("气泡字号应用失败: " + PetLog.Describe(ex)); }
             }
             // 契约 §2 v8：语音开关
             if (st.HasVoice && st.Voice != _voiceOn)

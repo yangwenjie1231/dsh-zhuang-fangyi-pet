@@ -69,6 +69,11 @@ namespace DshZhuangFangyiPet
         /// 旧快照缺省 = 1.0（不动现状）。用户点名"字太小了，想调大"。
         /// </summary>
         public bool HasStatusFontScale; public double StatusFontScale;
+        /// <summary>
+        /// 契约 §2 v-next：**气泡正文**字号倍率（1.0 = 基准）。
+        /// 旧快照缺省 = 1.0（不动现状）。用户点名"对话里的文字大小也要能调"。
+        /// </summary>
+        public bool HasChatFontScale; public double ChatFontScale;
 
         /// <summary>非法/缺省值一律回落 focus-dsh（task-6 验收点）。</summary>
         public static string NormalizeDoubleClick(string v)
@@ -383,6 +388,15 @@ namespace DshZhuangFangyiPet
                     if (fs > 3.0) fs = 3.0;
                     si.HasStatusFontScale = true;
                     si.StatusFontScale = fs;
+                }
+                // 契约 §2 v-next：**气泡正文**字号倍率（同范围 0.5~3.0）
+                if (st.Get("chatFontScale") != null && st.Get("chatFontScale").Kind == PetJson.JVal.TNum)
+                {
+                    double cfs = st.Num("chatFontScale", 1.0);
+                    if (cfs < 0.5) cfs = 0.5;
+                    if (cfs > 3.0) cfs = 3.0;
+                    si.HasChatFontScale = true;
+                    si.ChatFontScale = cfs;
                 }
                 s.Settings = si;
             }
