@@ -48,7 +48,6 @@ export const EMOTE_BY_KEY = {
   ],
   'notify-complete': [
     'bubble/17-yay.png',                    // 好耶
-    'bubble/muscle.gif',                    // 秀肌肉（"看我的"）
     'bubble/new/13-so-good.png',            // 太中啦
     'bubble/23-you-are-the-best.png',       // 你最好了
     'bubble/20-thumbs-up.png',              // 默大契（点赞）
@@ -87,7 +86,6 @@ export const EMOTE_BY_KEY = {
   error: [
     'bubble/22-annoyed.png',                // 好气人哦
     'bubble/angry-charge.gif',              // 生气蓄力→爆发（动图）
-    'bubble/sunglasses.gif',                // 墨镜流泪（强颜欢笑）
     'bubble/new/20-unhappy.png',            // 庄不开心
     'bubble/new/10-hate-you.png',           // 庄讨厌你
     'bubble/new/17-crying.png',             // 庄一直哭

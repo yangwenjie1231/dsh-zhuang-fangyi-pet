@@ -1852,13 +1852,21 @@ await ok('⭐ F5 那批已改为**桌宠主体**（用户点名"不要做气泡�
     }
   }
 
-  // 那 2 张硬约束：不得出现在主体里，但必须还在气泡池（没被丢掉）
+  // muscle / sunglasses：2026-10-07 用户拍板"管线关于不透明的要求，直接去掉"，
+  // 这两张（后半段满屏不透明）随之**归队进主体**，并按 F5 批次的统一原则
+  // （"不要做气泡表情，要做桌宠主体"）撤出气泡池。
+  //
+  // ⚠️ "进没进主体"不能按名字找：产物名是状态编号（happy-8.png），
+  // 语义名不进文件名（老坑）。所以用**张数**判定 —— muscle 进 happy（7→8）、
+  // sunglasses 进 error（3→4），配合下面"不在气泡池"的检查，两个方向都锁住。
   const bubbleFiles = (atlas.bubble ?? []).map(b => b.file)
+  assert.equal((atlas.variants?.happy ?? []).length, 8,
+    `happy 应为 8 张（muscle 归队 +1），实际 ${(atlas.variants?.happy ?? []).length}`)
+  assert.equal((atlas.variants?.error ?? []).length, 4,
+    `error 应为 4 张（sunglasses 归队 +1），实际 ${(atlas.variants?.error ?? []).length}`)
   for (const name of ['muscle', 'sunglasses']) {
-    const inBody = [...bodyFiles].some(f => String(f).includes(name))
-    assert.ok(!inBody, `${name} 有满屏不透明帧，不该进主体（会闪矩形块）`)
     const inBubble = bubbleFiles.some(f => String(f).includes(name))
-    assert.ok(inBubble, `${name} 应仍在气泡池里可用，不该被丢掉`)
+    assert.ok(!inBubble, `${name} 不该再留在气泡池（整批做主体的决定）`)
   }
 })
 
@@ -1880,9 +1888,13 @@ await ok('⭐ "吐彩虹"那张归属**出错**，不在思考（用户点名）
   //     而 GIF 的**中后段**才是用户看到的画面。认图必须看中间帧。
   //   · **像素比对**：要解 GIF/PNG，Node 侧代价太高（不值得为一条断言引依赖）。
   //
-  // 张数虽然朴素，但**精确对应这次的决定**：挪走前 thinking=5/error=2，
-  // 挪走后 thinking=4/error=3。谁把它挪回去，这两个数立刻变 —— 回滚验证过。
-  // 副作用是有意的：将来素材变动导致张数变化时这条会红，需要人重新确认归属，
+  // 张数虽然朴素，但**精确对应这一串决定**（都是用户拍板的，按时间记账）：
+  //   吐彩虹挪去 error        → thinking 5→4, error 2→3
+  //   星空公式进 thinking 并存 → thinking 4→5
+  //   muscle 进 happy         → happy 7→8
+  //   sunglasses 进 error     → error 3→4
+  // 谁把这些挪回去，张数立刻变 —— 回滚验证过。副作用是有意的：
+  // 将来素材变动导致张数变化时这条会红，需要人重新确认归属，
   // 而不是让它悄悄漂回去。
   const atlas = JSON.parse((await get('/api/zhuang-fangyi/pet/atlas')).body)
   const thinking = atlas.variants?.thinking ?? []
@@ -1890,10 +1902,38 @@ await ok('⭐ "吐彩虹"那张归属**出错**，不在思考（用户点名）
 
   assert.deepEqual(thinking.filter(f => error.includes(f)), [],
     `thinking 与 error 不该共用变体：${thinking.filter(f => error.includes(f)).join(', ')}`)
-  assert.equal(thinking.length, 4,
-    `thinking 应为 4 张（"吐彩虹"已挪走），实际 ${thinking.length}：${thinking.join(', ')}`)
-  assert.equal(error.length, 3,
-    `error 应为 3 张（原有 2 张 + 挪过来的"吐彩虹"），实际 ${error.length}：${error.join(', ')}`)
+  assert.equal(thinking.length, 5,
+    `thinking 应为 5 张（吐彩虹挪走 -1，星空公式并存 +1），实际 ${thinking.length}：${thinking.join(', ')}`)
+  assert.equal(error.length, 4,
+    `error 应为 4 张（吐彩虹 + 墨镜流泪），实际 ${error.length}：${error.join(', ')}`)
+})
+
+await ok('⭐ 星空公式当**思考主体**且气泡不退化（用户点名"这张用于思考"）', async () => {
+  // 用户 2026-10-07："这张图应该用于思考的时候" + "这两个都并存"（与星星眼）+
+  // "不需要抠背景……背景又不是无意义"。
+  //
+  // 三个要点：
+  //   ① thinking 里多出一张 **33帧/30ms** 的条带（星空公式的几何指纹）——
+  //     原先 thinking 只有一张 33帧/30ms（gif:04 戳脸颊），现在应是两张。
+  //     （几何指纹在这里够用：只判"多了一张"，不判"是哪张"。）
+  //   ② 它**带背景**（全幅不透明）—— 用户明确"不需要抠背景"。
+  //   ③ 气泡池里的 `starry-formula.gif` **不得退化**：它同时是气泡（GIF 原样）
+  //     和主体（条带），`by_semantic` 若撞键会让气泡拿到 kind=gif 的条目，
+  //     33 帧动图退化成静态首帧 —— 这是实现上最可能翻车的地方。
+  const atlas = JSON.parse((await get('/api/zhuang-fangyi/pet/atlas')).body)
+  const thinking = atlas.variants?.thinking ?? []
+  const big33 = thinking.filter(f => {
+    const g = atlas.files?.[f]
+    return g && g.frames === 33 && g.frameMs === 30
+  })
+  assert.equal(big33.length, 2,
+    `thinking 应有 2 张 33帧/30ms（戳脸颊 + 星空公式），实际 ${big33.length}：${big33.join(', ')}`)
+
+  // ③ 气泡仍是 33 帧动图
+  const bubble = (atlas.bubble ?? []).find(b => String(b.file).includes('starry-formula'))
+  assert.ok(bubble, '气泡池里应有 starry-formula')
+  assert.equal(bubble.frames, 33, `气泡 starry-formula 应为 33 帧动图，实际 ${bubble.frames}`)
+  assert.equal(bubble.frameMs, 30, `气泡 starry-formula frameMs 应为 30，实际 ${bubble.frameMs}`)
 })
 
 await ok('9 个状态全部有专属素材（覆盖率 9/9）', async () => {

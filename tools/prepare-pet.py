@@ -160,19 +160,13 @@ STATE_PLAN = (
     ('waking',    ('cheer', 'gif:07', 'cheerful')),
     ('idle',      ('gif:07', 'shy', 'wink', 'content', 'smile-soft')),
     ('listening', ('wink', 'gif:01', 'excited', 'cat-paws')),
-    # ⚠️ 用户 2026-10-07："思考用这张图不合适，这张图出错的时候放"。
-    # 那张是 **`listless`**（源文件 `表情包_35_双眼半睁无精打采嘴巴.gif`）——
-    # 半睁的眼睛 + 吐彩虹，表达"顶不住了/被搞懵"，属于**出错**，不是思考。
-    #
-    # 踩过一次：我先按文件名"圆睁大眼嘴巴张成小小"猜成 `stunned`，把**错的**那张
-    # 搬了过去（`stunned` 其实是圆眼张嘴的正常表情，跟彩虹无关）。
-    # 教训：这批素材的**文件名描述的是静态印象**，而 GIF 的**中后段**才是用户
-    # 实际看到的画面 —— 认图必须看**中间帧**，不能读文件名。
-    ('thinking',  ('gif:04', 'starry', 'dizzy', 'stunned')),
+    # ⚠️ `gif:05` = `05_星空公式`（33 帧带背景动图）。用户 2026-10-07 点名
+    # "这张图应该用于思考的时候"，与原有的星星眼 `starry` **并存**。
+    ('thinking',  ('gif:04', 'starry', 'gif:05', 'dizzy', 'stunned')),
     ('working',   ('writing', 'gif:03', 'megaphone', 'road-rage')),
     ('waiting',   ('gif:01', 'shy', 'follow-me', 'hungry', 'please')),
-    ('happy',     ('gif:06', 'joy', 'cheer', 'gif:07', 'star-eyes', 'all-ok', 'watermelon')),
-    ('error',     ('gif:02', 'knife', 'listless')),
+    ('happy',     ('gif:06', 'joy', 'cheer', 'gif:07', 'star-eyes', 'all-ok', 'watermelon', 'muscle')),
+    ('error',     ('gif:02', 'knife', 'listless', 'sunglasses')),
     ('sleeping',  ('sleepy', 'sleepy-zzz')),
 )
 
@@ -250,39 +244,30 @@ ANIM_BY_FILE = {
 #
 # ⚠️ **2026-10-07 用户改主意**：这批"不要做气泡表情，要做桌宠主体"。
 # 于是其中 18 张改走主体那条路（`F5_BODY_SEMANTICS` + `STATE_PLAN`），
-# 剩 2 张（`muscle` / `sunglasses`）因为**后半段是满屏不透明特效**，
-# 当主体会在桌面上闪出矩形块 → 留在气泡池（气泡本来就允许满幅不透明）。
-# 这样"都要用上"和"主体不能有矩形块"两个要求同时满足。
+# ⚠️ **2026-10-07 二次改主意**：用户拍板"管线关于不透明的要求，直接去掉" ——
+# 那道挡了 `muscle` / `sunglasses` 的透明占比判据已删（见 `scan_sources`），
+# 于是**整批 20 张全部进主体**，`BUBBLE_F5` 清空。
+#
+# 这意味着主体会出现**满幅不透明的帧**（muscle 后半段是明黄纯色底、
+# sunglasses 后半段是发丝特写）—— 用户明确接受："透不透明影响不大呀，
+# 背景又不是无意义"。**不要再把这道判据加回来**：它挡的是用户的决定，
+# 不是 bug。
 #
 # 关于画风：早先我以"另一个画风家族，混进主体会变装跳帧"为由把这批全放气泡，
 # 用户明确否掉了那条理由（"我认为新图都是符合的，没有这些要求"）——
-# 风格判断归用户，我只保留**渲染硬约束**（透明占比那条）。
+# 风格判断归用户。
 #
 # `opaque` 不写死 —— 由 `median_opaque_ratio` 按指标判定（见 `OPAQUE_MIN`）。
-BUBBLE_F5 = (
-    # (语义名, 源文件名, hasText)
-    # ⚠️ 只剩这 2 张：它们后半段是**满屏不透明特效**，当主体会在桌面上闪矩形块，
-    # 所以留在气泡池（气泡允许满幅不透明）。其余 18 张见 `F5_BODY`。
-    ('muscle',       '表情包_31_明黄背景眯眼咧嘴吐舌.gif', False),   # 秀肌肉（明黄底 → 自动判 opaque）
-    ('sunglasses',   '表情包_33_戴黑色墨镜单手推镜敬.gif', False),   # 墨镜流泪（强颜欢笑）
-)
+BUBBLE_F5 = ()
 
-# ── F5b：这批里**当主体**的 18 张（用户 2026-10-07 改的主意）─────────────────
+# ── F5b：这批**全部 20 张当主体**（用户 2026-10-07："不要做气泡表情，
+#    要做桌宠主体" + "不透明的要求直接去掉"）────────────────────────────────
 #
-# 用户原话："新增的那一批表情包不要做气泡表情，要做桌宠主体"。
-#
-# ⚠️ 为什么不能 20 张全进主体：主体有一条**硬判据**（不是审美偏好）——
-# `min_transparent_ratio` 要求**任何一帧都不能铺满不透明像素**，否则播到那一帧，
-# 桌面上会出现一个矩形色块。逐帧量过这 20 张（25 帧/张）：
-#
-#   能当主体（18 张，minT ≥ 3.1%）→ 见下表
-#   不能当主体（2 张，后半段满屏）→ 留在 `BUBBLE_F5`
-#     · muscle     13~24 帧铺满（明黄纯色底）
-#     · sunglasses 15~24 帧铺满（发丝特写撑满画面）
-#
-# 这样"都要用上"和"主体不能有矩形块"两个要求**同时**满足，而不是二选一。
-# `scan_sources` 仍会让这 18 张**过一遍**那条判据（走 `gif` 分支）——
-# 将来素材换版导致某张变实心时，它会掉进 `needs_cutout` 而不是悄悄进主体。
+# 逐帧量过的透明占比（记录在案，虽然已不再作为门槛）：
+#   18 张 minT ≥ 3.1%（全程有透明区）
+#   muscle      13~24 帧铺满（明黄纯色底）→ 主体播到那段会出现明黄矩形
+#   sunglasses  15~24 帧铺满（发丝特写撑满画面）→ 同理
+# 用户拍板接受矩形帧："透不透明影响不大呀，背景又不是无意义"。
 F5_BODY = (
     # (语义名, 源文件名)
     ('stunned',      '表情包_30_圆睁大眼嘴巴张成小小.gif'),   # 惊呆、冷汗
@@ -303,6 +288,9 @@ F5_BODY = (
     ('road-rage',    '表情包_47_驾浅蓝小车从远处一路.gif'),   # 开车路怒、赶路
     ('excited',      '表情包_48_先睁着大眼微笑后半段.gif'),   # 惊喜、期待
     ('all-ok',       '表情包_49_闭眼开心地笑脸颊泛红.gif'),   # 双手 OK、搞定
+    # ↓ 这 2 张原先被透明占比判据挡在气泡池，判据删除后归队（整批 20 张齐了）
+    ('muscle',       '表情包_31_明黄背景眯眼咧嘴吐舌.gif'),   # 秀肌肉（后半段明黄底铺满）
+    ('sunglasses',   '表情包_33_戴黑色墨镜单手推镜敬.gif'),   # 墨镜流泪（后半段发丝特写铺满）
 )
 
 # 与 F3b 合流：`scan_sources` 只认一张「文件名 → 语义名」的表。
@@ -311,24 +299,6 @@ F5_BY_FILE = {
     for semantic, fname, _has_text in BUBBLE_F5
 }
 
-# ── F5b：这批里**能当主体**的那些（用户 2026-10-07 改的主意）─────────────────
-#
-# 用户原话："新增的那一批表情包不要做气泡表情，要做桌宠主体"。
-#
-# ⚠️ 为什么不能 20 张全进主体：主体有一条**硬判据**（不是审美偏好）——
-# `min_transparent_ratio` 要求**任何一帧都不能铺满不透明像素**，否则播到那一帧，
-# 桌面上会出现一个矩形色块。逐帧量过这 20 张：
-#
-#   能当主体（18 张，全部 25 帧、minT ≥ 3.1%）：
-#     stunned content cat-paws listless cheerful watermelon sleepy-zzz star-eyes
-#     smile-soft knife please dizzy follow-me hungry megaphone road-rage excited all-ok
-#   不能当主体（2 张，后半段是**满屏特效**）：
-#     muscle     13~24 帧铺满（明黄纯色底）
-#     sunglasses 15~24 帧铺满（发丝特写撑满画面）
-#
-# 那两张**留在气泡池**（气泡本来就允许满幅不透明，F4 那批全是）—— 这样
-# "都要用上"和"主体不能有矩形块"两个要求同时满足，而不是二选一。
-#
 # 主体候选由 `STATE_PLAN` 按**语义名**引用（见那张表），这里只提供
 # 「源文件名 → 语义名」的反查，供 `scan_sources` 把 GIF 登记成主体。
 F5_BODY_BY_FILE = {
@@ -337,6 +307,19 @@ F5_BODY_BY_FILE = {
 }
 BUBBLE_ANIM = BUBBLE_ANIM + BUBBLE_F5
 ANIM_BY_FILE.update(F5_BY_FILE)
+
+# ── F3b 里**同时**当主体的那些 ──────────────────────────────────────────────
+#
+# 用户 2026-10-07："这张图应该用于思考的时候"（指 `05_星空公式`）+ "这两个
+# 都并存"（与思考里原有的星星眼 `starry` 并存）。
+#
+# ⚠️ 语义名必须用 `gif:05` 而不是复用 `starry-formula`：`by_semantic` 按
+# 语义名建索引，同一个语义名只能有一条 —— 若主体条目复用气泡的语义名，
+# 气泡池会拿到 kind=gif 的条目，**动态气泡退化成静态首帧**。
+# 两条并存：`starry-formula`（气泡，GIF 原样）+ `gif:05`（主体条带）。
+BODY_EXTRA_BY_FILE = {
+    '表情包_05_星空公式.gif': {'semantic': 'gif:05'},
+}
 
 # `opaque`（要不要套气泡底）**由指标判定，不手写**。
 #
@@ -665,7 +648,15 @@ def discover():
             needs_cutout.append({'name': 'wx/%s（%s）' % (fname, semantic),
                                  'reason': 'missing', 'detail': '源文件不存在'})
 
-    # ── 动态 GIF：逐帧透明占比自动判定，不依赖人工名单 ──
+    # ── 动态 GIF ──
+    #
+    # ⚠️ **透明占比判据已按用户要求删除**（2026-10-07："管线关于不透明的要求，
+    # 直接去掉"）。原先这里有两道 `mt < SOLID_EPS` 的拦截：登记为主体的 GIF
+    # 只要有一帧铺满不透明就被判去 `needs_cutout`，理由是"播到那帧桌面上会闪
+    # 矩形块"。用户拍板接受："透不透明影响不大呀，背景又不是无意义"。
+    #
+    # `minT` 照样算、照样进报告（--check 与 report 里还能看到每张的透明占比），
+    # 只是**不再作为门槛**。别把它加回来 —— 它挡的是用户的决定。
     for p in sorted(glob.glob(os.path.join(ASSETS_QQ, '*.gif'))):
         base = os.path.basename(p)
         idx = base.split('_')[1] if '_' in base else ''
@@ -674,28 +665,12 @@ def discover():
         still = ANIM_BY_FILE.get(base)
         body = F5_BODY_BY_FILE.get(base)
         if body is not None:
-            # F5b：用户改主意了 —— 这批要做**主体**，不是气泡。
-            #
-            # 走 `gif` 这条路（= 主体候选），于是它**照样要过** `min_transparent_ratio`
-            # 判据（下面那个分支）—— 这是**有意的**：那两张后半段满屏不透明的
-            #（muscle / sunglasses）会被判去 `needs_cutout` 而不是悄悄进主体。
-            # 它们仍在 `BUBBLE_F5` 里（`still` 分支），所以照样能在气泡池用上。
-            if mt < SOLID_EPS:
-                solid = sum(1 for f in frames
-                            if f.getchannel('A').histogram()[0] / float(f.width * f.height) < SOLID_EPS)
-                needs_cutout.append({
-                    'name': base, 'reason': 'needsCutout',
-                    'detail': 'F5 登记为主体但有实心帧（%d/%d 帧铺满不透明），'
-                              '播到那帧桌面上会闪矩形块；该张仍在气泡池里可用'
-                              % (solid, len(frames))})
-                continue
+            # F5 整批做**主体**（`BUBBLE_F5` 已清空，这批不再进气泡池）。
             usable.append({'kind': 'gif', 'semantic': body['semantic'], 'name': base,
                            'path': p, 'minT': mt, 'frames': len(frames)})
             continue
         if still is not None:
-            # F3b / F5：这张登记为**动态气泡** → 跳过「当状态动画」的判据。
-            # 不是放水：它不进 `states`（不在 STATE_PLAN 里），只作为**气泡**出现；
-            # 而气泡本来就允许满幅不透明（F4 那批全是）。
+            # F3b：登记为**动态气泡**（GIF 原样入池，允许满幅不透明）。
             #
             # `opaque` 在这里**按指标算**（不写死）：多数帧都铺满 → 不套气泡底。
             # 手写过一版，20 张里猜错 3 张 —— 能量的属性就别靠印象。
@@ -703,14 +678,12 @@ def discover():
                            'path': p, 'minT': mt, 'frames': len(frames),
                            'frameMs': median_ms(durations),
                            'opaque': median_opaque_ratio(frames) >= OPAQUE_MIN})
-            continue
-        if mt < SOLID_EPS:
-            solid = sum(1 for f in frames
-                        if f.getchannel('A').histogram()[0] / float(f.width * f.height) < SOLID_EPS)
-            needs_cutout.append({
-                'name': base, 'reason': 'needsCutout',
-                'detail': '有实心帧（%d/%d 帧铺满不透明），播放会出现矩形块；'
-                          '已排除动画，等手动抠图' % (solid, len(frames))})
+            # F3b 里被用户点名"该用于思考"的那张，**同时**登记为主体候选
+            #（语义名用 `gif:NN`，避免与气泡条目在 `by_semantic` 里撞键 ——
+            #  撞键会让气泡池拿到 kind=gif 的条目，动态气泡退化成静态首帧）。
+            if base in BODY_EXTRA_BY_FILE:
+                usable.append({'kind': 'gif', 'semantic': BODY_EXTRA_BY_FILE[base]['semantic'],
+                               'name': base, 'path': p, 'minT': mt, 'frames': len(frames)})
             continue
         usable.append({'kind': 'gif', 'semantic': 'gif:' + idx, 'name': base,
                        'path': p, 'minT': mt, 'frames': len(frames)})

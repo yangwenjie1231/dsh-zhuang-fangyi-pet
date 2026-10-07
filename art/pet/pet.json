@@ -166,24 +166,6 @@
       "w": 256
     },
     {
-      "file": "bubble/muscle.gif",
-      "frameMs": 40,
-      "frames": 25,
-      "h": 256,
-      "hasText": false,
-      "opaque": true,
-      "w": 256
-    },
-    {
-      "file": "bubble/sunglasses.gif",
-      "frameMs": 40,
-      "frames": 25,
-      "h": 256,
-      "hasText": false,
-      "opaque": false,
-      "w": 256
-    },
-    {
       "file": "bubble/new/01-bored.png",
       "h": 256,
       "hasText": true,
@@ -335,6 +317,11 @@
       "frameWidth": 256,
       "frames": 25
     },
+    "error-4.png": {
+      "frameMs": 40,
+      "frameWidth": 256,
+      "frames": 25
+    },
     "error.png": {
       "frameMs": 30,
       "frameWidth": 256,
@@ -366,6 +353,11 @@
       "frames": 25
     },
     "happy-7.png": {
+      "frameMs": 40,
+      "frameWidth": 256,
+      "frames": 25
+    },
+    "happy-8.png": {
       "frameMs": 40,
       "frameWidth": 256,
       "frames": 25
@@ -436,11 +428,16 @@
       "frames": 1
     },
     "thinking-3.png": {
+      "frameMs": 30,
+      "frameWidth": 256,
+      "frames": 33
+    },
+    "thinking-4.png": {
       "frameMs": 40,
       "frameWidth": 256,
       "frames": 25
     },
-    "thinking-4.png": {
+    "thinking-5.png": {
       "frameMs": 40,
       "frameWidth": 256,
       "frames": 25
@@ -592,7 +589,8 @@
     "error": [
       "error.png",
       "error-2.png",
-      "error-3.png"
+      "error-3.png",
+      "error-4.png"
     ],
     "happy": [
       "happy.png",
@@ -601,7 +599,8 @@
       "happy-4.png",
       "happy-5.png",
       "happy-6.png",
-      "happy-7.png"
+      "happy-7.png",
+      "happy-8.png"
     ],
     "idle": [
       "idle.png",
@@ -624,7 +623,8 @@
       "thinking.png",
       "thinking-2.png",
       "thinking-3.png",
-      "thinking-4.png"
+      "thinking-4.png",
+      "thinking-5.png"
     ],
     "waiting": [
       "waiting.png",
