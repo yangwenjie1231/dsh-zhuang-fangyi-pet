@@ -22,6 +22,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { normalizeSettings } from '../src/settings.js'
+import { sanitizeForSpeech } from '../src/pet/tts.js'
 import { EMOTE_BY_KEY, EMOTE_EXCLUDE_FROM_RANDOM } from '../src/pet/emotes.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -997,25 +998,32 @@ await ok('⭐⭐ AI 回答 → 合成 → 快照交付 → 字节可取（整条
   assert.equal(st.enabled, true, '状态应报已开启')
   assert.ok(st.cached >= 1, `应至少缓存 1 条，实际 ${st.cached}`)
 
-  // ⑦ ⭐⭐ 「每次朗读字数上限」改了要**立刻**生效。
+  // ⑦ ⭐⭐ 分段朗读：**整段都念完**，不再是"截到上限就丢"
   //
-  // 钉住一个真实 bug：`tts()` 的缓存键原先只比 `url`，改了 maxChars 不会重建
-  // client → 新上限要等下次改地址或重启才生效。症状隐蔽：`/pet/speech` 的
-  // maxChars 立刻变了（它直接读设置），但真正决定"念多长"的是 client 里的旧值。
+  // 这条原先断言的是**旧行为**（超过上限直接截断）。用户点名问过
+  // "为什么一次只能念 60 个字，别限制啊" —— 现在改成按句分段、逐段合成，
+  // 所以断言也必须跟着变成"分段"，否则它会**因为每段都 ≤ 上限而碰巧继续通过**，
+  // 把"还在截断"这件事藏起来。
   //
   // ⚠️ 三个坑（都是回滚验证时露的馅，别改回去）：
   //   1. 必须记**基线条数**再等新增 —— 写 `while (ttsCalls.length < 1)` 会立刻
   //      退出（那时已非空），读到旧调用，断言永远成立；
   //   2. 必须放在**会话已建立、且本链路自己的回复跑完之后** —— 合成只在
   //      speakReplies/voice 都开、且有聊天会话时才走，提前发事件会被静默忽略；
-  //   3. 必须断言原文**长于**上限，否则"截短"无从谈起。
+  //   3. 必须断言原文**长于**上限，否则"分段"无从谈起。
   const callsBefore = ttsCalls.length
+  const bootLogPath = path.join(tmpHome, 'zhuang-fangyi-pet', 'boot.log')
+  const bootLinesBefore = fs.existsSync(bootLogPath)
+    ? fs.readFileSync(bootLogPath, 'utf8').split('\n').length
+    : 0
   await fetch(`${base}/api/zhuang-fangyi/pet/settings`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ settings: { speechMaxChars: 12 } })
   })
   const longReply = '这是一句很长的回复，用来验证字数上限改了以后立刻生效，而不是等下次重启才生效。'
   assert.ok(longReply.length > 12, '测试前提：原文必须长于上限')
+  // 期望值 = **不截断**清洗后的全文（分段器一个字都不该丢）
+  const expectedFull = sanitizeForSpeech(longReply, { maxChars: 12, truncate: false })
   local.emit('session/event', { id: 'chat-tts-1' }, {
     type: 'assistant/message',
     seq: 9101,
@@ -1031,15 +1039,34 @@ await ok('⭐⭐ AI 回答 → 合成 → 快照交付 → 字节可取（整条
     }
   })
   {
-    const deadline2 = Date.now() + 8000
-    while (Date.now() < deadline2 && ttsCalls.length <= callsBefore) {
-      await new Promise(r => setTimeout(r, 50))
+    // 等到"所有分片都合成过"（拼接结果等于全文）或超时
+    const deadline2 = Date.now() + 10000
+    while (Date.now() < deadline2) {
+      if (ttsCalls.slice(callsBefore).join('') === expectedFull) break
+      await new Promise(r => setTimeout(r, 30))
     }
-    assert.ok(ttsCalls.length > callsBefore,
-      `上限改动后应触发一次新的合成调用（基线 ${callsBefore}，实际 ${ttsCalls.length}）`)
-    const limited = ttsCalls[ttsCalls.length - 1]
-    assert.ok(limited.length <= 12,
-      `字数上限改成 12 后送进合成服务的文本应 <= 12 字，实际 ${limited.length} 字：${JSON.stringify(limited)}`)
+    const segments = ttsCalls.slice(callsBefore)
+    assert.ok(segments.length >= 2,
+      `应分成**多段**合成（这是"不再截断"的证明），实际只有 ${segments.length} 段：${JSON.stringify(segments)}`)
+    assert.equal(segments.join(''), expectedFull,
+      '所有分片拼起来必须等于全文 —— 一个字都不许丢（旧行为会丢掉后半句）')
+    for (const s of segments) {
+      assert.ok(s.length <= 12,
+        `每段都应 <= 12 字（分段器没失效），实际 ${s.length} 字：${JSON.stringify(s)}`)
+    }
+    // ⭐ 交付时每一段都带**同一个 utterance**（exe 靠它把分片排成队列而不是互相抢占）
+    const snap2 = await (await fetch(`${base}/api/zhuang-fangyi/pet/state`)).json()
+    assert.ok(snap2.speak !== null && snap2.speak !== undefined, '分段交付后快照仍应带 speak 块')
+    assert.ok(Number.isFinite(snap2.speak.utterance) && snap2.speak.utterance > 0,
+      `speak 块必须带 utterance（>0），实际 ${JSON.stringify(snap2.speak.utterance)} —— ` +
+      '没有它 exe 会把每一段都当成"新的一句"而互相打断，听起来每句只念开头几个字')
+    // ⭐ 宿主日志里应能看到"N 段"的逐段交付（这条是"循环真的跑完了"的直接证据）
+    const newLines = fs.existsSync(bootLogPath)
+      ? fs.readFileSync(bootLogPath, 'utf8').split('\n').slice(bootLinesBefore)
+      : []
+    const delivered = newLines.filter(l => l.includes('段）'))
+    assert.equal(delivered.length, segments.length,
+      `日志里的分段交付条数应等于合成段数（${segments.length}），实际 ${delivered.length}：\n${delivered.join('\n')}`)
   }
 
   await ws.close()

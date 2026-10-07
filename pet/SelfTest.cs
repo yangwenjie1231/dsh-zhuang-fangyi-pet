@@ -2085,6 +2085,27 @@ namespace DshZhuangFangyiPet
             player.Stop();
             player.DrainReplies();
 
+            // (9f) ⭐⭐ 队列有上限（第二道防线：上游去重失效时不会无限重复念）
+            //
+            // 我踩过这个：把 `Play` 换成 `DeliverReply` 时**漏掉了
+            // `_lastSpeakName = snap.SpeakName` 那行**，于是每一帧都重新交付同一段。
+            // 实测队列从 0 一路涨到 21 且还在涨，桌宠开始无限重复念
+            //「那就什么都在。」真正的防线是上游的 name 去重（已修），
+            // 这里是第二道：即使上游再犯，也不能无限刷屏。
+            player.Stop();
+            long uttFlood = 7777;
+            for (int i = 0; i < PetVoicePlayer.MaxReplyQueue + 10; i++)
+            {
+                player.DeliverReply(fakeMp3, 1000, uttFlood);
+            }
+            Check(player.PendingReplies <= PetVoicePlayer.MaxReplyQueue,
+                  "⭐⭐ 回复队列有上限（上游去重失效时不会无限重复念同一句）",
+                  "灌入 " + (PetVoicePlayer.MaxReplyQueue + 10) + " 段 → 队列 " +
+                  player.PendingReplies + "（上限 " + PetVoicePlayer.MaxReplyQueue + "）");
+            // 收尾
+            player.Stop();
+            for (int i = 0; i < PetVoicePlayer.MaxReplyQueue + 2; i++) { player.DrainReplies(); player.Stop(); }
+
             // (10) ⭐ 高频道事件节流（连点十下不叠十条）
             //
             // ⚠️ 这条也被回退验证修过：原先两次 Play 之间**没有清掉"正在播"**，

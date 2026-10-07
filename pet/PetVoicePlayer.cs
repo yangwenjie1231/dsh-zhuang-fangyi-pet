@@ -61,6 +61,15 @@ namespace DshZhuangFangyiPet
         /// <summary>高频道事件的最小间隔（ms）。低于这个间隔的重复触发被丢弃。</summary>
         public const int MinRepeatMs = 900;
 
+        /// <summary>
+        /// 回复分片队列的上限（防御性）。
+        ///
+        /// 正常一次回复是几段（实测 120 字 → 6 段）。给到 32 是留足余量：
+        /// 真正会撞到它的只有"上游去重失效"这种 bug，那时**宁可少念几段**
+        /// 也不能无限重复（见 `DeliverReply` 里的说明）。
+        /// </summary>
+        public const int MaxReplyQueue = 32;
+
         private readonly Dispatcher _ui;
         private readonly string _cacheDir;
         private MediaPlayer _player;
@@ -207,6 +216,19 @@ namespace DshZhuangFangyiPet
             }
             _replyQueue.Enqueue(bytes);
             _replyDurations.Enqueue(durationMs);
+            // 防御性上限：一次回复的正常分片数是个位数（实测 120 字 → 6 段）。
+            // 若上游去重失效（我踩过：把 `Play` 换成 `DeliverReply` 时漏掉
+            // `_lastSpeakName = snap.SpeakName` 那行，于是**每一帧都重复交付同一段**，
+            // 队列从 0 一路涨到 21 且还在涨，桌宠开始无限重复念同一句话），
+            // 没有上限就会一直刷屏。超限时丢**最旧**的：宁可少念一段，
+            // 也不要卡住队列持续重复。
+            while (_replyQueue.Count > MaxReplyQueue)
+            {
+                _replyQueue.Dequeue();
+                _replyDurations.Dequeue();
+                DroppedCount++;
+                PetLog.Warn("回复队列超限（>" + MaxReplyQueue + "）→ 丢弃最旧的一段");
+            }
             DrainReplies();
         }
 

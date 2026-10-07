@@ -1154,12 +1154,22 @@ namespace DshZhuangFangyiPet
                 // 第 1 段打断 —— 听起来就是每句只念开头几个字。
                 // `utterance` 相同 → 入队等前一段播完；换号 → 清空队列播新的。
                 _voicePlayer.DeliverReply(bytes, ms, snap.SpeakUtterance);
+                // ⚠️⚠️ 这行**绝不能删** —— 它是"同一个 name 只交付一次"的唯一防线。
+                //
+                // 我把它删过一次（把 `Play` 换成 `DeliverReply` 时顺手重写，
+                // 以为 `DeliverReply` 自己会去重）—— 结果**每一帧都重新交付同一段**：
+                // 实测最后一段被塞进队列 20+ 遍，桌宠开始无限重复念
+                //「那就什么都在。」（`pet.log` 里队列从 0 一路涨到 21）。
+                //
+                // 去重必须在**取字节之前**（上面那行早退）才算数；
+                // 放到 `PetVoicePlayer` 里不行 —— 它拿不到 name，只拿到字节。
+                _lastSpeakName = snap.SpeakName;
                 // ⚠️ 措辞是"交付"不是"播放" —— 这一段可能只是**入了队**
                 //    （上一段还在播）。真正起播时 `PetVoicePlayer` 会再记一条
                 //    "回复分片起播"。之前这里写"播放"，于是日志会显示
                 //    "播放"了好几条却只有一条真在响 —— 诊断自己骗自己。
-                PetLog.Info("动态语音交付: " + snap.SpeakName + "（" + ms + "ms，第 " +
-                            snap.SpeakUtterance + " 句，队列 " + _voicePlayer.PendingReplies + "）");
+                PetLog.Info("动态语音交付: " + snap.SpeakName + "（" + ms + "ms，回复#" +
+                            snap.SpeakUtterance + "，队列 " + _voicePlayer.PendingReplies + "）");
             }
             catch (Exception ex)
             {
