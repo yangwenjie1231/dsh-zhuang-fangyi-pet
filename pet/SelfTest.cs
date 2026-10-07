@@ -81,6 +81,7 @@ namespace DshZhuangFangyiPet
                 TestSendCapabilityAndBody();
                 SpriteSheet sheet = TestSprite(artDir, atlas);
                 TestFilesMapCompat();
+                TestVariantDwell(artDir);
                 TestClamp();
                 TestWindows(opt, artDir, cacheDir, sheet);
                 TestAttentionPresentation();
@@ -468,6 +469,156 @@ namespace DshZhuangFangyiPet
             catch (Exception ex)
             {
                 Check(false, "旧清单向后兼容测试", PetLog.Describe(ex));
+            }
+        }
+
+        /// <summary>
+        /// 变体**驻留**：同一状态在短时间内反复取帧，必须拿到**同一张**。
+        ///
+        /// 用户反馈："主体变的太快了"。
+        ///
+        /// 根因（实测 exe 日志）：`PickVariant` 原先**每次调用都推进游标**，
+        /// 而状态机在 `thinking ↔ working` 之间高频抖动（AI 干活的真实节奏，
+        /// 实测相邻间隔 0.04 ~ 1.5 秒）—— 每跳一次就换一身"衣服"，
+        /// 看起来像人物在疯狂变装。一次对话实测换了十几张。
+        ///
+        /// ⚠️ **为什么自造 fixture 而不用现成素材**：第一版对着自检 fixture 的
+        /// `idle` 测，而它的变体是 `[idle-badvariant.png, idle.png]` ——
+        /// 第一个因**几何不符被拒收**，于是每次都回落 `idle.png`，`distinct` 恒为 1。
+        /// 结果：**把驻留去掉，断言照样绿**（回滚验证实测），是个抓不住 bug 的假断言。
+        ///
+        /// 真实素材（`art/pet`）里 idle 有 5 个可用变体，但自检不该依赖它的具体构成。
+        /// 所以这里现造一个"**3 个都有几何的变体**"的最小 fixture —— 判据只依赖
+        /// "变体确实在轮换"这一件事，不依赖任何外部素材长什么样。
+        /// </summary>
+        private static void TestVariantDwell(string srcArtDir)
+        {
+            string dir = null;
+            try
+            {
+                dir = Path.Combine(Path.GetTempPath(), "dsh-zhuang-fangyi-pet-dwell-fixture");
+                if (Directory.Exists(dir)) Directory.Delete(dir, true);
+                Directory.CreateDirectory(dir);
+                Directory.CreateDirectory(Path.Combine(dir, "bubble"));
+
+                // 源条带：借真实素材的 idle.png（4 帧 × 71px = 284 宽）
+                //
+                // ⚠️ 声明值必须与**实际像素**一致，否则变体会被判为几何不符而拒收 ——
+                // 第一版这里写死 frameWidth:256（其实应为 284/4=71），
+                // 于是三个变体全被拒收、回落 canonical，测试测了个空气。
+                // 所以这里**按实际像素算**，不写死。
+                string src = Path.Combine(srcArtDir, "idle.png");
+                if (!File.Exists(src))
+                {
+                    Check(false, "⭐ 变体驻留", "找不到基准素材 " + src);
+                    return;
+                }
+                int stripW, stripH, frameW;
+                using (var fs2 = new FileStream(src, FileMode.Open, FileAccess.Read))
+                {
+                    var dec = BitmapFrame.Create(fs2, BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
+                    stripW = dec.PixelWidth; stripH = dec.PixelHeight;
+                }
+                const int dwellFrames = 4;                       // idle.png 是 4 帧条带
+                frameW = stripW / dwellFrames;
+                if (frameW <= 0 || stripH <= 0)
+                {
+                    Check(false, "⭐ 变体驻留", "基准素材尺寸异常 " + stripW + "x" + stripH);
+                    return;
+                }
+                string[] files = { "dwell-a.png", "dwell-b.png", "dwell-c.png" };
+                foreach (string f in files) File.Copy(src, Path.Combine(dir, f), true);
+
+                // 三个变体**都**在 files 里给出**真实**几何 → 都会被接受（这是关键）
+                var sb = new System.Text.StringBuilder();
+                sb.Append("{\"version\":2,\"frameHeight\":").Append(stripH).Append(',');
+                sb.Append("\"states\":{\"idle\":{\"file\":\"dwell-a.png\",\"frames\":").Append(dwellFrames)
+                  .Append(",\"frameMs\":100,\"frameWidth\":").Append(frameW).Append("}},");
+                sb.Append("\"variants\":{\"idle\":[\"dwell-a.png\",\"dwell-b.png\",\"dwell-c.png\"]},");
+                sb.Append("\"files\":{");
+                for (int i = 0; i < files.Length; i++)
+                {
+                    if (i > 0) sb.Append(',');
+                    sb.Append('"').Append(files[i]).Append("\":{\"frames\":").Append(dwellFrames)
+                      .Append(",\"frameWidth\":").Append(frameW).Append(",\"frameMs\":100}");
+                }
+                sb.Append("},\"bubble\":[],\"missing\":[]}");
+                File.WriteAllText(Path.Combine(dir, "pet.json"), sb.ToString(), new System.Text.UTF8Encoding(false));
+
+                PetOptions o = new PetOptions();
+                o.ArtDir = dir;
+                PetSpriteStore store = new PetSpriteStore(o, null,
+                    Path.Combine(Path.GetTempPath(), "dsh-zhuang-fangyi-pet-dwell-cache"));
+                if (!store.LoadAtlas()) { Check(false, "变体驻留", "fixture 清单加载失败: " + dir); return; }
+
+                // ── ① 驻留期内：短时间连取多次必须**同一张** ──────────────────
+                //
+                // 这正是用户看到的"变的太快"：状态在 thinking↔working 之间抖动，
+                // 每抖动一次就换一张。驻留的作用就是让这串抖动只换一次。
+                var rapid = new List<string>();
+                for (int i = 0; i < 10; i++) { SpriteSheet s = store.GetSheet("idle"); if (s != null) rapid.Add(s.File); }
+                int rapidDistinct = 0;
+                for (int i = 0; i < rapid.Count; i++)
+                {
+                    bool first = true;
+                    for (int j = 0; j < i; j++) if (rapid[j] == rapid[i]) { first = false; break; }
+                    if (first) rapidDistinct++;
+                }
+                bool holdOk = rapid.Count == 10 && rapidDistinct == 1;
+                Check(holdOk, "⭐ 变体驻留：短时间反复取帧不换图（用户：变的太快了）",
+                      "fixture 3 个可用变体，连取 10 次得到 " + rapidDistinct + " 张：" +
+                      (rapid.Count > 0 ? rapid[0] : "-") +
+                      (holdOk ? "" : "（期望 1 张；>1 说明驻留没生效）"));
+
+                // ── ② 驻留期过后：必须**重新轮换**（否则就退回"呆板"了）──────
+                //
+                // ⚠️ 只验①是不够的：把驻留写成"永远不换"也能过①，
+                // 但那就等于把变体功能废掉（用户先前抱怨过变化度不够）。
+                // 所以这里睡过驻留窗口，再取一次，必须换到**别的**变体。
+                double dwell = PetSpriteStore.VariantDwellMsDiag;
+                System.Threading.Thread.Sleep((int)dwell + 250);
+                SpriteSheet after = store.GetSheet("idle");
+                bool rotated = after != null && rapid.Count > 0 && after.File != rapid[0];
+                Check(rotated, "⭐ 驻留是「慢下来」不是「不换」：过了驻留窗口仍会轮换",
+                      "驻留 " + dwell.ToString("0") + "ms 后：" +
+                      (rapid.Count > 0 ? rapid[0] : "-") + " → " + (after == null ? "-" : after.File) +
+                      (rotated ? "" : "（没换 = 变体功能被废掉）"));
+
+                // ── ③ 再走一轮，确认是**真的在循环**（不只是 A/B 两张来回）────
+                var seen = new List<string> { rapid[0], after.File };
+                for (int k = 0; k < 3; k++)
+                {
+                    System.Threading.Thread.Sleep((int)dwell + 250);
+                    SpriteSheet s = store.GetSheet("idle");
+                    if (s != null) seen.Add(s.File);
+                }
+                int seenDistinct = 0;
+                for (int i = 0; i < seen.Count; i++)
+                {
+                    bool first = true;
+                    for (int j = 0; j < i; j++) if (seen[j] == seen[i]) { first = false; break; }
+                    if (first) seenDistinct++;
+                }
+                // 3 个变体轮 4 次（含首张）应见到 >= 2 张（严格说 3 张，但取 >=2 更稳，
+                // 避免依赖 fixture 的起始游标位置）
+                bool cycles = seenDistinct >= 2;
+                Check(cycles, "⭐ 变体仍在循环（不是卡死在一张）",
+                      "跨驻留窗口取样得到 " + seenDistinct + " 张：" + string.Join(" → ", seen.ToArray()));
+
+                // ── ④ 预估尺寸与实际取到的一致（驻留期内也不能对不上）──────
+                // PetWindow.ReloadSprite 先按 TryGetDeclaredSize 预摆窗口，再取帧。
+                int pw, ph;
+                store.TryGetDeclaredSize("idle", out pw, out ph);
+                SpriteSheet nxt = store.GetSheet("idle");
+                bool consistent = nxt != null && pw == nxt.FrameW && ph == nxt.FrameH;
+                Check(consistent, "驻留期内：预估尺寸与实际取到的条带一致",
+                      "预估 " + pw + "x" + ph + "，实际 " + (nxt == null ? "-" : nxt.FrameW + "x" + nxt.FrameH));
+
+                store.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Check(false, "变体驻留测试", PetLog.Describe(ex));
             }
         }
 

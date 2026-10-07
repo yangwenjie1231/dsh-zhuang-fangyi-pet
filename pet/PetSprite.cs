@@ -182,6 +182,31 @@ namespace DshZhuangFangyiPet
         private PetJson.Atlas _atlas;
         private readonly Dictionary<string, SpriteSheet> _sheets = new Dictionary<string, SpriteSheet>(StringComparer.Ordinal);
         private readonly Dictionary<string, int> _variantCursor = new Dictionary<string, int>(StringComparer.Ordinal);
+
+        /// <summary>
+        /// 每个状态"上一次选了哪个变体 + 何时"（驻留判定，见 `HeldVariant`）。
+        /// </summary>
+        private readonly Dictionary<string, VariantPick> _variantPick = new Dictionary<string, VariantPick>(StringComparer.Ordinal);
+
+        /// <summary>
+        /// 变体**最短驻留时间**（ms）：这段时间内反复进入同一状态不再换图。
+        ///
+        /// 用户反馈"主体变的太快了"。实测状态机在 `thinking ↔ working` 之间
+        /// **0.04 ~ 1.5 秒**抖一次，而变体原先每次进入都推进 —— 一次对话能换十几身。
+        ///
+        /// 3000ms 的取法：短于它，抖动期还会连换（实测相邻抖动中位 ~0.8s，
+        /// 3 秒能盖住整串抖动）；长于它，就退回"呆板"（用户先前抱怨过变化度不够）。
+        /// 想更稳/更活可以调这一个常量。
+        /// </summary>
+        private const double VariantDwellMs = 3000;
+
+        /// <summary>
+        /// 自检诊断用：暴露驻留时长。
+        ///
+        /// 断言必须**按这个值算等待时间**，不能在测试里写死一个"够长"的数字 ——
+        /// 那样调大驻留后测试会假绿（等的时间早就不够了）。
+        /// </summary>
+        internal static double VariantDwellMsDiag { get { return VariantDwellMs; } }
         private readonly Dictionary<string, BitmapSource> _bubbleCache = new Dictionary<string, BitmapSource>(StringComparer.Ordinal);
 
         /// <summary>
@@ -655,22 +680,76 @@ namespace DshZhuangFangyiPet
         {
             List<string> vs;
             if (!a.Variants.TryGetValue(state, out vs) || vs == null || vs.Count == 0) return dflt;
+            string held = HeldVariant(state, vs);
+            if (held != null) return held;          // 驻留期内 → 与 PickVariant 给出同一个
             int cur;
             lock (_gate) { _variantCursor.TryGetValue(state, out cur); }
             return vs[Math.Abs(cur) % vs.Count];
+        }
+
+        /// <summary>
+        /// 变体驻留：某个状态刚选过的变体在 `VariantDwellMs` 内**复用**，
+        /// 而不是每次进入该状态都换一张。
+        ///
+        /// 用户反馈："主体变的太快了"。
+        ///
+        /// 根因（实测日志）：`PickVariant` 原先**每次调用都推进游标**，
+        /// 而状态机在 `thinking ↔ working` 之间**高频抖动**（AI 干活的真实节奏）：
+        ///
+        ///     13:52:17.516  working  ← working.png      （间隔 3.5s）
+        ///     13:52:18.332  thinking ← thinking-3.png   （间隔 0.8s）
+        ///     13:52:19.902  working  ← working-2.png    （间隔 1.6s）
+        ///     13:52:20.647  thinking ← thinking-4.png   （间隔 0.7s）
+        ///     13:52:20.691  working  ← working-3.png    （间隔 **44ms**）
+        ///     13:52:23.159  working  ← working-4.png
+        ///
+        /// 于是每跳一次就换一身"衣服" —— 看起来像人物在疯狂变装，
+        /// 而不是"状态在变"。变体本来是为了**防呆板**，但推进得太快就成了**花哨**。
+        ///
+        /// 修法：给每个状态记住"当前用哪张 + 什么时候选的"，驻留期内原样复用。
+        /// 变体依然会轮换（变化度不丢），只是**慢下来** —— 从"每次状态抖动"变成
+        /// "每 `VariantDwellMs` 一次"。这也正好对上用户先前"变化度不够"的诉求：
+        /// 要的是**变化**，不是**频闪**。
+        /// </summary>
+        private string HeldVariant(string state, List<string> vs)
+        {
+            if (VariantDwellMs <= 0) return null;
+            lock (_gate)
+            {
+                VariantPick pick;
+                if (!_variantPick.TryGetValue(state, out pick)) return null;
+                if ((DateTime.UtcNow - pick.At).TotalMilliseconds >= VariantDwellMs) return null;
+                // 清单可能已重载（变体换了一批）→ 旧选择不再有效
+                if (!vs.Contains(pick.File)) return null;
+                return pick.File;
+            }
+        }
+
+        /// <summary>某状态上一次选中的变体 + 选中时刻（驻留判定用）。</summary>
+        private sealed class VariantPick
+        {
+            public string File;
+            public DateTime At;
         }
 
         private string PickVariant(PetJson.Atlas a, string state, string dflt)
         {
             List<string> vs;
             if (!a.Variants.TryGetValue(state, out vs) || vs == null || vs.Count <= 1) return dflt;
+
+            string held = HeldVariant(state, vs);
+            if (held != null) return held;          // 驻留期内：不推进游标
+
             int cur;
+            string chosen;
             lock (_gate)
             {
                 _variantCursor.TryGetValue(state, out cur);
                 _variantCursor[state] = cur + 1;
+                chosen = vs[Math.Abs(cur) % vs.Count];
+                _variantPick[state] = new VariantPick { File = chosen, At = DateTime.UtcNow };
             }
-            return vs[Math.Abs(cur) % vs.Count];
+            return chosen;
         }
 
         // ------------------------------------------------------------------
