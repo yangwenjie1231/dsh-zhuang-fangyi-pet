@@ -31,6 +31,23 @@ namespace DshZhuangFangyiPet
     ///    同时 `Play()` 两条会互相打断。用 `_playingUntil` 做去重：
     ///    上一条还没播完就**丢弃**新的（而不是排队）—— 排队会让语音滞后于
     ///    它描述的事件，听起来像"桌宠反应迟钝"。
+    ///
+    ///    ⚠️ **但"动态回复" (interrupt: true) 例外 —— 它抢占。**
+    ///
+    ///    这条是实测踩出来的：原先所有语音一律"忙就丢"，于是
+    ///    「AI 回答的合成语音」和「固定台词（点击/状态的拟声词）」抢同一个
+    ///    单槽播放器。只要回复音频到达的那一刻正好有一条固定台词在响，
+    ///    回复就被**静默丢弃**；而重试只发生在"上游又来一帧"的时候 ——
+    ///    桌宠一旦进入 idle 就没帧了，**这句话永远播不出来**。
+    ///
+    ///    实测证据（`pet.log`）：固定台词 `pet/pet-head` 先响，
+    ///    470ms 后回复音频交付 → 之后 20 秒零日志、一声没出；
+    ///    另一次是回复音频被拖了 **51.4 秒**才播（等到下一次状态变化）。
+    ///    而 `/pet/speech/probe` 那一路还回 `played:true`（它只表示"已交付"），
+    ///    所以连诊断都在骗人。
+    ///
+    ///    语义上也不该丢：固定台词是"嗯哼"式的点缀，回复才是用户在等的那句。
+    ///    所以回复可以打断固定台词，反过来不行。
     /// 3. **绝不让播放失败影响功能**：任何异常都吞掉并记日志。没有声音
     ///    只是少了点趣味，不该让桌宠崩掉或卡住。
     ///
@@ -61,9 +78,11 @@ namespace DshZhuangFangyiPet
         /// <summary>轮换种子（同名事件多条时换着播）。</summary>
         private int _seed;
 
-        /// <summary>诊断：已播放条数 / 丢弃条数（自检与日志用）。</summary>
+        /// <summary>诊断：已播放条数 / 丢弃条数 / 抢占条数（自检与日志用）。</summary>
         public int PlayedCount { get; private set; }
         public int DroppedCount { get; private set; }
+        /// <summary>被"动态回复"抢占而中断的条数（固定台词居多）。</summary>
+        public int PreemptedCount { get; private set; }
 
         public PetVoicePlayer(Dispatcher ui, string cacheDir)
         {
@@ -100,9 +119,10 @@ namespace DshZhuangFangyiPet
         /// @param bytes mp3 字节
         /// @param eventKey 触发事件（节流与轮换用；null = 不节流）
         /// @param durationMs 预期时长（清单给的实测值；≤0 时用 3 秒兜底）
+        /// @param interrupt 忙时是否**抢占**（固定台词传 false，AI 回复传 true —— 见类头注释）
         /// @returns 是否真的开始播放（false = 被开关/节流/占用挡下）
         /// </summary>
-        public bool Play(byte[] bytes, string eventKey, int durationMs)
+        public bool Play(byte[] bytes, string eventKey, int durationMs, bool interrupt = false)
         {
             if (_disposed) { DroppedCount++; return false; }
             if (!Enabled) { DroppedCount++; return false; }
@@ -110,8 +130,26 @@ namespace DshZhuangFangyiPet
 
             int now = Environment.TickCount;
 
-            // ① 上一句还没播完 → 丢弃（不排队：排队会让语音滞后于事件）。
-            if (IsPlaying) { DroppedCount++; return false; }
+            // ① 上一句还没播完。
+            //
+            // `interrupt=false`（固定台词）→ 丢弃：给点击/状态配的拟声词迟几秒
+            //   再响毫无意义，排队只会让它滞后于事件。
+            // `interrupt=true`（AI 回复）→ **抢占**：这是用户在等的那句话，
+            //   不能因为正好有条固定台词在响就把它丢掉（丢了就再也不会播 ——
+            //   重试只发生在上游来帧的时候，idle 时没有帧）。见类头注释。
+            if (IsPlaying)
+            {
+                if (!interrupt)
+                {
+                    DroppedCount++;
+                    return false;
+                }
+                PreemptedCount++;
+                // 让出槽位：下面的 `start` 会先 `_player.Stop()` 再播新的。
+                // 这里同步清掉，否则并发的第二次 Play 会看到"还在播"。
+                _playingUntil = 0;
+                PetLog.Info("语音抢占：动态回复打断上一条（第 " + PreemptedCount + " 次）");
+            }
 
             // ② 高频道事件节流：连点十下不该叠十条。
             if (eventKey != null)

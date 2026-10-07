@@ -1857,12 +1857,34 @@ namespace DshZhuangFangyiPet
                   "null/空数组 → false；节流表无记录=" + noSideEffect);
 
             // (9) ⭐ 播放中再请求 → 丢弃（不排队：排队会让语音滞后于事件）
+            //
+            // ⚠️ 只对**固定台词**成立。动态回复走 `interrupt: true` 会抢占，
+            //    见下面的 (9b) —— 那条是实际丢过语音才加的。
             player.DiagSetPlayingUntil(unchecked(Environment.TickCount + 5000));
             int before = player.DroppedCount;
             bool playedWhileBusy = player.Play(fakeMp3, "pet/wake", 1000);
             Check(!playedWhileBusy && player.DroppedCount > before,
                   "⭐ 上一句没播完就丢弃新的（不排队 —— 排队会让语音滞后于事件）",
                   "播放中 → Play 返回 false，Dropped " + before + " → " + player.DroppedCount);
+
+            // (9b) ⭐⭐ 动态回复可以**抢占**固定台词（忙也要播）
+            //
+            // 这是实测丢过语音才补的断言：AI 回复的合成音频与固定台词共用
+            // 同一个单槽播放器，原先一律"忙就丢"。只要回复音频到达的瞬间
+            // 正好有条固定台词在响，回复就被静默丢弃，而且**再也不会播**
+            //（重试只发生在上游来帧的时候，桌宠 idle 之后就没有帧了）。
+            // 实测：一次被拖 51.4 秒，另一次 20 秒内零日志、那句永久丢失。
+            player.DiagSetPlayingUntil(unchecked(Environment.TickCount + 5000));
+            int preemptBefore = player.PreemptedCount;
+            int droppedBefore = player.DroppedCount;
+            bool replyWhileBusy = player.Play(fakeMp3, "speech", 1000, interrupt: true);
+            Check(replyWhileBusy && player.PreemptedCount > preemptBefore,
+                  "⭐⭐ 动态回复忙时也播（抢占固定台词）—— 否则回复会被静默丢弃且不再重试",
+                  "播放中 + interrupt:true → Play 返回 true，Preempted " +
+                  preemptBefore + " → " + player.PreemptedCount);
+            Check(player.DroppedCount == droppedBefore,
+                  "⭐ 抢占路径不该**同时**记一次丢弃（那是两条互斥的路）",
+                  "Dropped 保持 " + droppedBefore);
 
             // (10) ⭐ 高频道事件节流（连点十下不叠十条）
             //

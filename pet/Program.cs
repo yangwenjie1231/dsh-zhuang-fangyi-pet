@@ -1130,7 +1130,13 @@ namespace DshZhuangFangyiPet
                 int ms = snap.SpeakDurationMs > 0
                     ? (int)Math.Min(snap.SpeakDurationMs, int.MaxValue)
                     : 0;
-                if (_voicePlayer.Play(bytes, "speech", ms))
+                // ⭐ `interrupt: true` —— **回复语音可以打断固定台词**。
+                //
+                // 不加这个参数的话，只要音频到达时正好有条固定台词在响，
+                // 回复就被静默丢掉，而且再也不会播（重试只发生在上游来帧时，
+                // 桌宠 idle 之后没有帧）。实测：一次拖了 51.4 秒才播，
+                // 另一次 20 秒内一声没出、那句就永久丢了。
+                if (_voicePlayer.Play(bytes, "speech", ms, interrupt: true))
                 {
                     _lastSpeakName = snap.SpeakName;
                     PetLog.Info("动态语音播放: " + snap.SpeakName + "（" + ms + "ms）");

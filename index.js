@@ -2556,8 +2556,16 @@ export function apply (ctx, config) {
           cacheKey = client.cacheKey(probeText)
         }
 
-        // 存进缓存并交付给 exe 播一次（用户点"试一句"就该听到声音）。
-        let played = false
+        // 存进缓存并**交付**给 exe 播一次（用户点"试一句"就该听到声音）。
+        //
+        // ⚠️ `delivered` 的语义只是"已经交给 exe"，**不是"已经出声"**。
+        //
+        // 这里原先叫 `played` 并且照实回 true —— 实测骗过一次人：
+        // exe 那边因为播放器被固定台词占着，把这条**静默丢弃**、20 秒一声没出，
+        // 而 API 回的是 `played: true`。诊断自己说谎比没有诊断更糟。
+        // 真正的"出声"只有 exe 知道（它写 `动态语音播放:` 日志），
+        // 所以这里把名字改准，并把判据写清楚。
+        let delivered = false
         try {
           if (ensureSpeechDir()) {
             // 插件模式：我们的缓存键只用于**本地文件命名**，与插件内部缓存无关 ——
@@ -2567,8 +2575,8 @@ export function apply (ctx, config) {
             speechSeq += 1
             speechLatest = { seq: speechSeq, name: key, durationMs, text: probeText }
             hub.broadcast(withSettings(machine.snapshot()))
-            played = true
-            boot('动态语音探测成功，已交付播放')
+            delivered = true
+            boot('动态语音探测成功，已交付 exe 播放')
           }
         } catch (error) {
           logger.warn?.(`zhuang-fangyi-pet: 探测语音写入失败：${error?.message ?? error}`)
@@ -2579,7 +2587,10 @@ export function apply (ctx, config) {
           mode: status.mode,
           elapsedMs: Date.now() - started,
           durationMs,
-          played,
+          delivered,
+          // 向后兼容：老的面板读 `played`。语义与 `delivered` 相同（= 已交付），
+          // 不是"已出声" —— 别再拿它当成功判据。
+          played: delivered,
           // 写完**重新数盘**（不是 `+1`）：覆盖同名缓存时条数不变，见 speechCacheCount。
           status: { ...status, cached: speechCacheCount() }
         }
