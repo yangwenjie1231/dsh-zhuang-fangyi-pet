@@ -545,6 +545,43 @@ ok('⭐ 关键事件都有语音（番茄钟与完成提醒是用户点名的功
   }
 })
 
+ok('⭐⭐ 台词表里没有"结尾中文省略号"（合成会得到近乎静音的音频）', () => {
+  // 实测踩过：`让我想想……` 合成出来是 **-45.7 dB / 0.78 秒**（近乎静音），
+  // 而同一句改成 `让我想想...` 或 `让我想想` 就是正常的 -24.8 dB / 1.22 秒。
+  // 重合成两次结果**完全一样** → 是文本触发，不是随机失败。
+  // 句中省略号没事（`嗯……我理一理。` = -26.3 dB）。
+  //
+  // 危害在于它**静默**：wav 照常生成、长度正常、构建与其它测试全绿，
+  // 只有耳朵能发现 —— 而中招的恰好是 `agent/thinking`（最高频事件）。
+  //
+  // 这里与 `tools/gen-voice-lines.cjs` 里的构建期守卫**双保险**：
+  // 那边挡在生成前，这边挡在提交前（有人手改 voice-lines.json 也能拦住）。
+  const src = JSON.parse(fs.readFileSync(path.join(ROOT, 'tools', 'voice-lines.json'), 'utf8'))
+  const bad = src.lines.filter(l => /…+\s*$/.test(l.text))
+  assert.deepEqual(bad.map(l => `${l.name}: ${l.text}`), [],
+    '这些台词以中文省略号结尾，合成会近乎静音（改成 `...` 或句号）')
+})
+
+ok('⭐ 台词条数足够"换着说"（高频事件 ≥3 条，防单调）', () => {
+  // 用户反馈："当前主体的变化度还是比较少（包括语音），就是比较单调吧"。
+  // 改前 `agent/thinking` 只有 **2 条**，而它恰恰每次思考都放 —— 精确地循环，
+  // 听两次就腻。另有 9 个事件各只有 1 条。
+  const src = JSON.parse(fs.readFileSync(path.join(ROOT, 'tools', 'voice-lines.json'), 'utf8'))
+  const by = {}
+  for (const l of src.lines) by[l.event] = (by[l.event] ?? 0) + 1
+
+  // 高频事件：思考 / 干活 / 完成 / 回复 / 出错 / 点击 —— 每条都得有得换
+  for (const ev of ['agent/thinking', 'agent/working', 'turn/complete',
+    'chat/reply', 'agent/error', 'pet/click']) {
+    assert.ok((by[ev] ?? 0) >= 3,
+      `高频事件 ${ev} 只有 ${by[ev] ?? 0} 条台词，会明显重复（应 ≥3）`)
+  }
+  // 事件**类型**覆盖：exe 会说的每个事件都不该是"独一句"
+  const singles = Object.entries(by).filter(([, n]) => n === 1).map(([k]) => k)
+  assert.ok(singles.length <= 1,
+    `这些事件只有 1 条台词，听两次就腻：${singles.join(', ')}`)
+})
+
 /* ══════════════════════════════════════════════════════════════════════════
  * 汇总
  * ══════════════════════════════════════════════════════════════════════════ */

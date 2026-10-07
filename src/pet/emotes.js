@@ -38,9 +38,6 @@ export const EMOTE_BY_KEY = {
     'bubble/17-yay.png',                    // 好耶
     'bubble/09-finger-heart.png',           // 比心
     'bubble/15-cheer-up.png',               // 加油
-    'bubble/star-eyes.gif',                 // 变成金色星星眼（动图）
-    'bubble/all-ok.gif',                    // 双手 OK、搞定
-    'bubble/cheerful.gif',                  // 微笑着张嘴、开心
     'bubble/23-you-are-the-best.png',       // 你最好了
     'bubble/new/13-so-good.png',            // 太中啦
     'bubble/new/14-so-strong.png',          // ！强强！
@@ -51,7 +48,6 @@ export const EMOTE_BY_KEY = {
   ],
   'notify-complete': [
     'bubble/17-yay.png',                    // 好耶
-    'bubble/all-ok.gif',                    // 双手 OK、搞定
     'bubble/muscle.gif',                    // 秀肌肉（"看我的"）
     'bubble/new/13-so-good.png',            // 太中啦
     'bubble/23-you-are-the-best.png',       // 你最好了
@@ -65,7 +61,6 @@ export const EMOTE_BY_KEY = {
   working: [
     'bubble/21-at-work.png',                // 工作中
     'bubble/new/19-slacking.png',           // 摸鱼ing
-    'bubble/megaphone.gif',                 // 举喇叭喊（"我在忙！"）
     'bubble/new/06-brain-overload.png',     // 庄脑过载
     'bubble/new/07-wants.png',              // 庄想要
     'bubble/25-reading.png'                 // 看书（无文字）
@@ -75,9 +70,6 @@ export const EMOTE_BY_KEY = {
   thinking: [
     'bubble/18-confused.png',               // 有点懵
     'bubble/starry-formula.gif',            // 星空公式（满屏公式的"看不懂"；动图）
-    'bubble/stunned.gif',                   // 圆睁大眼、冷汗（"啊？"）
-    'bubble/dizzy.gif',                     // 双眼变成蚊香漩涡（晕头转向）
-    'bubble/listless.gif',                  // 双眼半睁、无精打采
     'bubble/new/06-brain-overload.png',
     'bubble/new/01-bored.png',              // 庄很无聊
     'bubble/25-reading.png'
@@ -85,10 +77,6 @@ export const EMOTE_BY_KEY = {
 
   // ── 等你处理：想要、得到、无聊（不要用庆祝类，会误导）──────────────────
   waiting: [
-    'bubble/follow-me.gif',                 // 举牌「求关注！」
-    'bubble/hungry.gif',                    // 端碗求投喂（"该理我了"）
-    'bubble/please.gif',                    // 双手合十拜托
-    'bubble/excited.gif',                   // 睁大眼微笑、期待
     'bubble/new/07-wants.png',              // 庄想要
     'bubble/new/01-bored.png',
     'bubble/new/15-so-loud.png',            // 庄一直响（提醒感）
@@ -99,8 +87,6 @@ export const EMOTE_BY_KEY = {
   error: [
     'bubble/22-annoyed.png',                // 好气人哦
     'bubble/angry-charge.gif',              // 生气蓄力→爆发（动图）
-    'bubble/knife.gif',                     // 举小刀挡在脸前（"再惹我试试"）
-    'bubble/road-rage.gif',                 // 开车路怒（赶路中）
     'bubble/sunglasses.gif',                // 墨镜流泪（强颜欢笑）
     'bubble/new/20-unhappy.png',            // 庄不开心
     'bubble/new/10-hate-you.png',           // 庄讨厌你
@@ -110,7 +96,6 @@ export const EMOTE_BY_KEY = {
   'tool/failed': [
     'bubble/22-annoyed.png',
     'bubble/angry-charge.gif',              // 一肚子火正好对上"工具炸了"
-    'bubble/road-rage.gif',
     'bubble/new/20-unhappy.png',
     'bubble/new/18-disgusted.png'
   ],
@@ -118,7 +103,6 @@ export const EMOTE_BY_KEY = {
   // ── 用户发来消息：打招呼、爱心、想你 ─────────────────────────────────────
   'inbox/inserted': [
     'bubble/11-hi.png',                     // hi～
-    'bubble/cheerful.gif',                  // 微笑着张嘴（打招呼）
     'bubble/08-love-you.png',               // 爱你哦
     'bubble/09-finger-heart.png',
     'bubble/new/08-miss-you.png',           // 庄想你了
@@ -127,7 +111,6 @@ export const EMOTE_BY_KEY = {
   ],
   listening: [
     'bubble/11-hi.png',
-    'bubble/smile-soft.gif',                // 歪头温柔微笑
     'bubble/13-wink.png',                   // 眨眼
     'bubble/10-blep.png',                   // 略略略（熟人打趣）
     'bubble/new/16-knock-knock.png',
@@ -137,10 +120,6 @@ export const EMOTE_BY_KEY = {
   // ── 空闲 / 睡觉：摸鱼、无聊、睡 ──────────────────────────────────────────
   idle: [
     'bubble/new/19-slacking.png',           // 摸鱼ing
-    'bubble/watermelon.gif',                // 抱着西瓜吃瓜（围观/闲）
-    'bubble/listless.gif',                  // 无精打采
-    'bubble/cat-paws.gif',                  // 猫耳猫爪（卖萌）
-    'bubble/content.gif',                   // 闭眼弯月笑、满足
     'bubble/new/01-bored.png',
     'bubble/gif-24.png',                    // 睡觉zzz（无文字）
     'bubble/new/11-sneak-snack.png',        // 庄偷吃外卖
@@ -150,7 +129,6 @@ export const EMOTE_BY_KEY = {
     'bubble/gif-29.png'                     // 抱小宠
   ],
   sleeping: [
-    'bubble/sleepy-zzz.gif',                // 躺床上盖被子（动图）
     'bubble/gif-24.png',                    // 睡觉zzz
     'bubble/new/03-dazed.png'               // 哦呀斯密
   ],

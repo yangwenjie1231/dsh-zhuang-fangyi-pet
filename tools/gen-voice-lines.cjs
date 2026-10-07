@@ -52,7 +52,9 @@ const lines = [
   { name: 'waiting-2', event: 'attention/approval', source: 'synth', text: '管理员，这里需要你定一下。',
     why: '审批轮换。说清为什么叫你，比只说等你更有用。' },
 
-  { name: 'thinking-1', event: 'agent/thinking', source: 'synth', text: '让我想想……',
+  // ⚠️ 结尾**不能**用中文省略号 `……`（实测 synth.py 会产出近乎静音的 wav）。
+  // 详见文件末尾 `assertNoTrailingEllipsis()`。
+  { name: 'thinking-1', event: 'agent/thinking', source: 'synth', text: '让我想想...',
     why: '这条才是「让我想想」的正确位置 —— v1 把它放在回复到达时，时序倒置（话都说完了才说这句）。' },
   { name: 'thinking-2', event: 'agent/thinking', source: 'synth', text: '嗯……我理一理。',
     why: '思考轮换。' },
@@ -108,7 +110,98 @@ const lines = [
     text: '好，那我继续了。', why: '你处理完审批后她接着干 —— 有始有终，v1 没覆盖。' },
   { name: 'idle-long', event: 'pet/idle-long', source: 'synth',
     text: '闲下来反而有点不习惯……要不要找点事做？',
-    why: '长时间空闲时的一句（低频，避免吵闹）。' }
+    why: '长时间空闲时的一句（低频，避免吵闹）。' },
+
+  // ── v3 扩充（用户 2026-10-07："当前主体的变化度还是比较少（包括语音），
+  //    就是比较单调吧"）────────────────────────────────────────────────────
+  //
+  // 实测痛点：`agent/thinking` **只有 2 条**，而它恰恰是最高频的（每次思考都放）；
+  // 另有 9 个事件各只有 1 条 —— 听两次就腻。
+  //
+  // 写作纪律与既有 29 条一致：人设是"冷静、务实、话少、关心你的课题"，
+  // 短句为主（8~20 字，合成 2~8 秒；且 `speechMaxChars` 默认 60 字会截断）。
+  // **不重复既有句的意思** —— 补台词是为了"换着说"，不是换词说同一件事。
+
+  // 思考（2 → 6）：最高频，最需要变化
+  { name: 'thinking-3', event: 'agent/thinking', source: 'synth', text: '这个问题……有点意思。',
+    why: '思考轮换。她遇到有意思的难题会来精神 —— 不是抱怨，是起兴致。' },
+  { name: 'thinking-4', event: 'agent/thinking', source: 'synth', text: '先别打断，我快抓到了。',
+    why: '思考轮换。她的思考是"抓线索"式的，与"我理一理"不同。' },
+  { name: 'thinking-5', event: 'agent/thinking', source: 'synth', text: '让我把条件捋一遍。',
+    why: '思考轮换 —— 研究员本能：先摆条件再下判断。' },
+  { name: 'thinking-6', event: 'agent/thinking', source: 'synth', text: '嗯，有个想法，验证一下。',
+    why: '思考轮换。她的口头禅是"验证"而不是"我觉得"。' },
+
+  // 干活（3 → 6）
+  { name: 'work-start-4', event: 'agent/working', source: 'synth', text: '在做了，稍等。',
+    why: '干活轮换 —— 最短的一句，适合连轴转时不啰嗦。' },
+  { name: 'work-start-5', event: 'agent/working', source: 'synth', text: '这部分交给我，你去忙别的。',
+    why: '干活轮换。她的担当：主动分走一半，不让你守着。' },
+  { name: 'work-start-6', event: 'agent/working', source: 'synth', text: '思路通了，剩下的就是体力活。',
+    why: '干活轮换 —— 把"难"和"烦"分开说，是她评估任务的方式。' },
+
+  // 完成（4 → 7）
+  { name: 'done-5', event: 'turn/complete', source: 'synth', text: '喏，按你要的改好了。',
+    why: '完成轮换。呼应"按你要的"—— 强调是照你的要求做的。' },
+  { name: 'done-6', event: 'turn/complete', source: 'synth', text: '这一版应该没有问题了。',
+    why: '完成轮换 —— 她的措辞留有余地（"应该"），不把话说满。' },
+  { name: 'done-7', event: 'turn/complete', source: 'synth', text: '收工。你验收一下。',
+    why: '完成轮换 —— 交付口吻，把最后一步交回给你。' },
+
+  // 聊天回复（3 → 6）
+  { name: 'chat-reply-4', event: 'chat/reply', source: 'synth', text: '我说完了，你怎么想？',
+    why: '回复轮换 —— 说完了还问一句，把话头递回去。' },
+  { name: 'chat-reply-5', event: 'chat/reply', source: 'synth', text: '大概就是这个意思。',
+    why: '回复轮换 —— 口语化的收束，比"我说完了"更轻。' },
+  { name: 'chat-reply-6', event: 'chat/reply', source: 'synth', text: '先这样，不够再问我。',
+    why: '回复轮换 —— 留个口子，不把对话做死。' },
+
+  // 出错（3 → 6）
+  { name: 'error-4', event: 'agent/error', source: 'synth', text: '等一下，这里不对劲。',
+    why: '出错轮换 —— 先叫停再排查，比"出问题了"更急一点。' },
+  { name: 'error-5', event: 'agent/error', source: 'synth', text: '报错了。别急，我看看。',
+    why: '出错轮换 —— 一半报信一半安抚，符合她稳住场面的习惯。' },
+  { name: 'error-6', event: 'agent/error', source: 'synth', text: '这个错我见过，有办法。',
+    why: '出错轮换 —— 给出"能解决"的信号，而不是只报告坏消息。' },
+
+  // ── 原先各只有 1 条的事件（1 → 3）：听两次就腻 ──────────────────────────
+  { name: 'wake-2', event: 'pet/wake', source: 'synth', text: '来了。今天从哪儿开始？',
+    why: '出现轮换 —— 直接问进度，符合她一上来就想干活。' },
+  { name: 'wake-3', event: 'pet/wake', source: 'synth', text: '我在这儿。有什么要做的？',
+    why: '出现轮换 —— 报到 + 待命，简洁。' },
+  { name: 'session-start-2', event: 'session/start', source: 'synth', text: '新的一页，从哪儿说起？',
+    why: '新会话轮换。' },
+  { name: 'session-start-3', event: 'session/start', source: 'synth', text: '好，我准备好了。',
+    why: '新会话轮换 —— 最短的一条，不打扰。' },
+  { name: 'idle-long-2', event: 'pet/idle-long', source: 'synth', text: '安静了这么久……在想什么呢？',
+    why: '空闲轮换 —— 关心你在想什么，而不是催你干活。' },
+  { name: 'idle-long-3', event: 'pet/idle-long', source: 'synth', text: '没事做的话，我陪你待会儿。',
+    why: '空闲轮换 —— 她的陪伴是不打扰式的。' },
+  { name: 'approval-done-2', event: 'attention/cleared', source: 'synth', text: '好，那这件事翻篇了。',
+    why: '审批结束轮换。' },
+  { name: 'approval-done-3', event: 'attention/cleared', source: 'synth', text: '收到，我接着做。',
+    why: '审批结束轮换 —— 最短，衔接回工作。' },
+  { name: 'pomodoro-start-2', event: 'pomodoro/start', source: 'synth', text: '计时开始了，专心。',
+    why: '专注开始轮换 —— 计时场景下她的话要短。' },
+  { name: 'pomodoro-break-end-2', event: 'pomodoro/break-end', source: 'synth', text: '休息结束，回来吧。',
+    why: '短休息结束轮换。' },
+  { name: 'pomodoro-long-end-2', event: 'pomodoro/long-end', source: 'synth', text: '睡饱了，继续。',
+    why: '长休息结束轮换。' },
+  { name: 'pomodoro-long-start-2', event: 'pomodoro/long-start', source: 'synth',
+    text: '这一轮辛苦你了，去放松一下。',
+    why: '长休息开始轮换 —— 认可这一轮的付出。' },
+  { name: 'feed-3', event: 'pet/feed', source: 'synth', text: '谢谢，我正好有点饿。',
+    why: '投喂轮换 —— 接受得自然，不像客套。' },
+  { name: 'sleepy-3', event: 'pet/sleeping', source: 'synth', text: '撑不住了……我睡一小会儿。',
+    why: '睡眠轮换 —— "撑不住"比"有点困"更累一档，对应更长的空闲。' },
+  { name: 'pet-head-3', event: 'pet/pet-head', source: 'synth', text: '嗯……就一下。',
+    why: '摸头轮换 —— 嘴上设限、其实没躲，与 pet-head-2 的"别闹"同一路子但更软。' },
+  { name: 'praise-4', event: 'pet/praise', source: 'synth', text: '这话我记下了。',
+    why: '被夸轮换 —— 不推辞也不得意，收下。' },
+  { name: 'click-6', event: 'pet/click', source: 'synth', text: '在的，你说。',
+    why: '点击轮换 —— 最短的应答，高频点击时不啰嗦。' },
+  { name: 'click-7', event: 'pet/click', source: 'synth', text: '嗯？需要我做什么？',
+    why: '点击轮换 —— 把点击理解成"有活要派"，符合她随时待命的状态。' }
 ]
 
 const doc = {
@@ -143,6 +236,36 @@ const doc = {
 }
 
 const out = path.join(__dirname, 'voice-lines.json')
+
+/**
+ * ⚠️ **结尾不能用中文省略号 `……`** —— 实测 `synth.py` 会产出**近乎静音**的 wav。
+ *
+ * 发现经过：扩充台词后扫全量音量，`thinking-1`（"让我想想……"）只有 **-45.7 dB**，
+ * 而其余 73 条都在 -20 ~ -27 dB。它不是随机失败 —— 重合成两次结果**完全一样**
+ * （都是 0.78 秒 / -45.7 dB），是**文本触发**。对照实验：
+ *
+ *     让我想想……   → -45.7 dB / 0.78s   ❌ 近乎静音
+ *     让我想想...   → -24.8 dB / 1.22s   ✅
+ *     让我想想      → -24.8 dB / 1.22s   ✅
+ *     嗯……我理一理。 → -26.3 dB / 1.90s   ✅ 句中的省略号没事
+ *
+ * 所以只有**结尾**的 `……` 出问题。危害在于它**静默**：wav 照常生成、有正常长度、
+ * 构建与测试全绿，只有耳朵能发现 —— 而这条恰好是 `agent/thinking`（最高频）。
+ *
+ * 这里直接**拒绝生成**，把问题挡在构建期。句中的 `……` 照常允许（实测正常，
+ * 且它是她说话停顿的一部分，删了会失去语气）。
+ */
+function assertNoTrailingEllipsis (all) {
+  const bad = all.filter(l => /…+\s*$/.test(l.text))
+  if (bad.length) {
+    console.error('❌ 这些台词以中文省略号结尾，合成会得到近乎静音的音频：')
+    for (const l of bad) console.error(`   ${l.name}  ${l.text}`)
+    console.error('   改法：结尾用 `...`（半角），或改成句号。句中的 `……` 可以保留。')
+    process.exit(1)
+  }
+}
+assertNoTrailingEllipsis(lines)
+
 fs.writeFileSync(out, JSON.stringify(doc, null, 2) + '\n', 'utf8')
 
 const real = lines.filter(l => l.source === 'real').length

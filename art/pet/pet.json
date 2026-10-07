@@ -166,15 +166,6 @@
       "w": 256
     },
     {
-      "file": "bubble/stunned.gif",
-      "frameMs": 40,
-      "frames": 25,
-      "h": 256,
-      "hasText": false,
-      "opaque": false,
-      "w": 256
-    },
-    {
       "file": "bubble/muscle.gif",
       "frameMs": 40,
       "frames": 25,
@@ -184,160 +175,7 @@
       "w": 256
     },
     {
-      "file": "bubble/content.gif",
-      "frameMs": 40,
-      "frames": 25,
-      "h": 256,
-      "hasText": false,
-      "opaque": false,
-      "w": 256
-    },
-    {
       "file": "bubble/sunglasses.gif",
-      "frameMs": 40,
-      "frames": 25,
-      "h": 256,
-      "hasText": false,
-      "opaque": false,
-      "w": 256
-    },
-    {
-      "file": "bubble/cat-paws.gif",
-      "frameMs": 40,
-      "frames": 25,
-      "h": 256,
-      "hasText": false,
-      "opaque": false,
-      "w": 256
-    },
-    {
-      "file": "bubble/listless.gif",
-      "frameMs": 40,
-      "frames": 25,
-      "h": 256,
-      "hasText": false,
-      "opaque": false,
-      "w": 256
-    },
-    {
-      "file": "bubble/cheerful.gif",
-      "frameMs": 40,
-      "frames": 25,
-      "h": 256,
-      "hasText": false,
-      "opaque": false,
-      "w": 256
-    },
-    {
-      "file": "bubble/watermelon.gif",
-      "frameMs": 40,
-      "frames": 25,
-      "h": 256,
-      "hasText": false,
-      "opaque": false,
-      "w": 256
-    },
-    {
-      "file": "bubble/sleepy-zzz.gif",
-      "frameMs": 40,
-      "frames": 25,
-      "h": 256,
-      "hasText": false,
-      "opaque": false,
-      "w": 256
-    },
-    {
-      "file": "bubble/star-eyes.gif",
-      "frameMs": 40,
-      "frames": 25,
-      "h": 256,
-      "hasText": false,
-      "opaque": false,
-      "w": 256
-    },
-    {
-      "file": "bubble/smile-soft.gif",
-      "frameMs": 40,
-      "frames": 25,
-      "h": 256,
-      "hasText": false,
-      "opaque": false,
-      "w": 256
-    },
-    {
-      "file": "bubble/knife.gif",
-      "frameMs": 40,
-      "frames": 25,
-      "h": 256,
-      "hasText": false,
-      "opaque": false,
-      "w": 256
-    },
-    {
-      "file": "bubble/please.gif",
-      "frameMs": 40,
-      "frames": 25,
-      "h": 256,
-      "hasText": false,
-      "opaque": false,
-      "w": 256
-    },
-    {
-      "file": "bubble/dizzy.gif",
-      "frameMs": 40,
-      "frames": 25,
-      "h": 256,
-      "hasText": false,
-      "opaque": false,
-      "w": 256
-    },
-    {
-      "file": "bubble/follow-me.gif",
-      "frameMs": 40,
-      "frames": 25,
-      "h": 256,
-      "hasText": true,
-      "opaque": false,
-      "w": 256
-    },
-    {
-      "file": "bubble/hungry.gif",
-      "frameMs": 40,
-      "frames": 25,
-      "h": 256,
-      "hasText": false,
-      "opaque": false,
-      "w": 256
-    },
-    {
-      "file": "bubble/megaphone.gif",
-      "frameMs": 40,
-      "frames": 25,
-      "h": 256,
-      "hasText": false,
-      "opaque": false,
-      "w": 256
-    },
-    {
-      "file": "bubble/road-rage.gif",
-      "frameMs": 40,
-      "frames": 25,
-      "h": 256,
-      "hasText": false,
-      "opaque": false,
-      "w": 256
-    },
-    {
-      "file": "bubble/excited.gif",
-      "frameMs": 40,
-      "frames": 25,
-      "h": 256,
-      "hasText": false,
-      "opaque": false,
-      "w": 256
-    },
-    {
-      "file": "bubble/all-ok.gif",
       "frameMs": 40,
       "frames": 25,
       "h": 256,
@@ -487,6 +325,11 @@
     }
   ],
   "files": {
+    "error-2.png": {
+      "frameMs": 40,
+      "frameWidth": 256,
+      "frames": 25
+    },
     "error.png": {
       "frameMs": 30,
       "frameWidth": 256,
@@ -507,6 +350,21 @@
       "frameWidth": 256,
       "frames": 33
     },
+    "happy-5.png": {
+      "frameMs": 40,
+      "frameWidth": 256,
+      "frames": 25
+    },
+    "happy-6.png": {
+      "frameMs": 40,
+      "frameWidth": 256,
+      "frames": 25
+    },
+    "happy-7.png": {
+      "frameMs": 40,
+      "frameWidth": 256,
+      "frames": 25
+    },
     "happy.png": {
       "frameMs": 30,
       "frameWidth": 256,
@@ -522,6 +380,16 @@
       "frameWidth": 288,
       "frames": 1
     },
+    "idle-4.png": {
+      "frameMs": 40,
+      "frameWidth": 256,
+      "frames": 25
+    },
+    "idle-5.png": {
+      "frameMs": 40,
+      "frameWidth": 256,
+      "frames": 25
+    },
     "idle.png": {
       "frameMs": 30,
       "frameWidth": 256,
@@ -532,10 +400,25 @@
       "frameWidth": 256,
       "frames": 33
     },
+    "listening-3.png": {
+      "frameMs": 40,
+      "frameWidth": 256,
+      "frames": 25
+    },
+    "listening-4.png": {
+      "frameMs": 40,
+      "frameWidth": 256,
+      "frames": 25
+    },
     "listening.png": {
       "frameMs": 0,
       "frameWidth": 288,
       "frames": 1
+    },
+    "sleeping-2.png": {
+      "frameMs": 40,
+      "frameWidth": 256,
+      "frames": 25
     },
     "sleeping.png": {
       "frameMs": 0,
@@ -547,6 +430,21 @@
       "frameWidth": 241,
       "frames": 1
     },
+    "thinking-3.png": {
+      "frameMs": 40,
+      "frameWidth": 256,
+      "frames": 25
+    },
+    "thinking-4.png": {
+      "frameMs": 40,
+      "frameWidth": 256,
+      "frames": 25
+    },
+    "thinking-5.png": {
+      "frameMs": 40,
+      "frameWidth": 256,
+      "frames": 25
+    },
     "thinking.png": {
       "frameMs": 30,
       "frameWidth": 256,
@@ -556,6 +454,21 @@
       "frameMs": 0,
       "frameWidth": 256,
       "frames": 1
+    },
+    "waiting-3.png": {
+      "frameMs": 40,
+      "frameWidth": 256,
+      "frames": 25
+    },
+    "waiting-4.png": {
+      "frameMs": 40,
+      "frameWidth": 256,
+      "frames": 25
+    },
+    "waiting-5.png": {
+      "frameMs": 40,
+      "frameWidth": 256,
+      "frames": 25
     },
     "waiting.png": {
       "frameMs": 30,
@@ -567,6 +480,11 @@
       "frameWidth": 256,
       "frames": 33
     },
+    "waking-3.png": {
+      "frameMs": 40,
+      "frameWidth": 256,
+      "frames": 25
+    },
     "waking.png": {
       "frameMs": 0,
       "frameWidth": 239,
@@ -576,6 +494,16 @@
       "frameMs": 30,
       "frameWidth": 256,
       "frames": 44
+    },
+    "working-3.png": {
+      "frameMs": 40,
+      "frameWidth": 256,
+      "frames": 25
+    },
+    "working-4.png": {
+      "frameMs": 40,
+      "frameWidth": 256,
+      "frames": 25
     },
     "working.png": {
       "frameMs": 0,
@@ -662,41 +590,59 @@
   },
   "variants": {
     "error": [
-      "error.png"
+      "error.png",
+      "error-2.png"
     ],
     "happy": [
       "happy.png",
       "happy-2.png",
       "happy-3.png",
-      "happy-4.png"
+      "happy-4.png",
+      "happy-5.png",
+      "happy-6.png",
+      "happy-7.png"
     ],
     "idle": [
       "idle.png",
       "idle-2.png",
-      "idle-3.png"
+      "idle-3.png",
+      "idle-4.png",
+      "idle-5.png"
     ],
     "listening": [
       "listening.png",
-      "listening-2.png"
+      "listening-2.png",
+      "listening-3.png",
+      "listening-4.png"
     ],
     "sleeping": [
-      "sleeping.png"
+      "sleeping.png",
+      "sleeping-2.png"
     ],
     "thinking": [
       "thinking.png",
-      "thinking-2.png"
+      "thinking-2.png",
+      "thinking-3.png",
+      "thinking-4.png",
+      "thinking-5.png"
     ],
     "waiting": [
       "waiting.png",
-      "waiting-2.png"
+      "waiting-2.png",
+      "waiting-3.png",
+      "waiting-4.png",
+      "waiting-5.png"
     ],
     "waking": [
       "waking.png",
-      "waking-2.png"
+      "waking-2.png",
+      "waking-3.png"
     ],
     "working": [
       "working.png",
-      "working-2.png"
+      "working-2.png",
+      "working-3.png",
+      "working-4.png"
     ]
   },
   "version": 1

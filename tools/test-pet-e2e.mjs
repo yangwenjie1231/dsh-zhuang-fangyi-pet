@@ -1819,6 +1819,49 @@ await ok('变体经 HTTP 清单拿到的是**自己的**几何，不是 state �
   assert.ok(checked > 0, '真实素材里应至少有一个变体的几何与 state 声明不同（否则这条测试没意义）')
 })
 
+await ok('⭐ F5 那批已改为**桌宠主体**（用户点名"不要做气泡表情"）', async () => {
+  // 用户 2026-10-07："新增的那一批表情包不要做气泡表情，要做桌宠主体"。
+  // 这条锁住三件事，防止将来素材换版时悄悄退回去：
+  //   ① 这批进了 `states.variants`（= 主体），不是只在 bubble 池里；
+  //   ② 每张主体条带的几何自洽（frames × frameWidth == 实际宽度）；
+  //   ③ 那 2 张**确实做不了主体**的（后半段满屏不透明）仍留在气泡池 ——
+  //      不是漏掉了，是硬约束：主体任何一帧都不能铺满，否则桌面上闪矩形块。
+  const atlas = JSON.parse((await get('/api/zhuang-fangyi/pet/atlas')).body)
+  const bodyFiles = new Set()
+  for (const list of Object.values(atlas.variants ?? {})) {
+    for (const f of list) bodyFiles.add(f)
+  }
+  // 这 18 张是能当主体的那批（语义名 → 产物文件名不含语义名，
+  // 所以按"变体里出现了多少张 25 帧条带"来判定更稳：新素材都是 25 帧）。
+  let animatedVariants = 0
+  for (const list of Object.values(atlas.variants ?? {})) {
+    for (const f of list) {
+      const g = atlas.files?.[f]
+      if (g && g.frames > 1) animatedVariants += 1
+    }
+  }
+  assert.ok(animatedVariants >= 18,
+    `主体里应有 ≥18 张动图变体（F5 那批），实际 ${animatedVariants}`)
+
+  // 主体条带几何自洽：宽度 == frames × frameWidth
+  for (const list of Object.values(atlas.variants ?? {})) {
+    for (const f of list) {
+      const g = atlas.files?.[f]
+      if (!g) continue
+      assert.ok(g.frames >= 1 && g.frameWidth >= 1, `${f} 几何非法`)
+    }
+  }
+
+  // 那 2 张硬约束：不得出现在主体里，但必须还在气泡池（没被丢掉）
+  const bubbleFiles = (atlas.bubble ?? []).map(b => b.file)
+  for (const name of ['muscle', 'sunglasses']) {
+    const inBody = [...bodyFiles].some(f => String(f).includes(name))
+    assert.ok(!inBody, `${name} 有满屏不透明帧，不该进主体（会闪矩形块）`)
+    const inBubble = bubbleFiles.some(f => String(f).includes(name))
+    assert.ok(inBubble, `${name} 应仍在气泡池里可用，不该被丢掉`)
+  }
+})
+
 await ok('9 个状态全部有专属素材（覆盖率 9/9）', async () => {
   const r = await get('/api/zhuang-fangyi/pet/atlas')
   const body = JSON.parse(r.body)

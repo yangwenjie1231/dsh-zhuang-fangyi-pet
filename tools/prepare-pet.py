@@ -157,15 +157,15 @@ WX_NAMES = {
 # F2/F3 全部归 `BUBBLE_F2` / `BUBBLE_F3`，进气泡池。
 # 9 个状态**全部覆盖**（sleeping 由 wx6 趴桌睡着撑起）。
 STATE_PLAN = (
-    ('waking',    ('cheer', 'gif:07')),
-    ('idle',      ('gif:07', 'shy', 'wink')),
-    ('listening', ('wink', 'gif:01')),
-    ('thinking',  ('gif:04', 'starry')),
-    ('working',   ('writing', 'gif:03')),
-    ('waiting',   ('gif:01', 'shy')),
-    ('happy',     ('gif:06', 'joy', 'cheer', 'gif:07')),
-    ('error',     ('gif:02',)),
-    ('sleeping',  ('sleepy',)),
+    ('waking',    ('cheer', 'gif:07', 'cheerful')),
+    ('idle',      ('gif:07', 'shy', 'wink', 'content', 'smile-soft')),
+    ('listening', ('wink', 'gif:01', 'excited', 'cat-paws')),
+    ('thinking',  ('gif:04', 'starry', 'dizzy', 'stunned', 'listless')),
+    ('working',   ('writing', 'gif:03', 'megaphone', 'road-rage')),
+    ('waiting',   ('gif:01', 'shy', 'follow-me', 'hungry', 'please')),
+    ('happy',     ('gif:06', 'joy', 'cheer', 'gif:07', 'star-eyes', 'all-ok', 'watermelon')),
+    ('error',     ('gif:02', 'knife')),
+    ('sleeping',  ('sleepy', 'sleepy-zzz')),
 )
 
 # ── 气泡池（**表情包**）= F2 + F3 ────────────────────────────────────────────
@@ -240,42 +240,92 @@ ANIM_BY_FILE = {
 #
 # 与 F3b 同一个机制（`ANIM_BY_FILE`），单独一张表只是为了**看得清来源与批次**。
 #
-# ⚠️ 关于"要不要放进 `states`（人物主体）"：**不放**。这批是**另一个画风家族**
-# —— 白绿作战服、粗描边、平涂、Q 版胸像；而 F1（现主体）是细笔触、深色作战服、
-# 半身像。本文件上方那条"F2/F3 不得进 states（风格会跳）"的纪律就是为这个写的：
-# 主体是**连续播放**的，混画风会让人物在桌面上"变装跳帧"。
-# 用户明确表示这批都要用上 → 全部进**气泡池**（气泡本来就是一张张独立贴纸，
-# 风格自成一派没问题，F3/F4 早有先例）。
+# ⚠️ **2026-10-07 用户改主意**：这批"不要做气泡表情，要做桌宠主体"。
+# 于是其中 18 张改走主体那条路（`F5_BODY_SEMANTICS` + `STATE_PLAN`），
+# 剩 2 张（`muscle` / `sunglasses`）因为**后半段是满屏不透明特效**，
+# 当主体会在桌面上闪出矩形块 → 留在气泡池（气泡本来就允许满幅不透明）。
+# 这样"都要用上"和"主体不能有矩形块"两个要求同时满足。
+#
+# 关于画风：早先我以"另一个画风家族，混进主体会变装跳帧"为由把这批全放气泡，
+# 用户明确否掉了那条理由（"我认为新图都是符合的，没有这些要求"）——
+# 风格判断归用户，我只保留**渲染硬约束**（透明占比那条）。
 #
 # `opaque` 不写死 —— 由 `median_opaque_ratio` 按指标判定（见 `OPAQUE_MIN`）。
 BUBBLE_F5 = (
     # (语义名, 源文件名, hasText)
-    ('stunned',      '表情包_30_圆睁大眼嘴巴张成小小.gif', False),   # 惊呆、冷汗
+    # ⚠️ 只剩这 2 张：它们后半段是**满屏不透明特效**，当主体会在桌面上闪矩形块，
+    # 所以留在气泡池（气泡允许满幅不透明）。其余 18 张见 `F5_BODY`。
     ('muscle',       '表情包_31_明黄背景眯眼咧嘴吐舌.gif', False),   # 秀肌肉（明黄底 → 自动判 opaque）
-    ('content',      '表情包_32_闭眼弯月笑脸颊泛红双.gif', False),   # 满足、乖巧
     ('sunglasses',   '表情包_33_戴黑色墨镜单手推镜敬.gif', False),   # 墨镜流泪（强颜欢笑）
-    ('cat-paws',     '表情包_34_头顶冒出粉色猫耳脸颊.gif', False),   # 猫耳猫爪、卖萌
-    ('listless',     '表情包_35_双眼半睁无精打采嘴巴.gif', False),   # 无精打采、咸鱼
-    ('cheerful',     '表情包_36_微笑着张嘴脸颊泛红四.gif', False),   # 开心、招手
-    ('watermelon',   '表情包_37_双手抱着一大块西瓜眯.gif', False),   # 吃瓜、围观
-    ('sleepy-zzz',   '表情包_38_躺床上盖粉色被子闭眼.gif', False),   # 盖被睡觉（Zzz 是装饰，按既有先例不算 hasText）
-    ('star-eyes',    '表情包_39_变成金色星星眼脸红张.gif', False),   # 星星眼、崇拜
-    ('smile-soft',   '表情包_40_空白背景中人物歪头冒.gif', False),   # 歪头温柔微笑
-    ('knife',        '表情包_41_举着一把小刀挡在脸前.gif', False),   # 持刀威胁、杀气
-    ('please',       '表情包_42_闭眼低头脸颊通红双手.gif', False),   # 双手合十拜托
-    ('dizzy',        '表情包_43_双眼变成绿色蚊香漩涡.gif', False),   # 晕头转向
-    ('follow-me',    '表情包_44_双手高举一块白牌牌上.gif', True),    # 举牌「求关注！」→ 文字 baked-in
-    ('hungry',       '表情包_45_双手端着一只白碗闭眼.gif', False),   # 端碗、求投喂
-    ('megaphone',    '表情包_46_举着蓝白扩音喇叭用力.gif', False),   # 拿喇叭喊话
-    ('road-rage',    '表情包_47_驾浅蓝小车从远处一路.gif', False),   # 开车路怒、赶路
-    ('excited',      '表情包_48_先睁着大眼微笑后半段.gif', False),   # 惊喜、期待
-    ('all-ok',       '表情包_49_闭眼开心地笑脸颊泛红.gif', False),   # 双手 OK、搞定
+)
+
+# ── F5b：这批里**当主体**的 18 张（用户 2026-10-07 改的主意）─────────────────
+#
+# 用户原话："新增的那一批表情包不要做气泡表情，要做桌宠主体"。
+#
+# ⚠️ 为什么不能 20 张全进主体：主体有一条**硬判据**（不是审美偏好）——
+# `min_transparent_ratio` 要求**任何一帧都不能铺满不透明像素**，否则播到那一帧，
+# 桌面上会出现一个矩形色块。逐帧量过这 20 张（25 帧/张）：
+#
+#   能当主体（18 张，minT ≥ 3.1%）→ 见下表
+#   不能当主体（2 张，后半段满屏）→ 留在 `BUBBLE_F5`
+#     · muscle     13~24 帧铺满（明黄纯色底）
+#     · sunglasses 15~24 帧铺满（发丝特写撑满画面）
+#
+# 这样"都要用上"和"主体不能有矩形块"两个要求**同时**满足，而不是二选一。
+# `scan_sources` 仍会让这 18 张**过一遍**那条判据（走 `gif` 分支）——
+# 将来素材换版导致某张变实心时，它会掉进 `needs_cutout` 而不是悄悄进主体。
+F5_BODY = (
+    # (语义名, 源文件名)
+    ('stunned',      '表情包_30_圆睁大眼嘴巴张成小小.gif'),   # 惊呆、冷汗
+    ('content',      '表情包_32_闭眼弯月笑脸颊泛红双.gif'),   # 满足、乖巧
+    ('cat-paws',     '表情包_34_头顶冒出粉色猫耳脸颊.gif'),   # 猫耳猫爪、卖萌
+    ('listless',     '表情包_35_双眼半睁无精打采嘴巴.gif'),   # 无精打采、咸鱼
+    ('cheerful',     '表情包_36_微笑着张嘴脸颊泛红四.gif'),   # 开心、招手
+    ('watermelon',   '表情包_37_双手抱着一大块西瓜眯.gif'),   # 吃瓜、围观
+    ('sleepy-zzz',   '表情包_38_躺床上盖粉色被子闭眼.gif'),   # 盖被睡觉
+    ('star-eyes',    '表情包_39_变成金色星星眼脸红张.gif'),   # 星星眼、崇拜
+    ('smile-soft',   '表情包_40_空白背景中人物歪头冒.gif'),   # 歪头温柔微笑
+    ('knife',        '表情包_41_举着一把小刀挡在脸前.gif'),   # 持刀威胁、杀气
+    ('please',       '表情包_42_闭眼低头脸颊通红双手.gif'),   # 双手合十拜托
+    ('dizzy',        '表情包_43_双眼变成绿色蚊香漩涡.gif'),   # 晕头转向
+    ('follow-me',    '表情包_44_双手高举一块白牌牌上.gif'),   # 举牌「求关注！」
+    ('hungry',       '表情包_45_双手端着一只白碗闭眼.gif'),   # 端碗、求投喂
+    ('megaphone',    '表情包_46_举着蓝白扩音喇叭用力.gif'),   # 拿喇叭喊话
+    ('road-rage',    '表情包_47_驾浅蓝小车从远处一路.gif'),   # 开车路怒、赶路
+    ('excited',      '表情包_48_先睁着大眼微笑后半段.gif'),   # 惊喜、期待
+    ('all-ok',       '表情包_49_闭眼开心地笑脸颊泛红.gif'),   # 双手 OK、搞定
 )
 
 # 与 F3b 合流：`scan_sources` 只认一张「文件名 → 语义名」的表。
 F5_BY_FILE = {
     fname: {'semantic': semantic}
     for semantic, fname, _has_text in BUBBLE_F5
+}
+
+# ── F5b：这批里**能当主体**的那些（用户 2026-10-07 改的主意）─────────────────
+#
+# 用户原话："新增的那一批表情包不要做气泡表情，要做桌宠主体"。
+#
+# ⚠️ 为什么不能 20 张全进主体：主体有一条**硬判据**（不是审美偏好）——
+# `min_transparent_ratio` 要求**任何一帧都不能铺满不透明像素**，否则播到那一帧，
+# 桌面上会出现一个矩形色块。逐帧量过这 20 张：
+#
+#   能当主体（18 张，全部 25 帧、minT ≥ 3.1%）：
+#     stunned content cat-paws listless cheerful watermelon sleepy-zzz star-eyes
+#     smile-soft knife please dizzy follow-me hungry megaphone road-rage excited all-ok
+#   不能当主体（2 张，后半段是**满屏特效**）：
+#     muscle     13~24 帧铺满（明黄纯色底）
+#     sunglasses 15~24 帧铺满（发丝特写撑满画面）
+#
+# 那两张**留在气泡池**（气泡本来就允许满幅不透明，F4 那批全是）—— 这样
+# "都要用上"和"主体不能有矩形块"两个要求同时满足，而不是二选一。
+#
+# 主体候选由 `STATE_PLAN` 按**语义名**引用（见那张表），这里只提供
+# 「源文件名 → 语义名」的反查，供 `scan_sources` 把 GIF 登记成主体。
+F5_BODY_BY_FILE = {
+    fname: {'semantic': semantic}
+    for semantic, fname in F5_BODY
 }
 BUBBLE_ANIM = BUBBLE_ANIM + BUBBLE_F5
 ANIM_BY_FILE.update(F5_BY_FILE)
@@ -614,6 +664,26 @@ def discover():
         frames, durations = gif_frames(p)
         mt = min_transparent_ratio(frames)
         still = ANIM_BY_FILE.get(base)
+        body = F5_BODY_BY_FILE.get(base)
+        if body is not None:
+            # F5b：用户改主意了 —— 这批要做**主体**，不是气泡。
+            #
+            # 走 `gif` 这条路（= 主体候选），于是它**照样要过** `min_transparent_ratio`
+            # 判据（下面那个分支）—— 这是**有意的**：那两张后半段满屏不透明的
+            #（muscle / sunglasses）会被判去 `needs_cutout` 而不是悄悄进主体。
+            # 它们仍在 `BUBBLE_F5` 里（`still` 分支），所以照样能在气泡池用上。
+            if mt < SOLID_EPS:
+                solid = sum(1 for f in frames
+                            if f.getchannel('A').histogram()[0] / float(f.width * f.height) < SOLID_EPS)
+                needs_cutout.append({
+                    'name': base, 'reason': 'needsCutout',
+                    'detail': 'F5 登记为主体但有实心帧（%d/%d 帧铺满不透明），'
+                              '播到那帧桌面上会闪矩形块；该张仍在气泡池里可用'
+                              % (solid, len(frames))})
+                continue
+            usable.append({'kind': 'gif', 'semantic': body['semantic'], 'name': base,
+                           'path': p, 'minT': mt, 'frames': len(frames)})
+            continue
         if still is not None:
             # F3b / F5：这张登记为**动态气泡** → 跳过「当状态动画」的判据。
             # 不是放水：它不进 `states`（不在 STATE_PLAN 里），只作为**气泡**出现；
@@ -876,11 +946,24 @@ def prune_unreferenced(referenced, report):
 
     `bubble/` 用 `**` 递归（F4 的产物在 `bubble/new/` 子目录里），否则子目录里的
     孤儿文件永远清不掉。
+
+    ⚠️ **两个坑都踩过，缺一个都会静默失效**：
+
+    ① **扩展名**：原先只写 `*.png` → **动图气泡**（`.gif`）的孤儿永远清不掉。
+       实测：F5 那 18 张从气泡改到主体后，`pet.json` 已不再引用它们，但
+       `bubble/` 里 18 个 `.gif`（**30 MB**）原样留着，还会被 `deploy.ps1`
+       拷进部署副本。"清单里没有了"和"磁盘上没有了"是两件事。
+
+    ② **`recursive=True`**：`bubble/**/*.gif` 在**不加** `recursive=True` 时返回
+       **0 个**（`**` 只当普通目录名），所以子目录里的孤儿（F4 的 `bubble/new/`）
+       一个都删不掉。实测：`glob('bubble\\**\\*.png')` → 20，而加上 recursive → 41。
     """
     removed = []
-    for pat in ('*.png', os.path.join('bubble', '**', '*.png'),
+    for pat in ('*.png', '*.gif',
+                os.path.join('bubble', '**', '*.png'),
+                os.path.join('bubble', '**', '*.gif'),
                 os.path.join('thumbs', '*.png')):
-        for p in sorted(glob.glob(os.path.join(ART, pat))):
+        for p in sorted(glob.glob(os.path.join(ART, pat), recursive=True)):
             rel = os.path.relpath(p, ART)
             if rel not in referenced:
                 os.remove(p)
@@ -1120,7 +1203,11 @@ def main():
     if args.clean:
         # art/pet 整棵树都是本脚本的产出范围，清掉旧图后重生成
         # （`bubble/**` 递归，覆盖 F4 的 `bubble/new/` 子目录）
-        for pat in ('*.png', os.path.join('bubble', '**', '*.png'),
+        # ⚠️ 与 `prune_unreferenced` 同一组坑：`.gif` 要一起清，
+        #    且 `**` **必须**配 `recursive=True`（否则子目录一个都匹配不到）。
+        for pat in ('*.png', '*.gif',
+                    os.path.join('bubble', '**', '*.png'),
+                    os.path.join('bubble', '**', '*.gif'),
                     os.path.join('thumbs', '*.png')):
             for p in glob.glob(os.path.join(ART, pat), recursive=True):
                 os.remove(p)
