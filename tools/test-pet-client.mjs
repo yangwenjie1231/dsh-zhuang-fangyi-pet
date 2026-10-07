@@ -1989,7 +1989,7 @@ ok('⭐ 重排后每个设置控件都还在（防"功能悄悄消失"）', () =
   //
   // v4 把设置页拆成六个页签，所以必须**逐页收集再合并** ——
   // 只渲染一页会漏掉另外五页的控件，而"页签化把功能弄丢"正是这一步最大的风险。
-  const TABS = ['appearance', 'bubble', 'behavior', 'voice', 'chat', 'diag']
+  const TABS = ['appearance', 'bubble', 'behavior', 'voice', 'chat', 'today', 'diag']
   const joined = TABS
     .map(tab => collectStrings(renderSectionTree({ pomodoro: true, ttsResident: false }, tab)).join('|'))
     .join('|')
@@ -2091,19 +2091,23 @@ ok('⭐ 对话文字大小：独立滑杆（用户点名"对话里的文字大�
 ok('⭐⭐ 页签与卡片按"用户找东西的心智"排（不再按开发历史）', () => {
   // 旧版是一列 7 个分组平铺（实测 2556px、三屏）。v4 拆成六页，每页若干张卡片。
   // 这里断言**每一页的卡片构成**：顺序与归属错了，用户就又找不到东西了。
-  const TABS = ['appearance', 'bubble', 'behavior', 'voice', 'chat', 'diag']
+  const TABS = ['appearance', 'bubble', 'behavior', 'voice', 'chat', 'today', 'diag']
   const layout = TABS.map(tab =>
     collectByType(renderSectionTree({}, tab), 'Card').map(c => c.props.title))
   // 「外观」只有两张卡：「主题」并进了「桌宠」—— 单行卡片自带一个卡片头，
   // 实测要占 100px，"一行一个概念"反而把一屏挤爆（见 probe-settings-tabs）。
   assert.deepEqual(layout[0], ['桌宠', '状态文字'], `「外观」页不对：${layout[0].join(' → ')}`)
   assert.deepEqual(layout[1], ['气泡', '提醒'], `「气泡」页不对：${layout[1].join(' → ')}`)
-  assert.deepEqual(layout[2], ['活跃度', '番茄钟'], `「行为」页不对：${layout[2].join(' → ')}`)
+  // v10：「行为」页多了「手势互动」（用户："通过右键就点个按钮，很奇怪"）
+  assert.deepEqual(layout[2], ['活跃度', '手势互动', '番茄钟'], `「行为」页不对：${layout[2].join(' → ')}`)
   assert.deepEqual(layout[3], ['固定台词', '念出回答（动态语音）'], `「语音」页不对：${layout[3].join(' → ')}`)
   assert.deepEqual(layout[4], ['聊天', '长期记忆（跨会话共享）', '发消息'], `「对话」页不对：${layout[4].join(' → ')}`)
-  assert.deepEqual(layout[5], ['运行状态', '素材', '合成服务', '路径与会话'], `「诊断」页不对：${layout[5].join(' → ')}`)
+  assert.deepEqual(layout[5], ['今天'], `「今天」页不对：${layout[5].join(' → ')}`)
+  assert.deepEqual(layout[6], ['运行状态', '素材', '合成服务', '路径与会话'], `「诊断」页不对：${layout[6].join(' → ')}`)
   // 关键性质：诊断**单独一页**（原先被压在整个面板最后，要滚到底才看得见）
-  assert.equal(layout[5][0], '运行状态', '诊断页的第一张应是运行状态')
+  assert.equal(layout[6][0], '运行状态', '诊断页的第一张应是运行状态')
+  // 而且诊断**仍然是最后一页**（它是"出问题了看哪里"，不该挡在回顾前面）
+  assert.equal(TABS[TABS.length - 1], 'diag', '诊断必须是最后一页')
 
   // 而且渲染出的卡片**只能有当前页签的** —— 这是"三屏变一屏"的全部机制。
   const cards = collectByType(renderSectionTree({}, 'voice'), 'Card')
@@ -2157,11 +2161,11 @@ ok('⭐⭐ 页签是真正的导航控件（role/aria + 点一下真的换页）
   const tabs = collectByType(tree, 'Tabs')
   assert.equal(tabs.length, 1, '应恰好渲染一个页签条')
   const items = tabs[0].props.items
-  assert.equal(items.length, 6, `应有 6 个页签，实际 ${items.length}`)
+  assert.equal(items.length, 7, `应有 7 个页签，实际 ${items.length}`)
   assert.deepEqual(items.map(i => i.id),
-    ['appearance', 'bubble', 'behavior', 'voice', 'chat', 'diag'], '页签顺序不对')
+    ['appearance', 'bubble', 'behavior', 'voice', 'chat', 'today', 'diag'], '页签顺序不对')
   assert.deepEqual(items.map(i => i.label),
-    ['外观', '气泡', '行为', '语音', '对话', '诊断'],
+    ['外观', '气泡', '行为', '语音', '对话', '今天', '诊断'],
     `页签文案不对：${items.map(i => i.label).join('/')}`)
 
   // 渲染出来的按钮必须带 ARIA（读屏要能用），且**恰好一个**选中态
@@ -2169,7 +2173,7 @@ ok('⭐⭐ 页签是真正的导航控件（role/aria + 点一下真的换页）
   const rendered = Tabs({ items, value: 'appearance', onSelect: () => {} })
   assert.equal(rendered.props.role, 'tablist', '页签条应有 role=tablist')
   const btns = rendered.props.children
-  assert.equal(btns.length, 6, '应渲染 6 个页签按钮')
+  assert.equal(btns.length, 7, '应渲染 7 个页签按钮')
   for (const b of btns) {
     assert.equal(b.props.role, 'tab', `页签按钮应有 role=tab，实际 ${b.props.role}`)
     assert.ok(b.props['aria-controls'], '页签按钮应有 aria-controls（指向面板）')
@@ -2204,7 +2208,7 @@ ok('⭐⭐ 每个页签「展开状态」的行数 ≤ 10（一屏放得下）',
   // 用户原话："太长：要滚好几屏，找不到东西"。原先一列 40 行、实测 2556px。
   // 拆页之后，每页**摊开来看**的行数必须控制在一屏之内。
   // 只数**展开卡片**里的行：收起的卡片（诊断页、台词清单、发消息）本来就看不见。
-  const TABS = ['appearance', 'bubble', 'behavior', 'voice', 'chat', 'diag']
+  const TABS = ['appearance', 'bubble', 'behavior', 'voice', 'chat', 'today', 'diag']
   const counts = {}
   for (const tab of TABS) {
     const cards = collectByType(renderSectionTree({}, tab), 'Card')
@@ -2236,7 +2240,7 @@ ok('⭐⭐ 全设置页只有一套控件外观（不许再有第二个输入框
   assert.ok(!usedClasses.has('zf-pet-settings__input'),
     'zf-pet-settings__input 应已彻底不再使用（那个类名曾经只有引用没有规则，是"裸样式控件"的根因）')
 
-  const TABS = ['appearance', 'bubble', 'behavior', 'voice', 'chat', 'diag']
+  const TABS = ['appearance', 'bubble', 'behavior', 'voice', 'chat', 'today', 'diag']
   const bad = []
   let seen = 0
   for (const tab of TABS) {
@@ -2559,6 +2563,228 @@ ok('设置页文案 zh/en key 集一致', () => {
   const zh = Object.keys(DICT.zh).sort()
   const en = Object.keys(DICT.en).sort()
   assert.deepEqual(zh, en, '两种语言的 key 集必须一致，否则切换语言会露 key')
+})
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * 10. v10：「今天」页签与新手势设置
+ * ═════════════════════════════════════════════════════════════════════════ */
+
+section('10. v10「今天」页签 + 手势设置')
+
+ok('⭐⭐ today 块缺失时「今天」页不崩（旧宿主 / 还没广播）', () => {
+  // 这是本项目最严重的一类事故：设置页整片崩溃且不报错。
+  // `snapshot.today` 是 v10 新增的**可选**块，旧宿主根本没有 ——
+  // 直接取 `snapshot.today.pomodoroCount` 会抛 TypeError。
+  const l = loadClient()
+  l.exports.apply(l.ctx)
+  const { Section, runtime } = l.exports.__test
+  runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 1 } } }
+  runtime.__state.snapshot = { petState: 'idle', label: '', bubble: null, nativeAvailable: true }
+  runtime.__state.settings = normalizePet({})
+  runtime.__state.tab = 'today'
+  l.react.resetHooks()
+  assert.doesNotThrow(() => Section({ close () {} }), 'today 块缺失时不该抛')
+})
+
+ok('⭐「今天」页显示四个数字（番茄/时长/摸鱼/连续天数）', () => {
+  const l = loadClient()
+  l.exports.apply(l.ctx)
+  const { Section, runtime } = l.exports.__test
+  runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 1 } } }
+  runtime.__state.snapshot = {
+    petState: 'idle',
+    label: '',
+    bubble: null,
+    nativeAvailable: true,
+    today: {
+      dayKey: '2026-10-08',
+      pomodoroCount: 3,
+      focusMs: 75 * 60 * 1000,
+      interrupts: 2,
+      streakDays: 5,
+      goalCount: 8,
+      byTask: [{ task: '桌宠开发', ms: 50 * 60 * 1000 }],
+      recent: [{ dayKey: '2026-10-08', count: 3, focusMs: 1000 }]
+    }
+  }
+  runtime.__state.settings = normalizePet({})
+  runtime.__state.tab = 'today'
+  l.react.resetHooks()
+  const tree = Section({ close () {} })
+  const text = collectStrings(tree).join('|')
+  assert.ok(text.includes('今日番茄'), '缺「今日番茄」')
+  assert.ok(text.includes('专注时长'), '缺「专注时长」')
+  assert.ok(text.includes('摸鱼次数'), '缺「摸鱼次数」')
+  assert.ok(text.includes('连续天数'), '缺「连续天数」')
+  // 时长格式化：75 分钟 → "1 小时 15 分"（不是 75 分、不是 4500 秒）
+  assert.ok(text.includes('1 小时 15 分'), `时长格式化不对：${text.slice(0, 200)}`)
+  // 目标进度 3/8
+  assert.ok(text.includes('3/8'), `缺目标进度：${text.slice(0, 200)}`)
+  // 任务列表
+  assert.ok(text.includes('桌宠开发'), '缺任务名')
+})
+
+ok('⭐「今天」页一次没用过时给引导，而不是四个 0', () => {
+  const l = loadClient()
+  l.exports.apply(l.ctx)
+  const { Section, runtime } = l.exports.__test
+  runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 1 } } }
+  runtime.__state.snapshot = {
+    petState: 'idle', label: '', bubble: null, nativeAvailable: true,
+    today: { pomodoroCount: 0, focusMs: 0, interrupts: 0, streakDays: 0, goalCount: 0, byTask: [], recent: [] }
+  }
+  runtime.__state.settings = normalizePet({})
+  runtime.__state.tab = 'today'
+  l.react.resetHooks()
+  const text = collectStrings(Section({ close () {} })).join('|')
+  assert.ok(text.includes('还没有记录'), `应有引导文案：${text.slice(0, 200)}`)
+})
+
+ok('⭐⭐ 时长格式化与 exe 同口径（不足一分钟 → 1 分，不是 0 分）', () => {
+  // 两处各写一套的风险是"菜单显示 25 分、面板显示 0 分"。
+  // exe 的 `PetTodayInfo.FormatDuration` 有一条一模一样的断言。
+  //
+  // ⚠️ 每个用例都要**新起一个挂载**（`loadClient()`），不能复用一个 `runtime`
+  // 反复改快照再渲染 —— 桩的 `useState` 会把首次渲染的结果**缓存**在
+  // `hooks.states[i]` 里，`resetHooks()` 只归零游标、不清缓存，
+  // 于是第二次渲染读到的还是第一份快照（这正是本项目记过的"假绿"陷阱）。
+  const render = focusMs => {
+    const l = loadClient()
+    l.exports.apply(l.ctx)
+    const { Section, runtime } = l.exports.__test
+    runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 1 } } }
+    runtime.__state.snapshot = {
+      petState: 'idle', label: '', bubble: null, nativeAvailable: true,
+      today: { pomodoroCount: 1, focusMs, interrupts: 0, streakDays: 1, goalCount: 0, byTask: [], recent: [] }
+    }
+    runtime.__state.settings = normalizePet({})
+    runtime.__state.tab = 'today'
+    l.react.resetHooks()
+    return collectStrings(Section({ close () {} })).join('|')
+  }
+  assert.ok(render(30 * 1000).includes('1 分钟'), '30 秒应显示 1 分钟（显示 0 分会让人以为统计坏了）')
+  assert.ok(render(25 * 60 * 1000).includes('25 分钟'), '25 分钟')
+  assert.ok(render(60 * 60 * 1000).includes('1 小时'), '1 小时')
+  assert.ok(render(65 * 60 * 1000).includes('1 小时 5 分钟'), '1 小时 5 分钟')
+  assert.ok(render(0).includes('0 分钟'), '0 应显示 0 分钟')
+})
+
+ok('⭐ 新手势设置三个开关都在，且能改到设置里', () => {
+  const tree = renderSectionTree({}, 'behavior')
+  const text = collectStrings(tree).join('|')
+  assert.ok(text.includes('按住摸头'), '缺「按住摸头」')
+  assert.ok(text.includes('拖住甩出去'), '缺「拖住甩出去」')
+  assert.ok(text.includes('鼠标停在她身上时看你一眼'), '缺「悬停反应」')
+})
+
+ok('⭐⭐ 悬停反应默认关（唯一"她主动找你"的互动，默认开就是骚扰）', () => {
+  const d = normalizePet({})
+  assert.equal(d.hoverReact, false, '悬停反应必须默认关')
+  // 而抛掷与长按默认开：只有用户主动做手势才触发，不是骚扰
+  assert.equal(d.flingEnabled, true, '抛掷默认开（要主动甩才触发）')
+  assert.equal(d.longPress, true, '长按默认开（要主动按住才触发）')
+})
+
+ok('⭐ 新设置字段能穿过归一化（否则"界面能改、发不出去"）', () => {
+  const n = normalizePet({
+    hoverReact: true, flingEnabled: false, longPress: false,
+    pomodoroBreath: true, pomodoroGoalCount: 12, pomodoroPreset: 'deep'
+  })
+  assert.equal(n.hoverReact, true)
+  assert.equal(n.flingEnabled, false)
+  assert.equal(n.longPress, false)
+  assert.equal(n.pomodoroBreath, true)
+  assert.equal(n.pomodoroGoalCount, 12)
+  assert.equal(n.pomodoroPreset, 'deep')
+})
+
+ok('⭐ 目标数夹在 0..30（0 = 不设目标是**合法值**）', () => {
+  assert.equal(normalizePet({ pomodoroGoalCount: 0 }).pomodoroGoalCount, 0)
+  assert.equal(normalizePet({ pomodoroGoalCount: -5 }).pomodoroGoalCount, 0)
+  assert.equal(normalizePet({ pomodoroGoalCount: 999 }).pomodoroGoalCount, 30)
+  assert.equal(normalizePet({ pomodoroGoalCount: 'x' }).pomodoroGoalCount, 8, '坏值回落默认 8')
+})
+
+ok('⭐⭐ 预设只认白名单（未知值回落，不透传）', () => {
+  assert.equal(normalizePet({ pomodoroPreset: 'deep' }).pomodoroPreset, 'deep')
+  assert.equal(normalizePet({ pomodoroPreset: 'nope' }).pomodoroPreset, 'classic')
+  assert.equal(normalizePet({ pomodoroPreset: '__proto__' }).pomodoroPreset, 'classic',
+    '原型链名字必须被挡（本项目在 interactions.js 上踩过一模一样的坑）')
+  assert.equal(normalizePet({ pomodoroPreset: 'toString' }).pomodoroPreset, 'classic')
+})
+
+ok('⭐⭐ 预设选项集与宿主**同集**（不同集会让界面选到一个宿主不认识的值）', () => {
+  // 界面能选到 deep、宿主回落 classic → "显示 deep、实际跑 25 分钟"，且不报错。
+  const src = fs.readFileSync(CLIENT, 'utf8')
+  const m = src.match(/const PET_POMODORO_PRESETS = \[([^\]]+)\]/)
+  assert.ok(m, '找不到 PET_POMODORO_PRESETS')
+  const clientSet = m[1].split(',').map(s => s.trim().replace(/['"]/g, '')).filter(Boolean)
+  assert.deepEqual(clientSet.sort(), ['classic', 'deep', 'free', 'sprint'].sort(),
+    `客户端预设集不对：${clientSet.join(',')}`)
+  // 宿主那份必须含同样的四个（外加 custom 标记）
+  const hostSrc = fs.readFileSync(
+    path.join(path.dirname(CLIENT), 'src', 'settings.js'), 'utf8')
+  for (const id of clientSet) {
+    assert.ok(hostSrc.includes(`'${id}'`), `宿主 settings.js 里没有预设 ${id}`)
+  }
+})
+
+ok('⭐ 番茄钟页有预设下拉，且选中后会套用时长', () => {
+  const l = loadClient()
+  l.exports.apply(l.ctx)
+  const { Section, runtime } = l.exports.__test
+  runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 1 } } }
+  runtime.__state.snapshot = { petState: 'idle', label: '', bubble: null, nativeAvailable: true }
+  runtime.__state.settings = normalizePet({ pomodoro: true })
+  runtime.__state.tab = 'behavior'
+  l.react.resetHooks()
+  const tree = Section({ close () {} })
+
+  // ⚠️ `collectStrings` 只走 `props.children`，而 v4 起**控件挂在 `Row` 的
+  // `control` prop 里**（不是 children）—— 所以要自己把 control 也走一遍。
+  // 这正是本项目记过的"只走 children 的检查器一个控件都找不到"。
+  const texts = []
+  const walk = n => {
+    if (n === null || n === undefined) return
+    if (typeof n === 'string') { texts.push(n); return }
+    if (Array.isArray(n)) { n.forEach(walk); return }
+    if (typeof n !== 'object') return
+    const p = n.props ?? {}
+    for (const k of ['label', 'hint', 'title', 'placeholder', 'desc', 'lead', 'note']) {
+      if (typeof p[k] === 'string') texts.push(p[k])
+    }
+    walk(p.control)
+    walk(p.children)
+  }
+  walk(tree)
+  const text = texts.join('|')
+  assert.ok(text.includes('节奏预设'), `缺「节奏预设」：${text.slice(0, 200)}`)
+  assert.ok(text.includes('经典 25/5'), '缺预设选项（下拉的 option 文案）')
+  assert.ok(text.includes('深度工作 52/17'), '缺深度工作预设')
+  assert.ok(text.includes('自由计时（上限 4 小时）'), '缺自由计时预设')
+
+  // 选中 deep 后应把 52 分钟写进 focusMs —— 断言映射表本身（onChange 的产物
+  // 无法从树上观察，因为 `set` 是闭包内的函数）。
+  const mm = fs.readFileSync(CLIENT, 'utf8').match(/deep: \{ pomodoroFocusMs: (\d+) \* 60 \* 1000/)
+  assert.ok(mm, '找不到 deep 的时长定义')
+  assert.equal(Number(mm[1]), 52, `deep 的专注时长应是 52 分钟，实际 ${mm[1]}`)
+  // 而且四个预设的映射表必须与宿主一致（不同集 = 界面选 deep、实际跑 classic）
+  const hostSrc = fs.readFileSync(path.join(path.dirname(CLIENT), 'src', 'settings.js'), 'utf8')
+  for (const [id, focus] of [['classic', 25], ['deep', 52], ['sprint', 25], ['free', 240]]) {
+    const re = new RegExp(`${id}: \\{ pomodoroFocusMs: (\\d+) \\* 60 \\* 1000`)
+    const hm = hostSrc.match(re)
+    assert.ok(hm, `宿主 settings.js 里找不到预设 ${id}`)
+    assert.equal(Number(hm[1]), focus, `${id} 的时长与客户端不一致（宿主 ${hm[1]} / 期望 ${focus}）`)
+  }
+})
+
+ok('⭐ 手改时长会把预设标成自定义（否则下拉显示 deep、实际跑 30 分钟）', () => {
+  const src = fs.readFileSync(CLIENT, 'utf8')
+  // 四个时长滑杆的 onChange 都必须带上 pomodoroPreset: 'custom'
+  for (const key of ['pomodoroFocusMs', 'pomodoroBreakMs', 'pomodoroLongBreakMs', 'pomodoroRounds']) {
+    const re = new RegExp(`key: '${key}'[\\s\\S]{0,400}?onChange: v => set\\(\\{ ${key}: [^}]*pomodoroPreset: 'custom'`)
+    assert.ok(re.test(src), `${key} 的 onChange 没有把预设标成 custom`)
+  }
 })
 
 /* ═════════════════════════════════════════════════════════════════════════ */

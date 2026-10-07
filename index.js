@@ -3118,8 +3118,24 @@ export function apply (ctx, config) {
     },
     /** 番茄钟状态存取（`/pet/pomodoro` 用；见 routes.js 的说明）。 */
     pomodoro: {
-      snapshot: () => pomodoro.snapshot(Date.now()),
-      control: action => {
+      snapshot: () => ({
+        ...pomodoro.snapshot(Date.now()),
+        /**
+         * v10：当前任务名（设置页「今天」页签与统计用）。
+         *
+         * 为什么加在这里而不是 `settings`：任务是**番茄钟的会话状态**
+         *（"这一轮我在做什么"），不是用户偏好 —— 放进设置会让它被
+         * "重置设置"清掉，而且它每轮都可能变。
+         */
+        task: stats.task(),
+        /** v10：本阶段累计的摸鱼次数（专注中才有意义）。 */
+        interrupts: stats.phaseInterrupts()
+      }),
+      /**
+       * @param {string} action - 白名单动作（路由层已校验）
+       * @param {object} [options] - `set-task` 时带 `{task}`
+       */
+      control: (action, options) => {
         const at = Date.now()
         let result = null
         switch (action) {
@@ -3128,6 +3144,14 @@ export function apply (ctx, config) {
           case 'toggle': result = { running: pomodoro.toggle(at) }; break
           case 'skip': result = pomodoro.skip(at); break
           case 'reset': result = { reset: pomodoro.reset(at) }; break
+          case 'set-task': {
+            // 归一化（去空白、截断到 24 字）在 `stats.js` 里 ——
+            // 路由层只挡"荒唐输入"（10KB 串），精确口径只有一处。
+            const task = stats.setTask(options?.task ?? '')
+            flushStats(at)
+            result = { task }
+            break
+          }
           default: return null
         }
         // 持久化 + 广播：用户按了开始，桌宠那边要立刻看到倒计时。

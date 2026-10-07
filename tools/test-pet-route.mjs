@@ -33,6 +33,7 @@ import {
 } from '../src/pet/routes.js'
 import { createHub } from '../src/pet/hub.js'
 import { createPomodoro } from '../src/pet/pomodoro.js'
+import { normalizeTask } from '../src/pet/stats.js'
 import { loadVoice, resolveVoice, voiceReport } from '../src/pet/voice.js'
 import {
   createAffection, INTERACT_KINDS, interactLabel, interactText
@@ -757,6 +758,7 @@ section('5b. 番茄钟路由（/pet/pomodoro）')
  * 而真正会出错的是"action 名与番茄钟方法对不上""白名单漏了一个动作"。
  * 用真模块才能覆盖那条链路。这里用固定时钟，避免测试受真实时间影响。
  */
+let stubTask = ''
 let pomoClock = 1_000_000
 const realPomodoro = createPomodoro({
   now: () => pomoClock,
@@ -788,8 +790,13 @@ const pomoHandler = createHandler({
   getSettings: () => settingsValue,
   setSettings: next => next,
   pomodoro: {
-    snapshot: () => realPomodoro.snapshot(pomoClock),
-    control: action => {
+    snapshot: () => ({
+      ...realPomodoro.snapshot(pomoClock),
+      // v10：快照里多带 task / interrupts（设置页与统计用）
+      task: stubTask,
+      interrupts: 0
+    }),
+    control: (action, options) => {
       controlCalls.push(action)
       switch (action) {
         case 'start': return { started: realPomodoro.start(pomoClock) }
@@ -797,6 +804,12 @@ const pomoHandler = createHandler({
         case 'toggle': return { running: realPomodoro.toggle(pomoClock) }
         case 'skip': return realPomodoro.skip(pomoClock)
         case 'reset': return { reset: realPomodoro.reset(pomoClock) }
+        case 'set-task': {
+          // 用**真实**的 normalizeTask（不是抄一份口径）—— 这条链路真正会
+          // 出错的就是"归一化没接上"，桩自己实现一遍等于没测。
+          stubTask = normalizeTask(options?.task ?? '')
+          return { task: stubTask }
+        }
         default: return null
       }
     }
@@ -860,7 +873,32 @@ await okAsync('缺 action 字段 → 400 且列出允许值（调用方能自我
   const r = await pomoCall('POST', {})
   assert.equal(r.status, 400)
   const body = JSON.parse(r.body)
-  assert.deepEqual(body.allowed, ['start', 'pause', 'toggle', 'skip', 'reset'])
+  // v10 加了 `set-task`（绑定"这一轮做什么"）
+  assert.deepEqual(body.allowed, ['start', 'pause', 'toggle', 'skip', 'reset', 'set-task'])
+})
+
+await okAsync('⭐ v10：set-task 真的改到任务名（不是只回 ok）', async () => {
+  const r = await pomoCall('POST', { action: 'set-task', task: '  桌宠   开发  ' })
+  assert.equal(r.status, 200, `状态码 ${r.status}`)
+  const body = JSON.parse(r.body)
+  // 归一化（去空白、合并空格）在 stats.js —— 路由层只挡荒唐输入
+  assert.equal(body.result.task, '桌宠 开发', `任务名归一化不对：${JSON.stringify(body.result.task)}`)
+  assert.equal(body.pomodoro.task, '桌宠 开发', '快照里的 task 也要跟着变')
+})
+
+await okAsync('⭐ set-task 的坏输入：非字符串当空、超长截断', async () => {
+  // 非字符串 → 当作"清空"（不报错：清空是合法操作）
+  const r1 = await pomoCall('POST', { action: 'set-task', task: 12345 })
+  assert.equal(r1.status, 200)
+  assert.equal(JSON.parse(r1.body).result.task, '')
+  // 超长 → 路由层截到 200，再经 normalizeTask 截到 24
+  const r2 = await pomoCall('POST', { action: 'set-task', task: 'x'.repeat(500) })
+  assert.equal(r2.status, 200)
+  assert.equal(JSON.parse(r2.body).result.task.length, 24, '最终应截到 24 字')
+  // 缺 task 字段 → 清空（不是 400：这个动作的参数是可选的）
+  const r3 = await pomoCall('POST', { action: 'set-task' })
+  assert.equal(r3.status, 200)
+  assert.equal(JSON.parse(r3.body).result.task, '')
 })
 
 await okAsync('非法 JSON → 400', async () => {

@@ -113,6 +113,56 @@ export const POMODORO_LONG_BREAK_MAX = 120 * 60 * 1000
 export const POMODORO_ROUNDS_MIN = 2
 export const POMODORO_ROUNDS_MAX = 12
 
+/**
+ * 计时节奏预设（v10，用户："当前的番茄钟太简单了"）。
+ *
+ * ── 为什么是"预设"而不是"多套独立的时长字段" ─────────────────────────────
+ *
+ * 四个时长字段（focus/break/longBreak/rounds）**永远是真相**，预设只是
+ * "一次性把它们写成某一组值"的快捷方式。选中预设后用户再手改时长，
+ * 预设会被标成 `custom`（见 `applyPreset`）。
+ *
+ * 反过来做（预设与字段同时说了算）会出现"我明明改成 30 分钟，它又变回 25"
+ * 这种打架状态 —— 而用户永远说不清最终生效的是哪个（`activity.js` 的
+ * 档位设计里记过同一个教训）。
+ *
+ * ⚠️ `free`（自由计时）**不用 0 表示"不限时"**，而是给 240 分钟上限。
+ * 理由：`remainingMs === 0` 在 `pomodoro.js` 里**到处**被当作"阶段已结束"
+ *（`enter()` 的去重守卫、`start()` 的重置分支、`adopt()` 的回落），
+ * 引入 0 语义会同时打破那四处，而它们的失败方式都是静默的。
+ * 240 分钟与 `POMODORO_FOCUS_MAX` 一致，用户感知上没有损失。
+ */
+export const POMODORO_PRESETS = ['classic', 'deep', 'sprint', 'free', 'custom']
+
+/** 预设 → 四个时长字段。`custom` 不在表里（它是"用户手改过"的标记）。 */
+export const POMODORO_PRESET_VALUES = {
+  classic: { pomodoroFocusMs: 25 * 60 * 1000, pomodoroBreakMs: 5 * 60 * 1000, pomodoroLongBreakMs: 15 * 60 * 1000, pomodoroRounds: 4 },
+  deep: { pomodoroFocusMs: 52 * 60 * 1000, pomodoroBreakMs: 17 * 60 * 1000, pomodoroLongBreakMs: 30 * 60 * 1000, pomodoroRounds: 3 },
+  sprint: { pomodoroFocusMs: 25 * 60 * 1000, pomodoroBreakMs: 5 * 60 * 1000, pomodoroLongBreakMs: 15 * 60 * 1000, pomodoroRounds: 4 },
+  free: { pomodoroFocusMs: 240 * 60 * 1000, pomodoroBreakMs: 5 * 60 * 1000, pomodoroLongBreakMs: 15 * 60 * 1000, pomodoroRounds: 4 }
+}
+
+/**
+ * 把预设套用成一组时长。未知预设返回 null（调用方据此**什么都不做**，
+ * 而不是把设置改成一堆 undefined）。
+ *
+ * ⚠️ **必须 `hasOwnProperty`**：`POMODORO_PRESET_VALUES['__proto__']` 会返回
+ * `Object.prototype`（原型链上的），`['toString']` 返回函数 —— 于是"未知预设"
+ * 被当成合法值一路传下去。本项目在 `interactions.js` 的 `interactConfig` 上
+ * 已经踩过一模一样的坑（探针实测 `interact('__proto__')` 返回了
+ * `accepted: true`）。这里同样是"用户串查表"，所以同样要挡。
+ *
+ * @param {string} preset
+ * @returns {object|null}
+ */
+export function applyPreset (preset) {
+  if (typeof preset !== 'string') return null
+  if (!Object.prototype.hasOwnProperty.call(POMODORO_PRESET_VALUES, preset)) return null
+  const v = POMODORO_PRESET_VALUES[preset]
+  if (v === null || typeof v !== 'object') return null
+  return { ...v, pomodoroPreset: preset }
+}
+
 /** 设置结构版本。v1 为首个版本。 */
 /** 推理后端白名单（'' = 用子插件默认）。 */
 export const TT_BACKENDS = ['', 'torch', 'onnx']
@@ -221,6 +271,54 @@ export function defaultSettings () {
      * 但番茄钟的倒计时是他主动开的，得看得见。
      */
     pomodoroCountdown: true,
+    /**
+     * v10：今日目标番茄数（0 = 不设目标）。
+     *
+     * 为什么要"目标"而不是只显示数字：一个裸的"今天 3 个"没有参照 ——
+     * 3 个算多还是算少？有了目标才有进度感，也是 `today` 行显示 `3/8` 的来源。
+     * 默认 8（约 3.5 小时专注）—— 不给 0 是因为"没目标"等于少了一半信息；
+     * 想要纯粹记录的人可以调到 0。
+     */
+    pomodoroGoalCount: 8,
+    /**
+     * v10：计时节奏预设（`classic` / `deep` / `sprint` / `free`）。
+     *
+     * ⚠️ 它**只决定"套用哪一组时长"**，不是第四个真相：
+     * 选中预设后会把 `pomodoroFocusMs` 等字段写进去，之后用户手改时长
+     * 会把预设标成 `custom`。若让预设与四个时长字段同时"说了算"，
+     * 就会出现"我明明改成 30 分钟，它又变回 25"这种打架状态。
+     */
+    pomodoroPreset: 'classic',
+    /**
+     * v10：专注期间显示呼吸引导（4-7-8 节奏）。
+     *
+     * **默认关闭**：它会在桌宠下方常驻一个动画，而多数人只想看倒计时。
+     * 与"计时器类功能不许默认开"同一条纪律。
+     */
+    pomodoroBreath: false,
+
+    // ── 互动手势（v10，用户："通过右键就点个按钮，很奇怪"）──────────────────
+    /**
+     * 允许**抛掷**（拖住甩出去，她沿抛物线飞）。
+     *
+     * 默认**开**：它不是骚扰型功能 —— 只有用户主动甩才会触发，
+     * 而"慢慢拖"仍然是正常的挪位置（判据是速度，见 `PetGesture`）。
+     * 关掉之后甩动会被当成普通拖动（她直接停在松手的位置）。
+     */
+    flingEnabled: true,
+    /**
+     * 允许**长按摸头**（按住不动逐级反应）。
+     *
+     * 默认**开**：与抛掷同理，必须用户主动按住才触发。
+     */
+    longPress: true,
+    /**
+     * **悬停反应**：鼠标停在她身上一会儿，她看你一眼。
+     *
+     * ⚠️ **默认关闭**。这是唯一"她主动找你"的互动 —— 默认开就是骚扰
+     * （用户只是在桌面上移动鼠标经过她而已）。与番茄钟/语音同一条纪律。
+     */
+    hoverReact: false,
 
     // ── 语音（用户点名："claude目录下有一个庄方宜专属的语音合成skill"）────────
     //
@@ -358,9 +456,20 @@ export function normalizeSettings (input) {
   for (const key of ['clickThrough', 'topmost', 'bubble', 'bubbleImages',
     'hint', 'statusAlways', 'notifyComplete', 'attentionReminder',
     'pomodoro', 'pomodoroAutoNext', 'pomodoroNotify', 'pomodoroCountdown',
+    'pomodoroBreath', 'flingEnabled', 'longPress', 'hoverReact',
     'voice', 'chatEnabled', 'memoryAuto', 'speakReplies', 'ttsResident']) {
     if (typeof input[key] === 'boolean') out[key] = input[key]
   }
+
+  // v10：今日目标番茄数。0 = 不设目标（**合法值**，所以下限是 0 而不是 1）。
+  // 上限 30：一天 30 个番茄已经是 12.5 小时专注，再高没有现实意义
+  //（而且目标行会撑得很长）。
+  out.pomodoroGoalCount = clamp(input.pomodoroGoalCount, 0, 30, base.pomodoroGoalCount)
+
+  // v10：计时节奏预设。**只认白名单**，未知值回落到 base ——
+  // 它是"套用哪一组时长"的开关，不认识的值必须回落而不是透传
+  //（透传的话下游 `applyPreset` 查表会拿到 undefined，静默什么都不做）。
+  if (POMODORO_PRESETS.includes(input.pomodoroPreset)) out.pomodoroPreset = input.pomodoroPreset
 
   // 人设名与聊天工作区：字符串，走**保守校验**。
   //

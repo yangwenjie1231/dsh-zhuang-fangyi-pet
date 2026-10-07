@@ -195,6 +195,49 @@ window.__ModuleLoader__.load({
         pomodoroResume: '继续',
         pomodoroSkip: '跳过当前段',
         pomodoroReset: '重置',
+        // ── v10：番茄钟扩展（目标 / 预设 / 呼吸）───────────────────────────
+        pomodoroGoalCount: '今日目标番茄数',
+        pomodoroGoalCountHint: '设 0 就不显示目标，只记录',
+        pomodoroPreset: '节奏预设',
+        pomodoroPresetHint: '选一个套用时长；之后手改时长会标成「自定义」',
+        presetClassic: '经典 25/5',
+        presetDeep: '深度工作 52/17',
+        presetSprint: '冲刺 25/5',
+        presetFree: '自由计时（上限 4 小时）',
+        presetCustom: '自定义',
+        pomodoroBreath: '专注时显示呼吸引导',
+        pomodoroBreathHint: '桌宠下方一个随呼吸缩放的光环（4-7-8 节奏）',
+        pomodoroTask: '这一轮做什么',
+        pomodoroTaskHint: '起个名字，统计里能看到时间花在哪',
+        pomodoroTaskPlaceholder: '比如：桌宠开发',
+        // ── v10：互动手势 ──────────────────────────────────────────────────
+        groupGesture: '手势互动',
+        flingEnabled: '拖住甩出去',
+        flingEnabledHint: '快速甩动她会飞出去再落地；慢慢拖仍然只是挪位置',
+        longPress: '按住摸头',
+        longPressHint: '按住不动会逐级反应；松手即停',
+        hoverReact: '鼠标停在她身上时看你一眼',
+        hoverReactHint: '默认关闭 —— 这是唯一她会主动找你的互动',
+        // ── v10：「今天」页签 ──────────────────────────────────────────────
+        tabToday: '今天',
+        groupToday: '今天',
+        todayCount: '今日番茄',
+        todayFocus: '专注时长',
+        todayInterrupts: '摸鱼次数',
+        todayStreak: '连续天数',
+        todayEmpty: '还没有记录 —— 开一次番茄钟就会出现在这里',
+        todayGoal: '目标进度',
+        todayByTask: '时间花在哪',
+        todayByTaskEmpty: '（还没绑定过任务）',
+        todayMilestone: '已达成的里程碑',
+        todayMilestoneEmpty: '（还没有）',
+        todayRecent: '最近 7 天',
+        todayUnit: '个',
+        todayDays: '天',
+        todayTimes: '次',
+        taskNote: '回车提交。绑定后统计里能看到时间花在哪。',
+        taskUnnamed: '（未命名）',
+        hours: '小时',
         minutes: '分钟',
         rounds: '轮',
         /**
@@ -402,6 +445,49 @@ window.__ModuleLoader__.load({
         pomodoroResume: 'Resume',
         pomodoroSkip: 'Skip phase',
         pomodoroReset: 'Reset',
+        // ── v10: pomodoro extras ───────────────────────────────────────────
+        pomodoroGoalCount: 'Daily pomodoro goal',
+        pomodoroGoalCountHint: 'Set 0 to just track, without a goal',
+        pomodoroPreset: 'Pace preset',
+        pomodoroPresetHint: 'Applies a set of lengths; editing them marks it Custom',
+        presetClassic: 'Classic 25/5',
+        presetDeep: 'Deep work 52/17',
+        presetSprint: 'Sprint 25/5',
+        presetFree: 'Free (up to 4 hours)',
+        presetCustom: 'Custom',
+        pomodoroBreath: 'Breathing guide while focusing',
+        pomodoroBreathHint: 'A ring below the pet that expands and contracts (4-7-8)',
+        pomodoroTask: 'What this round is for',
+        pomodoroTaskHint: 'Name it and the stats show where the time went',
+        pomodoroTaskPlaceholder: 'e.g. pet plugin',
+        // ── v10: gestures ──────────────────────────────────────────────────
+        groupGesture: 'Gestures',
+        flingEnabled: 'Fling by dragging',
+        flingEnabledHint: 'Flick her and she flies and lands; a slow drag still just moves her',
+        longPress: 'Pet by holding',
+        longPressHint: 'Hold still for a graded reaction; release to stop',
+        hoverReact: 'Glance up when the cursor rests on her',
+        hoverReactHint: 'Off by default — the only interaction she starts herself',
+        // ── v10: Today tab ────────────────────────────────────────────────
+        tabToday: 'Today',
+        groupToday: 'Today',
+        todayCount: 'Pomodoros today',
+        todayFocus: 'Focus time',
+        todayInterrupts: 'Interruptions',
+        todayStreak: 'Day streak',
+        todayEmpty: 'No records yet — run one pomodoro and it shows up here',
+        todayGoal: 'Goal progress',
+        todayByTask: 'Where the time went',
+        todayByTaskEmpty: '(no task bound yet)',
+        todayMilestone: 'Milestones reached',
+        todayMilestoneEmpty: '(none yet)',
+        todayRecent: 'Last 7 days',
+        todayUnit: '',
+        todayDays: 'days',
+        todayTimes: 'x',
+        taskNote: 'Press Enter to submit. Once bound, the stats show where the time went.',
+        taskUnnamed: '(unnamed)',
+        hours: 'h',
         minutes: 'min',
         rounds: 'rounds',
         unitSec: 's',
@@ -558,6 +644,26 @@ window.__ModuleLoader__.load({
      * 小工具
      * ------------------------------------------------------------------ */
 
+    /**
+     * 番茄钟节奏预设（v10）。**与 Host 的 `POMODORO_PRESETS` 同集**。
+     *
+     * ⚠️ 客户端也要有一份：它是**下拉框的选项值**，而白名单校验发生在
+     * 客户端归一化里（`normalizePet` 会原样 POST 给宿主）。两边不同集时，
+     * 界面能选到一个宿主不认识的值 → 宿主回落默认 → **界面显示 deep、
+     * 实际跑 25 分钟**，而且不报错。
+     *
+     * `custom` 不在下拉里（它是"用户手改过时长"的标记，不是一个可选项）。
+     */
+    const PET_POMODORO_PRESETS = ['classic', 'deep', 'sprint', 'free']
+
+    /** 预设 → 四个时长字段。与 Host 的 `POMODORO_PRESET_VALUES` 同值。 */
+    const PET_POMODORO_PRESET_VALUES = {
+      classic: { pomodoroFocusMs: 25 * 60 * 1000, pomodoroBreakMs: 5 * 60 * 1000, pomodoroLongBreakMs: 15 * 60 * 1000, pomodoroRounds: 4 },
+      deep: { pomodoroFocusMs: 52 * 60 * 1000, pomodoroBreakMs: 17 * 60 * 1000, pomodoroLongBreakMs: 30 * 60 * 1000, pomodoroRounds: 3 },
+      sprint: { pomodoroFocusMs: 25 * 60 * 1000, pomodoroBreakMs: 5 * 60 * 1000, pomodoroLongBreakMs: 15 * 60 * 1000, pomodoroRounds: 4 },
+      free: { pomodoroFocusMs: 240 * 60 * 1000, pomodoroBreakMs: 5 * 60 * 1000, pomodoroLongBreakMs: 15 * 60 * 1000, pomodoroRounds: 4 }
+    }
+
     /** 取一个 host 设置对象，缺字段时回落默认值。 */
     function normalizePet (input) {
       const base = {
@@ -616,6 +722,16 @@ window.__ModuleLoader__.load({
         pomodoroAutoNext: true,
         pomodoroNotify: true,
         pomodoroCountdown: true,
+        // ── 番茄钟 v10（今日目标 / 节奏预设 / 呼吸引导）────────────────────
+        pomodoroGoalCount: 8,
+        pomodoroPreset: 'classic',
+        pomodoroBreath: false,
+        // ── 互动手势 v10（用户："通过右键就点个按钮，很奇怪"）───────────────
+        // 抛掷与长按摸头**默认开**：只有用户主动做手势才触发，不是骚扰。
+        flingEnabled: true,
+        longPress: true,
+        // 悬停反应**默认关**：这是唯一"她主动找你"的互动，默认开就是骚扰。
+        hoverReact: false,
         // ── 语音（v3）───────────────────────────────────────────────────────
         // **默认关**：桌宠突然开口是强打扰，用户主动打开才生效。
         voice: false,
@@ -683,6 +799,9 @@ window.__ModuleLoader__.load({
       for (const k of ['clickThrough', 'topmost', 'bubble', 'bubbleImages',
         'hint', 'statusAlways', 'notifyComplete', 'attentionReminder',
         'pomodoro', 'pomodoroAutoNext', 'pomodoroNotify', 'pomodoroCountdown',
+        // v10：番茄钟扩展 + 互动手势。同样必须在这里 —— 漏一个就是
+        // "界面能改、但发不出去"（合并语义下宿主静默忽略，零报错）。
+        'pomodoroBreath', 'flingEnabled', 'longPress', 'hoverReact',
         'voice', 'chatEnabled',
         // ⚠️ 这三个曾经漏在白名单外 —— 见上面 `memoryAuto` 的说明。
         'memoryAuto', 'speakReplies', 'ttsResident']) {
@@ -695,6 +814,9 @@ window.__ModuleLoader__.load({
       out.pomodoroBreakMs = num(input.pomodoroBreakMs, 60000, 60 * 60000, base.pomodoroBreakMs)
       out.pomodoroLongBreakMs = num(input.pomodoroLongBreakMs, 60000, 120 * 60000, base.pomodoroLongBreakMs)
       out.pomodoroRounds = num(input.pomodoroRounds, 2, 12, base.pomodoroRounds)
+      // v10：今日目标（0 = 不设目标，所以下限是 0）+ 节奏预设（白名单）。
+      out.pomodoroGoalCount = num(input.pomodoroGoalCount, 0, 30, base.pomodoroGoalCount)
+      if (PET_POMODORO_PRESETS.includes(input.pomodoroPreset)) out.pomodoroPreset = input.pomodoroPreset
       if (typeof input.persona === 'string') {
         const p = input.persona.trim()
         if (p !== '' && p.length <= 64) out.persona = p
@@ -1540,15 +1662,30 @@ window.__ModuleLoader__.load({
        * 番茄钟动作：POST /pet/pomodoro。
        *
        * 失败也要给提示 —— "点了没反应"是最糟的（用户会以为坏了）。
+       *
+       * @param {string} action - `start`|`pause`|`skip`|`reset`|`set-task`
+       * @param {object} [options] - `set-task` 时带 `{task}`
        */
-      const pomodoroAction = action => {
+      const pomodoroAction = (action, options) => {
         const doPost = runtime.pomodoroAction
         if (typeof doPost !== 'function') {
           setChatNote('番茄钟不可用（宿主未装配）')
           return
         }
-        Promise.resolve(doPost(action))
-          .then(r => { if (r !== null && r !== undefined) setChatNote(null) })
+        // `set-task` 要给反馈（输入框按回车后没有任何视觉变化，
+        // 用户不知道到底提交了没有）；其余动作静默成功即可。
+        Promise.resolve(doPost(action, options))
+          .then(r => {
+            if (r === null || r === undefined) return
+            if (action === 'set-task') {
+              const name = r?.result?.task
+              setChatNote(name === '' || name === undefined
+                ? '已清空这一轮的任务名'
+                : `这一轮：${name}`)
+              return
+            }
+            setChatNote(null)
+          })
           .catch(e => setChatNote(`番茄钟操作失败：${e?.message ?? e}`))
       }
 
@@ -1755,10 +1892,14 @@ window.__ModuleLoader__.load({
       /**
        * 页签与页序。
        *
-       * 为什么是这六页：按**用户找东西的心智**切，不按代码结构切 ——
-       * 一页 = 一类问题（她长什么样 / 她怎么冒泡 / 她什么时候活跃 /
-       * 她怎么说话 / 她记住什么 / 出问题了看哪里）。
+       * 为什么是这七页（v10 加了「今天」）：按**用户找东西的心智**切，
+       * 不按代码结构切 —— 一页 = 一类问题（她长什么样 / 她怎么冒泡 /
+       * 她什么时候活跃 / 她怎么说话 / 她记住什么 / **今天做了多少** /
+       * 出问题了看哪里）。
        * 默认配置下每页展开的行数都 ≤ 10，一屏放得下。
+       *
+       * ⚠️「今天」放在「聊天」之后、**「诊断」之前**：它是"回顾"，
+       * 不是"配置"。放到设置类页签中间会打断"调完这个调那个"的动线。
        */
       const tabItems = [
         { id: 'appearance', label: t('tabAppearance') },
@@ -1766,8 +1907,97 @@ window.__ModuleLoader__.load({
         { id: 'behavior', label: t('tabBehavior') },
         { id: 'voice', label: t('tabVoice') },
         { id: 'chat', label: t('tabChat') },
+        { id: 'today', label: t('tabToday') },
         { id: 'diag', label: t('tabDiag') }
       ]
+
+      /* ── v10：「今天」页签用的小工具 ────────────────────────────────────
+       *
+       * 数据全部来自快照的 `today` 块（**只读**）。这里只做**展示格式化**，
+       * 不做任何判定 —— 计数、连续天数、里程碑全在宿主判定（唯一真相）。
+       *
+       * ⚠️ `today` 块可能**整块缺失**（旧宿主 / 插件刚启动还没广播）：
+       * 所以一律 `?? 0` / `?? []`，绝不直接取属性 —— 那会抛
+       * `Cannot read properties of undefined`，而设置页整片崩掉是本项目
+       * 出过的最严重事故（见 client.js 顶部的说明）。 */
+      const today = (snapshot !== null && typeof snapshot === 'object' && snapshot.today !== null &&
+        typeof snapshot.today === 'object') ? snapshot.today : {}
+
+      /** 一次都没跑过番茄钟 → 显示一句引导而不是四个 0。 */
+      const todayIsEmpty = () => {
+        const c = Number(today.pomodoroCount ?? 0)
+        const s = Number(today.streakDays ?? 0)
+        const i = Number(today.interrupts ?? 0)
+        return !(c > 0 || s > 0 || i > 0)
+      }
+
+      /**
+       * 时长格式化：`25 分` / `1 小时 5 分` / `0 分`。
+       *
+       * ⚠️ 与 exe 的 `PetTodayInfo.FormatDuration` **同一口径**（不足一分钟
+       * 显示"1 分"而不是"0 分"）：显示 0 分而番茄数 +1，用户会以为统计坏了。
+       * 两处各写一套的风险是"菜单显示 25 分、面板显示 0 分" —— 所以两边的
+       * 边界都写成了同一条判据（有值但不足一分钟 → 1 分）。
+       */
+      const formatFocus = ms => {
+        const n = Number(ms ?? 0)
+        if (!Number.isFinite(n) || n <= 0) return '0 ' + t('minutes')
+        const totalMin = Math.floor(n / 60000)
+        if (totalMin <= 0) return '1 ' + t('minutes')
+        const h = Math.floor(totalMin / 60)
+        const m = totalMin % 60
+        if (h <= 0) return m + ' ' + t('minutes')
+        if (m <= 0) return h + ' ' + t('hours')
+        return h + ' ' + t('hours') + ' ' + m + ' ' + t('minutes')
+      }
+
+      /** 目标进度百分比（夹到 0..100 —— 超额完成不该把进度条撑出容器）。 */
+      const goalPercent = () => {
+        const goal = Number(today.goalCount ?? 0)
+        const done = Number(today.pomodoroCount ?? 0)
+        if (!Number.isFinite(goal) || goal <= 0) return 0
+        const pct = Math.round((done / goal) * 100)
+        return Math.min(100, Math.max(0, pct))
+      }
+
+      /** 迷你柱状图的高度：按最近 7 天里最多的那天归一化。 */
+      const sparkHeight = count => {
+        const list = Array.isArray(today.recent) ? today.recent : []
+        let max = 0
+        for (const d of list) {
+          const c = Number(d?.count ?? 0)
+          if (Number.isFinite(c) && c > max) max = c
+        }
+        const c = Number(count ?? 0)
+        if (max <= 0) return '2%'          // 全 0 时留一条底线，否则柱子完全看不见
+        const pct = Math.round((c / max) * 100)
+        return Math.max(2, Math.min(100, pct)) + '%'
+      }
+
+      /**
+       * 已达成里程碑的名字（宿主给的是 key，中英由这里的字典映射）。
+       *
+       * ⚠️ 认不出的 key **原样显示**，不隐藏：里程碑是宿主加的，客户端
+       * 字典可能还没跟上 —— 隐藏会让"我明明达成了却看不到"，
+       * 而原样显示至少能看出"有个东西达成了"。
+       */
+      const milestoneKeys = () => {
+        const ms = (snapshot !== null && typeof snapshot === 'object' &&
+          snapshot.growth !== null && typeof snapshot.growth === 'object')
+          ? snapshot.growth.milestone
+          : null
+        if (ms === null || typeof ms !== 'object' || typeof ms.key !== 'string') return []
+        const label = ms.label !== null && typeof ms.label === 'object'
+          ? (ms.label[locale] ?? ms.label.zh ?? ms.key)
+          : ms.key
+        return [label]
+      }
+
+      /** 「今天」页签里的一个数字块。 */
+      const todayStat = (label, value) => h('div', { key: label, className: 'zf-pet-stat' }, [
+        h('b', { key: 'v', className: 'zf-pet-stat__v' }, value),
+        h('span', { key: 'l', className: 'zf-pet-stat__l' }, label)
+      ])
 
       const panels = [
         /* ── ① 外观：她是谁、长多大、在哪儿 ──────────────────────────────── */
@@ -2012,6 +2242,41 @@ window.__ModuleLoader__.load({
           })
         ]),
 
+        /* ── ③b 手势互动（v10）───────────────────────────────────────────
+         *
+         * 用户原话："互动当前方式，通过右键就点个按钮，很奇怪，能不能加一些
+         * 更有意思的"。这一组就是那几个"手上的动作"的开关。
+         *
+         * 为什么放在「行为」页而不是新开一页：它们描述的是"她怎么被碰"，
+         * 与"她什么时候活跃"是同一类问题（互动性）。单开一页会多出一个
+         * 只有 3 行的页签，而页签本身也是有成本的（每多一个都要点一次）。
+         *
+         * 位置在「活跃度」**之后**：那一张是这一页的主卡（"她什么时候活跃"
+         * 是这一页存在的理由），手势是它的补充。 */
+        card('behavior', { key: 'gGesture', title: t('groupGesture'), open: true }, [
+          h(Toggle, {
+            key: 'longPress',
+            label: t('longPress'),
+            hint: t('longPressHint'),
+            value: settings.longPress,
+            onChange: v => set({ longPress: v })
+          }),
+          h(Toggle, {
+            key: 'flingEnabled',
+            label: t('flingEnabled'),
+            hint: t('flingEnabledHint'),
+            value: settings.flingEnabled,
+            onChange: v => set({ flingEnabled: v })
+          }),
+          h(Toggle, {
+            key: 'hoverReact',
+            label: t('hoverReact'),
+            hint: t('hoverReactHint'),
+            value: settings.hoverReact,
+            onChange: v => set({ hoverReact: v })
+          })
+        ]),
+
         /* 番茄钟：默认关 → 整张卡片收起（8 个控件不该占着主面板）。 */
         card('behavior', {
           key: 'gPomodoro',
@@ -2028,6 +2293,34 @@ window.__ModuleLoader__.load({
           // 时长只在启用后渲染：默认关着的时候摆一堆滑杆是噪音。
           settings.pomodoro
             ? h('div', { key: 'pomoControls' }, [
+                // v10：节奏预设放**时长滑杆之前** —— 它是"一次套用一组值"，
+                // 放在后面会让人以为"先调时长再选预设"（顺序是反的）。
+                h(Row, {
+                  key: 'pomodoroPreset',
+                  label: t('pomodoroPreset'),
+                  desc: t('pomodoroPresetHint'),
+                  control: h('select', {
+                    key: 's',
+                    className: 'zf-pet-row__input',
+                    value: PET_POMODORO_PRESETS.includes(settings.pomodoroPreset)
+                      ? settings.pomodoroPreset
+                      : 'custom',
+                    onChange: e => {
+                      const v = e.target.value
+                      const preset = PET_POMODORO_PRESET_VALUES[v]
+                      // `custom` 不在表里 → 只改标记，不动时长（用户手改过的那组值）。
+                      if (preset === undefined) set({ pomodoroPreset: 'custom' })
+                      else set({ pomodoroPreset: v, ...preset })
+                    }
+                  }, [
+                    ...PET_POMODORO_PRESETS.map(id => h('option', { key: id, value: id }, t('preset' + id[0].toUpperCase() + id.slice(1)))),
+                    // `custom` 只在**当前就是**自定义时才出现 —— 否则下拉里会
+                    // 永远挂着一个用户选不了也取消不掉的项。
+                    PET_POMODORO_PRESETS.includes(settings.pomodoroPreset)
+                      ? null
+                      : h('option', { key: 'custom', value: 'custom' }, t('presetCustom'))
+                  ])
+                }),
                 h(Slider, {
                   key: 'pomodoroFocusMs',
                   label: t('pomodoroFocusMs'),
@@ -2036,7 +2329,8 @@ window.__ModuleLoader__.load({
                   max: 240,
                   step: 1,
                   suffix: t('minutes'),
-                  onChange: v => set({ pomodoroFocusMs: v * 60000 })
+                  // 手改时长 → 预设标成"自定义"（否则下拉显示 deep、实际跑 30 分钟）。
+                  onChange: v => set({ pomodoroFocusMs: v * 60000, pomodoroPreset: 'custom' })
                 }),
                 h(Slider, {
                   key: 'pomodoroBreakMs',
@@ -2046,7 +2340,7 @@ window.__ModuleLoader__.load({
                   max: 60,
                   step: 1,
                   suffix: t('minutes'),
-                  onChange: v => set({ pomodoroBreakMs: v * 60000 })
+                  onChange: v => set({ pomodoroBreakMs: v * 60000, pomodoroPreset: 'custom' })
                 }),
                 h(Slider, {
                   key: 'pomodoroLongBreakMs',
@@ -2056,7 +2350,7 @@ window.__ModuleLoader__.load({
                   max: 120,
                   step: 1,
                   suffix: t('minutes'),
-                  onChange: v => set({ pomodoroLongBreakMs: v * 60000 })
+                  onChange: v => set({ pomodoroLongBreakMs: v * 60000, pomodoroPreset: 'custom' })
                 }),
                 h(Slider, {
                   key: 'pomodoroRounds',
@@ -2067,7 +2361,7 @@ window.__ModuleLoader__.load({
                   step: 1,
                   suffix: t('rounds'),
                   hint: t('pomodoroRoundsHint'),
-                  onChange: v => set({ pomodoroRounds: v })
+                  onChange: v => set({ pomodoroRounds: v, pomodoroPreset: 'custom' })
                 }),
                 h(Toggle, {
                   key: 'pomodoroAutoNext',
@@ -2088,6 +2382,13 @@ window.__ModuleLoader__.load({
                   label: t('pomodoroCountdown'),
                   value: settings.pomodoroCountdown,
                   onChange: v => set({ pomodoroCountdown: v })
+                }),
+                h(Toggle, {
+                  key: 'pomodoroBreath',
+                  label: t('pomodoroBreath'),
+                  hint: t('pomodoroBreathHint'),
+                  value: settings.pomodoroBreath,
+                  onChange: v => set({ pomodoroBreath: v })
                 }),
                 // 开始/暂停按钮：设置页也能控制（桌宠不在手边时用得上）。
                 h('div', { key: 'pomoBtns', className: 'zf-pet-settings__btns' }, [
@@ -2401,7 +2702,92 @@ window.__ModuleLoader__.load({
           h('p', { key: 'chatReplyNote', className: 'zf-pet-settings__note' }, t('chatReplyNote'))
         ]),
 
-        /* ── ⑥ 诊断：**整页默认全部收起** ────────────────────────────────
+        /* ── ⑥ 今天：番茄钟统计 + 这一轮做什么（v10）─────────────────────
+         *
+         * 为什么单独一页而不是塞进「番茄钟」页：那一页是**设置**（调时长、
+         * 开关），这一页是**记录**（今天做了多少）。混在一起的话，用户想
+         * "看看今天怎么样"要在滑杆和开关里找数字。
+         *
+         * 位置放在「聊天」之后、「诊断」之前：它是"回顾"，不是"配置"。
+         * 全部数据来自快照的 `today` 块（**只读展示**，绝不在这里算 ——
+         * 判定与记账的唯一真相在宿主）。 */
+        card('today', {
+          key: 'gToday',
+          title: t('groupToday'),
+          open: true,
+          // 一次都没跑过番茄钟时给一句引导，而不是四个 0（四个 0 只是噪音）。
+          lead: todayIsEmpty() ? t('todayEmpty') : null
+        }, [
+          // 四个数字：番茄 / 时长 / 摸鱼 / 连续天数
+          h('div', { key: 'stats', className: 'zf-pet-stats' }, [
+            todayStat(t('todayCount'), String(today.pomodoroCount ?? 0) + t('todayUnit')),
+            todayStat(t('todayFocus'), formatFocus(today.focusMs ?? 0)),
+            todayStat(t('todayInterrupts'), String(today.interrupts ?? 0) + t('todayTimes')),
+            todayStat(t('todayStreak'), String(today.streakDays ?? 0) + t('todayDays'))
+          ]),
+          // 目标进度条：只在设了目标时出现（0 = 不设目标，见设置里的说明）。
+          (today.goalCount ?? 0) > 0
+            ? h('div', { key: 'goal', className: 'zf-pet-goal' }, [
+                h('div', { key: 'bar', className: 'zf-pet-goal__bar' }, [
+                  h('i', {
+                    key: 'fill',
+                    className: 'zf-pet-goal__fill',
+                    style: { width: goalPercent() + '%' }
+                  })
+                ]),
+                h('span', { key: 'txt', className: 'zf-pet-goal__txt' },
+                  `${t('todayGoal')} ${today.pomodoroCount ?? 0}/${today.goalCount}`)
+              ])
+            : null,
+          // 这一轮做什么：绑定任务名（POST /pet/pomodoro {action:'set-task'}）
+          h(Row, {
+            key: 'task',
+            label: t('pomodoroTask'),
+            desc: t('pomodoroTaskHint'),
+            control: h('input', {
+              key: 'i',
+              className: 'zf-pet-row__input',
+              type: 'text',
+              placeholder: t('pomodoroTaskPlaceholder'),
+              maxLength: 24,
+              // 非受控 + `defaultValue`：与记忆框/聊天输入框同一条纪律
+              //（切页签会卸载卡片，受控值要靠外部 ref 才不丢草稿 ——
+              //  而这里只是"起个名字"，丢了也不心疼，所以用最简单的写法）。
+              defaultValue: snapshot?.pomodoro?.task ?? '',
+              onKeyDown: e => {
+                if (e.key !== 'Enter') return
+                // 失焦一下让用户看到"已经提交了"（输入框没有别的反馈）
+                try { e.target.blur() } catch { /* 忽略 */ }
+                pomodoroAction('set-task', { task: e.target.value ?? '' })
+              }
+            })
+          }),
+          h('p', { key: 'taskNote', className: 'zf-pet-settings__note' }, t('taskNote')),
+          // 时间花在哪：按任务聚合（宿主已按耗时降序排好，这里不再排一次）
+          h('p', { key: 'byTaskTitle', className: 'zf-pet-settings__note' }, t('todayByTask')),
+          (today.byTask ?? []).length === 0
+            ? h('p', { key: 'byTaskEmpty', className: 'zf-pet-settings__note' }, t('todayByTaskEmpty'))
+            : h('ul', { key: 'byTask', className: 'zf-pet-tasklist' },
+                (today.byTask ?? []).map(it => h('li', { key: it.task || '∅' },
+                  `${it.task === '' ? t('taskUnnamed') : it.task} · ${formatFocus(it.ms)}`))),
+          // 最近 7 天：一行一个迷你条（不做图表库 —— 7 个数字画柱子足够）
+          h('p', { key: 'recentTitle', className: 'zf-pet-settings__note' }, t('todayRecent')),
+          h('div', { key: 'recent', className: 'zf-pet-spark' },
+            (today.recent ?? []).map(d => h('span', {
+              key: d.dayKey,
+              className: 'zf-pet-spark__bar',
+              title: `${d.dayKey} · ${d.count} 个`,
+              // 高度按"7 天里最多的那天"归一化；全 0 时给 2% 保证看得见一条底线。
+              style: { height: sparkHeight(d.count) }
+            }))),
+          // 里程碑：已达成的列出来（没有就说没有，不留空白）
+          h('p', { key: 'msTitle', className: 'zf-pet-settings__note' }, t('todayMilestone')),
+          milestoneKeys().length === 0
+            ? h('p', { key: 'msEmpty', className: 'zf-pet-settings__note' }, t('todayMilestoneEmpty'))
+            : h('p', { key: 'ms', className: 'zf-pet-settings__note' }, milestoneKeys().join(' · '))
+        ]),
+
+        /* ── ⑦ 诊断：**整页默认全部收起** ────────────────────────────────
          *
          * 这里放的全是"出问题时才需要看"的东西：服务状态、**启动命令（机器
          * 路径）**、素材覆盖、会话 id、目录路径。原先它们以 24 条同权重的说明
@@ -2936,6 +3322,55 @@ input[type=number].zf-pet-row__input:focus-visible{
 .zf-pet-chatrow__input:disabled{ opacity:.6; }
 .zf-pet-chatrow .zf-pet-settings__btn{ flex:0 0 auto; }
 
+/* ── v10「今天」页签 ────────────────────────────────────────────────────
+ *
+ * 四个数字 + 目标进度 + 任务列表 + 7 天迷你柱。
+ *
+ * ⚠️ 字号只用 12/14/16 三档（设置页有断言守着这条）：
+ *   数字 16（要一眼看到）、标签 12（次要）、其余 12/14。
+ * 布局一律 flex + min-width:0，否则长任务名会把卡片撑破。 */
+.zf-pet-stats{ display:flex;gap:10px;flex-wrap:wrap;padding:4px 0 10px; }
+.zf-pet-stat{
+  flex:1 1 0;min-width:88px;
+  display:flex;flex-direction:column;gap:2px;
+  padding:10px 12px;border-radius:var(--zf-ctl-radius);
+  background:var(--zf-card-fill);
+  border:1px solid var(--zf-card-stroke);
+}
+.zf-pet-stat__v{
+  font-size:16px;line-height:24px;font-weight:600;
+  color:var(--dsw-alias-label-primary);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.zf-pet-stat__l{ font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary); }
+
+/* 目标进度：细条 + 一行文字。宽度夹在容器内，超额完成不撑破。 */
+.zf-pet-goal{ display:flex;align-items:center;gap:10px;padding:2px 0 10px; }
+.zf-pet-goal__bar{
+  flex:1 1 auto;min-width:0;height:6px;border-radius:3px;
+  background:var(--zf-hairline);overflow:hidden;
+}
+.zf-pet-goal__fill{
+  display:block;height:100%;border-radius:3px;
+  background:var(--dsw-alias-brand-primary,#4c8dff);
+}
+.zf-pet-goal__txt{ flex:0 0 auto;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary); }
+
+/* 任务耗时列表：左对齐、任务名可省略号（长名字不换行撑高卡片）。 */
+.zf-pet-tasklist{ margin:0 0 8px;padding:0 0 0 18px;list-style:disc; }
+.zf-pet-tasklist li{
+  font-size:12px;line-height:20px;color:var(--dsw-alias-label-secondary);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+
+/* 最近 7 天迷你柱：固定高度容器 + 底部对齐，柱子按最大值归一化。
+ * 高度用百分比 → 容器必须有确定高度（24px），否则百分比无从计算。 */
+.zf-pet-spark{ display:flex;align-items:flex-end;gap:4px;height:24px;padding:0 0 10px; }
+.zf-pet-spark__bar{
+  flex:1 1 0;min-width:0;border-radius:2px;
+  background:var(--dsw-alias-brand-primary,#4c8dff);opacity:.65;
+}
+
 /* 记忆编辑框：等宽 + 可纵向拖。高度压到 96px —— 它是个编辑区，
  * 不是正文，默认给太大就会把「保存」按钮顶到屏幕外。 */
 .zf-pet-memobox{
@@ -3251,8 +3686,13 @@ input[type=number].zf-pet-row__input:focus-visible{
         // ── v3：番茄钟 / 语音 / 人设 / 聊天 ────────────────────────────────
         //
         // 全部走上面那个 `api()`，共用错误归一化与围栏处理。
-        pomodoroAction (action) {
-          return api('POST', '/pomodoro', { action })
+        /**
+         * @param {string} action
+         * @param {object} [options] - `set-task` 时带 `{task}`（宿主侧有白名单与长度校验）
+         */
+        pomodoroAction (action, options) {
+          return api('POST', '/pomodoro',
+            options === undefined ? { action } : { action, ...options })
         },
         loadVoiceInfo () {
           return api('GET', '/voices')

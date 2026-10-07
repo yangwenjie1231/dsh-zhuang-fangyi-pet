@@ -495,12 +495,21 @@ export function createHandler (deps) {
           const action = String(parsed?.action ?? '')
           // ⚠️ **白名单**：动作名直接映射到番茄钟方法，绝不能把用户串
           // 透传到内部（那等于给了一个任意方法调用入口）。
-          const ALLOWED = ['start', 'pause', 'toggle', 'skip', 'reset']
+          //
+          // v10 加了 `set-task`：它是唯一带**参数**的动作，所以参数也要在
+          // 这一层校验（长度 + 类型），不能只查动作名就放行。
+          const ALLOWED = ['start', 'pause', 'toggle', 'skip', 'reset', 'set-task']
           if (!ALLOWED.includes(action)) {
             sendJson(res, 400, { error: 'bad action', allowed: ALLOWED })
             return
           }
-          const result = deps.pomodoro.control(action)
+          // `set-task` 的参数字段名是 `task`。长度上限与 `stats.js` 的
+          // `TASK_MAX_CHARS`(24) 留出余量：**这里挡的是荒唐输入**
+          //（10KB 字符串），精确截断归 `normalizeTask` —— 两处各管一件事。
+          const options = action === 'set-task'
+            ? { task: typeof parsed?.task === 'string' ? parsed.task.slice(0, 200) : '' }
+            : undefined
+          const result = deps.pomodoro.control(action, options)
           if (result === null) {
             sendJson(res, 400, { error: 'bad action', allowed: ALLOWED })
             return
