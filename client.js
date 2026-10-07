@@ -1445,8 +1445,26 @@ window.__ModuleLoader__.load({
         setMemoryNote(null)
         Promise.resolve(fn(memoryDraftRef.current))
           .then(r => {
+            if (r?.ok === false) {
+              // ⚠️ 宿主写盘失败时返回的是 `{ok:false, reason}`，HTTP 状态仍是 200
+              //（`api()` 只在 `!res.ok` 时抛）—— 所以**必须自己看 `ok`**，
+              // 否则会把"写失败"报成"已保存"，用户以为记住了、其实没有。
+              setMemoryNote(`保存失败：${r.reason ?? '未知原因'}`)
+              return
+            }
             setMemoryNote(t('memorySaved'))
-            if (r !== null && r !== undefined) setMemory(r)
+            // ⚠️ 这里必须**合并**，不能整体替换。
+            //
+            // `POST /memory` 的应答只有 `{ok, bytes, text}`，而 `GET /memory`
+            // 给的是 `{text, bytes, capBytes, auto, file}` —— 两个形状不一样。
+            // 原先写的是 `setMemory(r)`：保存一次之后 `memory.file` /
+            // `memory.capBytes` 就变成 undefined，诊断区那行"记忆文件"
+            // 会退化成 `— · N / 0 字节`（用户看到的是"文件不见了"）。
+            if (r !== null && r !== undefined) {
+              setMemory(prev => ({ ...(prev ?? {}), ...r }))
+            }
+            // 让编辑框重建，显示"已保存的那一份"（与 `key` 里的 nonce 配套）。
+            setMemoryNonce(n => n + 1)
           })
           .catch(e => setMemoryNote(`保存失败：${e?.message ?? e}`))
           .finally(() => setMemoryBusy(false))

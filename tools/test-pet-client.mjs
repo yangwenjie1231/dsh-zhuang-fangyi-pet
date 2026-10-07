@@ -906,6 +906,176 @@ ok('⭐ 分组标题不能用西文那套 uppercase/字距（套在中文上只�
   }
 })
 
+okAsync('⭐⭐ 保存记忆后编辑框会重建（显示"已保存的那一份"）', async () => {
+  // ⚠️ 这条与上一条配套：`saveMemory()` 也必须让 nonce 自增。
+  // 我第一版写了注释声称"加载完成、保存成功两处都自增"，但代码只在加载处
+  // 自增了 —— **注释与代码不一致**，正是这一整轮在修的那种 bug。
+  // 单靠读代码很容易漏，所以给它一条断言。
+  const l = loadClient({
+    fetchImpl: async (url, init) => {
+      if (String(url).endsWith('/memory')) {
+        if (init?.method === 'POST') {
+          const sent = JSON.parse(init.body)
+          return { ok: true, status: 200, json: async () => ({ ok: true, bytes: sent.text.length, text: sent.text }), text: async () => '' }
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ text: '旧记忆', file: 'D:\\m.md', bytes: 9, capBytes: 4096, auto: true }),
+          text: async () => ''
+        }
+      }
+      return { ok: true, status: 200, json: async () => ({}), text: async () => '' }
+    }
+  })
+  l.exports.apply(l.ctx)
+  const { Section, runtime } = l.exports.__test
+  runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 1 } } }
+  runtime.__state.snapshot = { petState: 'idle', label: '', bubble: null, nativeAvailable: true }
+  l.react.resetHooks()
+  Section({ close () {} })
+
+  // 拉记忆（挂载 effect）
+  for (const fn of l.react.hooks.effects) { if (typeof fn === 'function') { try { fn() } catch { /* 忽略 */ } } }
+  await new Promise(r => setTimeout(r, 30))
+  l.react.resetHooks()
+  const loaded = Section({ close () {} })
+  const keyAfterLoad = collectByType(loaded, 'textarea')[0].props.key
+
+  // 改一个字，点保存。
+  // ⚠️ 每次 `Section()` 之前**必须** `resetHooks()`：桩的 hook 游标是全局的，
+  //    连着渲染两次而不重置 → 第二次从越界游标开始、给每个 hook 建**新槽位**，
+  //    于是 setState 写进新槽、下一次渲染读旧槽，表现为"状态没变"。
+  //    我第一版漏了这一步，断言因此误报（是测试错了，不是代码错了）。
+  l.react.resetHooks()
+  const dirty = Section({ close () {} })
+  collectByType(dirty, 'textarea')[0].props.onInput({ target: { value: '新记忆' } })
+  let saveBtn = null
+  const walk = n => {
+    if (n === null || n === undefined) return
+    if (Array.isArray(n)) { n.forEach(walk); return }
+    if (typeof n !== 'object') return
+    if (n.type === 'button' && Array.isArray(n.props?.children) && String(n.props.children[0]).includes('保存')) saveBtn = n
+    if (n.props) walk(n.props.children)
+  }
+  walk(dirty)
+  assert.ok(saveBtn, '应有「保存记忆」按钮')
+  assert.equal(saveBtn.props.disabled, false, '空闲时保存按钮应可点')
+  saveBtn.props.onClick()
+  await new Promise(r => setTimeout(r, 30))
+
+  l.react.resetHooks()
+  const after = Section({ close () {} })
+  const box = collectByType(after, 'textarea')[0]
+  assert.notEqual(box.props.key, keyAfterLoad,
+    '保存成功后编辑框应重建（否则框里留着旧内容，而磁盘上已经是新的了）')
+  assert.equal(box.props.defaultValue, '新记忆', '重建后应显示刚保存的内容')
+})
+
+okAsync('⭐⭐ 保存记忆后，诊断区的"记忆文件/容量"不许退化成 —（两个端点形状不同）', async () => {
+  // `GET /memory`  → {text, bytes, capBytes, auto, file}
+  // `POST /memory` → {ok, bytes, text}          ← **没有 file / capBytes**
+  // 原先保存走的是 `setMemory(r)`（整体替换），于是保存一次之后
+  // `memory.file` 与 `memory.capBytes` 变成 undefined，
+  // 诊断区那行会显示成 `— · N / 0 字节`，看起来像"记忆文件不见了"。
+  const l = loadClient({
+    fetchImpl: async (url, init) => {
+      if (String(url).endsWith('/memory')) {
+        if (init?.method === 'POST') {
+          const sent = JSON.parse(init.body)
+          return { ok: true, status: 200, json: async () => ({ ok: true, bytes: sent.text.length, text: sent.text }), text: async () => '' }
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ text: '旧记忆', file: 'D:\\data\\memory.md', bytes: 9, capBytes: 4096, auto: true }),
+          text: async () => ''
+        }
+      }
+      return { ok: true, status: 200, json: async () => ({}), text: async () => '' }
+    }
+  })
+  l.exports.apply(l.ctx)
+  const { Section, runtime } = l.exports.__test
+  runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 1 } } }
+  runtime.__state.snapshot = { petState: 'idle', label: '', bubble: null, nativeAvailable: true }
+  l.react.resetHooks()
+  Section({ close () {} })
+  for (const fn of l.react.hooks.effects) { if (typeof fn === 'function') { try { fn() } catch { /* 忽略 */ } } }
+  await new Promise(r => setTimeout(r, 30))
+
+  // 保存
+  l.react.resetHooks()
+  let tree = Section({ close () {} })
+  collectByType(tree, 'textarea')[0].props.onInput({ target: { value: '新记忆更长一点' } })
+  let saveBtn = null
+  const walk = n => {
+    if (n === null || n === undefined) return
+    if (Array.isArray(n)) { n.forEach(walk); return }
+    if (typeof n !== 'object') return
+    if (n.type === 'button' && Array.isArray(n.props?.children) && String(n.props.children[0]).includes('保存')) saveBtn = n
+    if (n.props) walk(n.props.children)
+  }
+  walk(tree)
+  saveBtn.props.onClick()
+  await new Promise(r => setTimeout(r, 30))
+
+  // 诊断区那行必须**仍然**有文件路径与容量
+  l.react.resetHooks()
+  tree = Section({ close () {} })
+  const diags = collectByType(tree, 'Diag').map(n => n.props)
+  const memRow = diags.find(d => String(d.k).includes('记忆文件') || String(d.k).includes('Memory'))
+  assert.ok(memRow, `诊断区应有"记忆文件"行，实际的键：${diags.map(d => d.k).join(', ')}`)
+  assert.ok(!String(memRow.v).startsWith('—'),
+    `保存后记忆文件路径不该变成 '—'（说明 setMemory 把 GET 的形状整体替换成了 POST 的形状），实际：${memRow.v}`)
+  assert.ok(String(memRow.v).includes('memory.md'), `应保留文件路径，实际：${memRow.v}`)
+  assert.ok(!/\/ 0 /.test(String(memRow.v)),
+    `保存后容量不该变成 0（capBytes 被 POST 应答冲掉了），实际：${memRow.v}`)
+})
+
+okAsync('⭐ 宿主写盘失败（HTTP 200 + ok:false）必须如实报错，不许报"已保存"', async () => {
+  // 宿主写盘失败时返回 `{ok:false, reason:'write-failed'}`，**HTTP 状态仍是 200**，
+  // 而客户端的 `api()` 只在 `!res.ok` 时抛 —— 所以不自己看 `ok` 就会把
+  // "写失败"报成"已保存"。用户以为记住了，其实没有。
+  const l = loadClient({
+    fetchImpl: async (url, init) => {
+      if (String(url).endsWith('/memory')) {
+        if (init?.method === 'POST') {
+          return { ok: true, status: 200, json: async () => ({ ok: false, reason: 'write-failed' }), text: async () => '' }
+        }
+        return { ok: true, status: 200, json: async () => ({ text: 'x', file: 'f', bytes: 1, capBytes: 10 }), text: async () => '' }
+      }
+      return { ok: true, status: 200, json: async () => ({}), text: async () => '' }
+    }
+  })
+  l.exports.apply(l.ctx)
+  const { Section, runtime } = l.exports.__test
+  runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 1 } } }
+  runtime.__state.snapshot = { petState: 'idle', label: '', bubble: null, nativeAvailable: true }
+  l.react.resetHooks()
+  let tree = Section({ close () {} })
+  let saveBtn = null
+  const walk = n => {
+    if (n === null || n === undefined) return
+    if (Array.isArray(n)) { n.forEach(walk); return }
+    if (typeof n !== 'object') return
+    if (n.type === 'button' && Array.isArray(n.props?.children) && String(n.props.children[0]).includes('保存')) saveBtn = n
+    if (n.props) walk(n.props.children)
+  }
+  walk(tree)
+  saveBtn.props.onClick()
+  await new Promise(r => setTimeout(r, 30))
+
+  l.react.resetHooks()
+  tree = Section({ close () {} })
+  const notes = collectStrings(tree)
+  const joined = notes.join('|')
+  assert.ok(!joined.includes('已保存'),
+    '写盘失败时**不能**显示"已保存"（用户会以为记住了）')
+  assert.ok(joined.includes('write-failed') || joined.includes('保存失败'),
+    `应如实报出失败原因，实际提示：${joined}`)
+})
+
 /* ══════════════════════════════════════════════════════════════════════════
  * 6. 渲染：定位约束（最容易挡住整个界面的地方）
  * ═════════════════════════════════════════════════════════════════════════ */
