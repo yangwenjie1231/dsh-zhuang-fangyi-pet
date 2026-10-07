@@ -401,6 +401,68 @@ export function apply (ctx, config) {
     pickBubbleImage
   })
 
+  // ── 时间驱动：**按需调度** + 15s 兜底 ─────────────────────────────────────
+  //
+  // `sleeping` / `waking` 这类粗粒度逻辑靠 15 秒兜底 ticker 就够
+  //（sleepMs 默认 5 分钟，精度要求很低）。
+  //
+  // ⚠️ 但**最短驻留不能靠它**：状态机是**事件驱动**的，
+  // "思考满 2 秒才切干活"这个决定要等到下一次 tick 才生效 ——
+  // 最坏压 15 秒（e2e 实测：2 秒后仍未切换）。气泡到期同理
+  //（`bubbleMs` 6 秒的气泡可能挂到 21 秒）。
+  //
+  // 所以状态机报出 `nextDeadline()`（下一个**已知会变**的时刻），
+  // 这里按时起定时器；定时器只跑一次、跑完立刻重排 —— 不做固定频率轮询。
+  //
+  // 放在这里（紧跟 machine）是因为事件桥要用它（见 `onApplied`）：
+  // 每来一个事件就重排一次，新产生的驻留到期点才会被排上。
+  let tickTimer = null
+  let tickFloor = 0
+  const TICK_BACKSTOP_MS = 15000
+  const TICK_MIN_MS = 100          // 别让 0/负数退化成立即重排的忙循环
+
+  function scheduleTick () {
+    const deadline = typeof machine.nextDeadline === 'function' ? machine.nextDeadline() : null
+    let delay = TICK_BACKSTOP_MS
+    if (typeof deadline === 'number' && deadline > 0) {
+      delay = Math.max(TICK_MIN_MS, Math.min(TICK_BACKSTOP_MS, deadline - Date.now()))
+    }
+    // 已经排着同一个延迟 → 什么都不用做（连着几个事件算出同一个 deadline 时）。
+    //
+    // ⚠️ **必须先判再清**。原先的顺序是"先 clearTimeout 再判"，于是这一支
+    // 会**把定时器清掉却不补上** —— 而且 `tickFloor` 还留着旧值，
+    // 后续每次算出同一个 delay 都会再次早退，**定时器永远回不来**。
+    // 后果不是"晚一点"而是"没有了"：兜底 ticker 是 `sleeping`/气泡过期的
+    // 唯一驱动，一旦丢了这个桌宠就**再也不睡觉、气泡再也不消失**。
+    //
+    // 为什么现在才暴露：这条路要"连着两次算出同一个 delay"才走到，
+    // 而 `onApplied`（每个事件后重排）落地之前，scheduleTick 只在启动与
+    // 定时器回调里被调用（回调里 `tickFloor` 已归零），根本走不到这一支。
+    // 接上 `onApplied` 之后它变得非常容易走到：连着两个"没有 deadline"的
+    // 事件算出来都是 15000（兜底值），第二次就把定时器清没了。
+    if (tickTimer !== null && delay === tickFloor) return
+    if (tickTimer !== null) {
+      clearTimeout(tickTimer)
+      tickTimer = null
+    }
+    tickFloor = delay
+    tickTimer = setTimeout(() => {
+      tickTimer = null
+      tickFloor = 0
+      try {
+        machine.tick()
+      } catch (error) {
+        logger.warn?.(`zhuang-fangyi-pet: tick 失败（${error?.message ?? error}）`)
+      }
+      scheduleTick()
+    }, delay)
+    tickTimer.unref?.()
+  }
+  scheduleTick()
+  ctx.effect(() => () => {
+    if (tickTimer !== null) clearTimeout(tickTimer)
+  }, 'zhuang-fangyi-pet: idle ticker')
+
   // ── 番茄钟（用户点名："增加番茄钟提醒我休息"）─────────────────────────────
   //
   // 它是**独立于 AI 状态**的一条时间线（见 `pomodoro.js` 文件头），
@@ -920,6 +982,33 @@ export function apply (ctx, config) {
   /** 最近一次交付的语音（进快照）。 */
   let speechLatest = null
   /**
+   * **兜底台词**（进快照的 `speak.fallback`）：动态语音没兜住时，exe 改播固定台词。
+   *
+   * 为什么需要：TTS 子插件还在开发中，可能没装 / 超时 / 合成失败。那种情况下
+   * "回复到达"这个时刻会**完全无声** —— 而 `art/voice/voice.json` 里明明有 12 条
+   * `chat/reply` 固定台词（"我说完了" / "你看这样行吗？"…）。
+   *
+   * ⚠️ 这一段以前只有注释（"退回固定台词，exe 侧会播 chat/reply"），
+   * **exe 侧从来没实现过** —— 于是那 12 条是死资源。现在两端口径对齐。
+   *
+   * `seq` 用于去重（exe 见到新值才播一次）；与 `speechSeq` 分开是因为
+   * 两者语义不同（一个是"有音频"，一个是"没音频、说一句"）。
+   */
+  let speechFallback = null
+  let speechFallbackSeq = 0
+
+  /**
+   * 发一次兜底台词请求。
+   *
+   * @param {string} event - 清单里的事件名（`chat/reply`）
+   */
+  const publishSpeechFallback = event => {
+    speechFallbackSeq += 1
+    speechFallback = { seq: speechFallbackSeq, event }
+    boot(`兜底台词：${event}（#${speechFallbackSeq}，动态语音不可用）`)
+    try { hub.broadcast(withSettings(machine.snapshot())) } catch { /* 还没起来 */ }
+  }
+  /**
    * 合成代际：每来一条新回复就 +1。
    *
    * 为什么需要它：合成要几秒，而用户可能连发几条。没有代际的话，
@@ -1380,6 +1469,10 @@ export function apply (ctx, config) {
               // 服务没起 / 超时 / 返回垃圾 —— 这一段之后的都放弃
               //（退回固定台词，exe 侧会播 chat/reply）。
               boot(`动态语音合成不可用 → 第 ${i + 1}/${chunks.length} 段起放弃`)
+              // ⭐ 真的发出兜底信号（契约 §2 `speak.fallback`）：之前这里只有一句注释，
+              //   exe 侧**从来没有**对应的实现 —— 于是 `chat/reply` 那 12 条固定台词
+              //   是死资源（TTS 一关就永远不会被播）。现在 exe 见到新 seq 会播一次。
+              publishSpeechFallback('chat/reply')
               return
             }
             try {
@@ -1903,9 +1996,15 @@ export function apply (ctx, config) {
      *
      * 与 `interact` 同一模式：seq 递增而不是时间戳（同一毫秒两次不会漏）。
      * `name` 是缓存键，exe 去 `/pet/speech/<name>` 取 WAV。
-     * 没开动态语音 / 还没合成好时是 null —— exe 保持沉默，退回固定台词。
+     * 没开动态语音 / 还没合成好时是 null —— exe 保持沉默。
+     *
+     * `fallback` 是**可选子块**：动态语音真的没兜住时（TTS 没装/超时/失败），
+     * Host 填 `{seq, event}`，exe 见到新 seq 且 `name` 为空时播一次固定台词。
+     * 缺省即"没有兜底请求"（旧 Host → exe 保持沉默）。
      */
-    speak: speechLatest,
+    speak: speechLatest === null
+      ? (speechFallback === null ? null : { fallback: speechFallback })
+      : { ...speechLatest, ...(speechFallback === null ? {} : { fallback: speechFallback }) },
     // 会话列表：给"发送到哪个对话"的选择器用（见 `sessionChoices`）。
     sessions: sessionChoices(snap),
     // 能力位：两半边的 ✎ 入口都靠它决定显不显示（**不做没入口的错误**）。
@@ -2025,7 +2124,10 @@ export function apply (ctx, config) {
   // 现在把 `assistant/message` 从 `session/event` 里接出来交给 `onChatMessage`：
   // 状态机仍然不读正文（红线不变），聊天另走一条**只认聊天会话**的通道。
   const offEvents = bridgeHostEvents(ctx, machine, logger, {
-    onChatMessage: (sessionId, event) => onAssistantMessage(sessionId, event)
+    onChatMessage: (sessionId, event) => onAssistantMessage(sessionId, event),
+    // 每来一个事件就重排定时器：新的驻留到期点 / 气泡到期点据此入队。
+    // 不这么做的话，新产生的"2 秒后该换图"要等兜底 ticker（最坏 15 秒）。
+    onApplied: () => scheduleTick()
   })
   ctx.effect(() => () => offEvents(), 'zhuang-fangyi-pet: host events')
   boot('状态机 + 事件桥已就绪（含聊天正文通道）')
@@ -2105,17 +2207,9 @@ export function apply (ctx, config) {
   // 于是订阅永远不触发、也没有任何日志（这正是用户报的那个 bug 的根因）。
   // 订阅已在上面的 `bridgeHostEvents(..., { onChatMessage })` 里完成。
 
-  // ── 空闲驱动：`sleeping` 需要时间推进，纯事件驱动不会自己发生 ─────────────
-  // 每 15s tick 一次足够（sleepMs 默认 5 分钟，精度要求很低）。
-  const ticker = setInterval(() => {
-    try {
-      machine.tick()
-    } catch (error) {
-      logger.warn?.(`zhuang-fangyi-pet: tick 失败（${error?.message ?? error}）`)
-    }
-  }, 15000)
-  ticker.unref?.()
-  ctx.effect(() => () => clearInterval(ticker), 'zhuang-fangyi-pet: idle ticker')
+  // ── 时间驱动：`sleeping` 需要时间推进，纯事件驱动不会自己发生 ─────────────
+  // 调度器已在上方（紧跟 machine）就位：它是 `onApplied` 的回调，且启动时已跑过一次。
+  // 这里的兜底语义不变 —— 若 `nextDeadline()` 返回 null，就按 15 秒周期醒一次。
 
   // ── 番茄钟推进 ──────────────────────────────────────────────────────────
   //
@@ -2286,6 +2380,15 @@ export function apply (ctx, config) {
     diagnostics: () => ({
       build: PLUGIN_BUILD,
       ...diagnostics,
+      /**
+       * 兜底 ticker 的现状。
+       *
+       * 为什么把它放进 diag：`sleeping`/气泡过期**没有别的驱动**，只靠这个定时器。
+       * 它一旦被丢掉（见 `scheduleTick` 里那段"必须先判再清"的说明），
+       * 表现是"桌宠再也不睡觉、气泡再也挂在那儿" —— 而且**没有任何报错**，
+       * 只能靠肉眼盯。有了 `armed` 就能一眼判定，e2e 也据此立了一条回归断言。
+       */
+      tick: { armed: tickTimer !== null, floor: tickFloor },
       launcher: launcher.status,
       nativeAvailable: machine.snapshot().nativeAvailable,
       // 语音包状态：让"到底装上没有"一眼可见（缺失是正常的，不是错误）。

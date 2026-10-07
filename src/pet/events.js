@@ -212,6 +212,18 @@ export function bridgeHostEvents (ctx, machine, logger = console, opts = {}) {
     } catch (error) {
       logger.warn?.(`zhuang-fangyi-pet: 状态机处理失败（已忽略）：${error?.message ?? error}`)
     }
+    // 每个事件之后让宿主重排定时器（可选）：状态机是事件驱动的，
+    // 而"最短驻留到期才换图""气泡 6 秒后收"这类决定都**已知会发生**、
+    // 只是还没到点 —— 宿主靠 `nextDeadline()` 精确起定时器，不必等兜底轮询。
+    //
+    // 放在 catch 之后：即使 apply 抛了也要重排（不然可能留下一个永不触发的定时器）。
+    if (typeof opts.onApplied === 'function') {
+      try {
+        opts.onApplied()
+      } catch (error) {
+        logger.warn?.(`zhuang-fangyi-pet: 事件后调度失败（已忽略）：${error?.message ?? error}`)
+      }
+    }
   }
 
   // ── scoped 事件：根监听者收全部（见文件头说明）──────────────────────────

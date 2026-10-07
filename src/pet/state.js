@@ -62,16 +62,37 @@ export const STATE_PRIORITY = {
   thinking: 70,
   error: 60,
   happy: 50,
+  /**
+   * `listening` **保留在值域里，但运行时不再产出**（用户 2026-10-07：
+   * 「Listening 这个状态几乎不会出现（过的很快，而且意义不大）」）。
+   *
+   * 它原本是 `inbox/inserted` 置的一个 1.2 秒闩锁，优先级低于 thinking ——
+   * 于是只有在"你刚发完消息、agent 还没起跑"的那 1.2 秒里才可能成为 petState，
+   * agent 一开跑就被 thinking 盖掉；而它那组图（眨眼等）与 idle 撞脸，
+   * 就算闪过你也分辨不出来。改为**只弹气泡**（`inbox/inserted` 事件本来就有）。
+   *
+   * 保留条目是为了**向后兼容**：契约 §1 的 9 个状态名、老客户端、老设置都不动。
+   */
   listening: 40,
   waking: 30,
   idle: 20,
   sleeping: 10
 }
 
+/**
+ * 哪些状态**不受最短驻留约束**（切过去立即生效）。
+ *
+ * 驻留是为了消除抖动（见 `effectiveSessionState`），但这几个是"事件时刻"：
+ * 完成 / 出错 / 等你审批 / 刚醒 / 睡着 —— 晚 2 秒才出��会让语音与画面对不上，
+ * 「等你审批」更是会把一次**要人动手**的提醒硬压两秒。
+ */
+export const DWELL_EXEMPT_STATES = new Set(['waking', 'happy', 'error', 'waiting', 'sleeping'])
+
 /** 每个状态的文案。Host 按 `locale` 选一条，同时把 key 发给客户端以便自行本地化。 */
 export const STATE_TEXT = {
   waking: { zh: '醒来了…', en: 'Waking up…' },
   idle: { zh: '待机中', en: 'Idle' },
+  /** 保留在值域里但运行时不再产出（见 `STATE_PRIORITY.listening` 的说明）。 */
   listening: { zh: '收到啦', en: 'Got it' },
   thinking: { zh: '正在思考…', en: 'Thinking…' },
   working: { zh: '正在调用工具…', en: 'Working…' },
@@ -83,7 +104,7 @@ export const STATE_TEXT = {
 
 /** 非「状态本身」的气泡文案（事件驱动，不改变 petState）。 */
 export const EVENT_TEXT = {
-  'inbox/inserted': { zh: '收到新消息', en: 'New message' },
+  'inbox/inserted': { zh: '收到，说吧。', en: "Got it — go ahead." },
   'tool/failed': { zh: '工具出错了', en: 'A tool failed' },
   'turn/max-tokens': { zh: '输出被截断', en: 'Output truncated' },
   /** `notifyComplete` 强提醒的文案。不是状态，只是"跑完了"的一声招呼。 */
@@ -104,7 +125,7 @@ export const EVENT_TEXT = {
 
 /** 进入这些状态时会弹一次气泡；`idle`/`waking`/`sleeping` 太安静，不弹。 */
 /** 默认弹气泡的状态（`activity.js` 的"正常/调皮"档按它走）。 */
-export const DEFAULT_BUBBLE_STATES = ['listening', 'thinking', 'working', 'waiting', 'happy', 'error']
+export const DEFAULT_BUBBLE_STATES = ['thinking', 'working', 'waiting', 'happy', 'error']
 
 /** 默认参数。全部可被 `createPetState({config})` 覆盖，便于测试用极小值。 */
 export const DEFAULT_CONFIG = {
@@ -112,8 +133,19 @@ export const DEFAULT_CONFIG = {
   wakingMs: 1500,
   /** `happy` 闩锁时长：庆祝一下就回 idle，别一直傻笑。 */
   happyMs: 3000,
-  /** `listening` 闩锁时长：收到消息时的短促反应。 */
-  listeningMs: 1200,
+  /**
+   * **过程态的最短驻留**（ms）：切到新状态不足这么久就继续显示上一个。
+   *
+   * 为什么需要它：`thinking` 与 `working` 是**交替**而不是阶段 ——
+   * `sessionState()` 里 `toolsInFlight > 0` 就是 working，否则 running 就是 thinking。
+   * 于是每个工具调用都会来一轮「想 → 做 → 回到想」，而一次本地工具常常只有
+   * 几十~几百毫秒。切状态就会换图（exe 换精灵条带），于是桌面上一直在抖，
+   * 变体轮换还没轮到就被抖回去了 —— 这正是"主体变化度少"的一半原因。
+   *
+   * 2 秒是用户定的值。豁免名单见 `DWELL_EXEMPT_STATES`（完成/出错/等你审批等
+   * 事件时刻立即生效，不被压两秒）。测试可置 0 恢复"立刻响应"的旧行为。
+   */
+  minStateDwellMs: 2000,
   /** 全局空闲多久算睡着。 */
   sleepMs: 300000,
   /** 气泡默认停留时长。 */
@@ -224,7 +256,16 @@ function newRecord (sessionId) {
     attentionSince: null,
     error: null,
     happyUntil: null,
-    listeningUntil: null,
+    /**
+     * **最短驻留闩锁**：上一次"对外显示"的状态与起始时刻（见
+     * `effectiveSessionState`）。`null` = 还没显示过任何状态。
+     *
+     * 为什么按会话存而不是全局存：快照里的 `sessions[].state` 也要过闩锁 ——
+     * exe 的 `EffectiveState()` 会拿各会话状态与顶层 `petState` 比优先级取最大，
+     * 只锁顶层的话原始会话状态会把它顶回去，抖动照旧。
+     */
+    latchState: null,
+    latchSince: 0,
     lastEventAt: 0
   }
 }
@@ -242,8 +283,43 @@ export function sessionState (rec, at) {
   if (rec.running) return 'thinking'
   if (rec.error !== null) return 'error'
   if (rec.happyUntil !== null && at < rec.happyUntil) return 'happy'
-  if (rec.listeningUntil !== null && at < rec.listeningUntil) return 'listening'
   return 'idle'
+}
+
+/**
+ * 单个会话此刻**对外显示**的状态 = `sessionState()` 过一道最短驻留闩锁。
+ *
+ * 规则（用户定的 2 秒）：
+ *   · 与上次显示相同 → 不动（`latchSince` 也不动）；
+ *   · 新旧**都**是过程态（不在 `DWELL_EXEMPT_STATES` 里）且距上次切换不足
+ *     `minStateDwellMs` → **继续显示上一个**；
+ *   · 其余（事件时刻：完成/出错/等你审批/刚醒/睡着）→ 立即切换。
+ *
+ * 为什么需要：见 `DEFAULT_CONFIG.minStateDwellMs` —— thinking 与 working 是交替的，
+ * 一个工具调用就能触发一次切换，几百毫秒一轮，桌面上一直在抖。
+ *
+ * 纯函数性：只改 `rec` 上的两个字段（闩锁记账），不改任何语义状态。
+ *
+ * @param {object} rec - 会话记录
+ * @param {number} at - 当前时间（epoch ms）
+ * @param {number} dwellMs - 最短驻留（`0` = 不驻留，直接返回 `sessionState()`）
+ * @returns {string} 状态名
+ */
+export function effectiveSessionState (rec, at, dwellMs) {
+  const raw = sessionState(rec, at)
+  if (!(dwellMs > 0)) return raw
+  if (rec.latchState === null) {
+    rec.latchState = raw
+    rec.latchSince = at
+    return raw
+  }
+  if (raw === rec.latchState) return raw
+  const bothProcess = !DWELL_EXEMPT_STATES.has(raw) &&
+    !DWELL_EXEMPT_STATES.has(rec.latchState)
+  if (bothProcess && at - rec.latchSince < dwellMs) return rec.latchState
+  rec.latchState = raw
+  rec.latchSince = at
+  return raw
 }
 
 /**
@@ -284,7 +360,7 @@ export function createPetState (options = {}) {
       next[key] = value
     }
     // 数值字段夹取：负数/NaN 会让排程与静默期算出荒唐结果。
-    for (const key of ['wakingMs', 'happyMs', 'listeningMs', 'sleepMs', 'bubbleMs', 'bubbleSilenceMs']) {
+    for (const key of ['wakingMs', 'happyMs', 'minStateDwellMs', 'sleepMs', 'bubbleMs', 'bubbleSilenceMs']) {
       const n = Number(next[key])
       next[key] = Number.isFinite(n) && n >= 0 ? n : DEFAULT_CONFIG[key]
     }
@@ -376,7 +452,7 @@ export function createPetState (options = {}) {
   /** 聚合出此刻应该展示的状态。 */
   function computeState (at) {
     const states = []
-    for (const rec of sessions.values()) states.push(sessionState(rec, at))
+    for (const rec of sessions.values()) states.push(effectiveSessionState(rec, at, cfg.minStateDwellMs))
     let best = highestState(states)
 
     // `waking` 是启动亮相态：只在**还没有任何会话活动**、且仍在亮相窗口内时显示。
@@ -666,7 +742,6 @@ export function createPetState (options = {}) {
           // 关键：新回合一开始就清掉错误闩锁，否则「历史错误覆盖当前回合」。
           rec.error = null
           rec.happyUntil = null
-          rec.listeningUntil = null
         } else {
           rec.running = false
           // 兜底：真的 idle 了却还有在飞工具，说明结果事件丢了。
@@ -765,11 +840,17 @@ export function createPetState (options = {}) {
 
       case 'inbox/inserted': {
         const rec = ensure(sessionId)
-        rec.listeningUntil = at + cfg.listeningMs
         rec.lastEventAt = at
+        // ⭐ 只弹气泡，**不再切主体状态**（用户 2026-10-07）。
+        // 原先这里置一个 1.2 秒的 `listeningUntil` 闩锁，但 `listening` 优先级低于
+        // `thinking` —— agent 一开跑就被盖掉，于是它极少真正成为 petState；
+        // 而它那组图与 idle 撞脸，闪过也分辨不出。现在"收到"这件事由气泡承担。
+        //
+        // ⚠️ `state: 'inbox/inserted'` 是**挑图用的情境 key**（见 `pickBubbleImage`），
+        // 不是 petState —— 别再写 `state: 'listening'`。
         requestBubble('inbox/inserted', at, {
           table: EVENT_TEXT, text: textOf(EVENT_TEXT, 'inbox/inserted', cfg.locale),
-          priority: STATE_PRIORITY.listening, state: 'listening'
+          priority: STATE_PRIORITY.listening, state: 'inbox/inserted'
         })
         break
       }
@@ -868,7 +949,10 @@ export function createPetState (options = {}) {
       attention: lastAttention,
       sessions: [...sessions.values()].map(rec => ({
         sessionId: rec.sessionId,
-        state: sessionState(rec, at),
+        // ⚠️ 走 `effectiveSessionState` 而非 `sessionState`：**快照里这一列也会被
+        // exe 的 `EffectiveState()` 拿去比优先级取最大**。写原始状态等于把抖动
+        // 又放回去（顶层的闩锁被它一票推翻）。
+        state: effectiveSessionState(rec, at, cfg.minStateDwellMs),
         toolsInFlight: rec.toolsInFlight.size
       })),
       nativeAvailable,
@@ -880,6 +964,40 @@ export function createPetState (options = {}) {
     apply,
     tick: () => refresh(now()),
     snapshot,
+    /**
+     * **下一个需要主动重算的时刻**（epoch ms；`null` = 没有待办）。
+     *
+     * 为什么需要它：状态机是**事件驱动**的，宿主原先只有一个 15 秒兜底 ticker。
+     * 有了最短驻留之后，这就出问题了 —— "思考满 2 秒才切干活"这个决定要等到
+     * **下一次 tick** 才生效，最坏要压 15 秒（实测 e2e 里 2 秒后仍未切换）。
+     * 气泡到期同理：`bubbleMs` 6 秒却可能挂到 21 秒。
+     *
+     * 所以这里把"已经知道会变、只是还没到点"的时刻报出来，宿主据此安排定时器
+     * （见 `index.js` 的调度器）。没到期的不报，兜底 ticker 继续管睡觉那类粗粒度逻辑。
+     *
+     * 报的只有两类，且都要求**两者都不是豁免态**（否则早就立即切了）：
+     *   · 最短驻留到期 —— 到点就该换图；
+     *   · 气泡到期（常亮气泡不按 durationMs 收，跳过）。
+     *
+     * @returns {number|null}
+     */
+    nextDeadline () {
+      const at = now()
+      let best = null
+      const take = t => {
+        if (t > at && (best === null || t < best)) best = t
+      }
+      for (const rec of sessions.values()) {
+        if (rec.latchState === null) continue
+        const raw = sessionState(rec, at)
+        if (raw === rec.latchState) continue
+        if (DWELL_EXEMPT_STATES.has(raw) || DWELL_EXEMPT_STATES.has(rec.latchState)) continue
+        take(rec.latchSince + cfg.minStateDwellMs)
+      }
+      // 常亮气泡（attention）不按 durationMs 收 —— 它由 attention 块决定去留。
+      if (bubble !== null && bubble.sticky !== true) take(bubble.at + bubble.durationMs)
+      return best
+    },
     /**
      * 热更新配置（**改完立即生效，不需要重载插件**）。
      *
@@ -911,7 +1029,9 @@ export function createPetState (options = {}) {
         .map(rec => ({
           sessionId: rec.sessionId,
           at: typeof rec.lastEventAt === 'number' ? rec.lastEventAt : 0,
-          state: sessionState(rec, at),
+          // 与快照同源（也过闩锁）：这份数据被"发消息挑目标会话"用，
+          // 报出来的状态应该和桌面上看到的一致。
+          state: effectiveSessionState(rec, at, cfg.minStateDwellMs),
           running: rec.running === true,
           toolsInFlight: rec.toolsInFlight.size
         }))
