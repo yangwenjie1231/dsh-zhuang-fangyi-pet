@@ -1,0 +1,988 @@
+{
+  "version": 1,
+  "_说明": [
+    "庄方宜桌宠 · 素材台账（唯一真相）。tools/prepare-pet.py 只读这个文件。",
+    "",
+    "改归属 / 加素材 / 改气泡情境 = 只改这里，然后重跑 prepare-pet.py。",
+    "产物：主体 <state>-<id>.png（canonical 也是这个名）；气泡 bubble/[dir/]<id>.<png|gif>。",
+    "",
+    "role=body  → states[] 必填（第 1 个是主图），一张素材默认只能服务一个状态；",
+    "              要复用就写 \"shared\": true（生成时会红，提示你确认）。",
+    "role=bubble/anim → keys[] 是它参与的气泡情境，random=false 表示不参与「全池随机」兜底。",
+    "",
+    "不写进本文件的字段（opaque / frames / frameWidth / minT）都由管线按指标算 ——",
+    "手写 opaque 历史上猜错过 3 张，别手写。",
+    "caption 是**看 GIF 中间帧**写的，不是照抄源文件名。"
+  ],
+  "assets": [
+    {
+      "id": "cheer",
+      "source": "wx/7.png",
+      "family": "F1",
+      "role": "body",
+      "caption": "打招呼「！」惊讶转头",
+      "mood": "greet",
+      "states": [
+        "waking"
+      ]
+    },
+    {
+      "id": "smile",
+      "source": "QQ表情/表情包_07_微笑.gif",
+      "family": "F1",
+      "role": "body",
+      "caption": "平静微笑，日常待机",
+      "mood": "calm",
+      "states": [
+        "idle"
+      ]
+    },
+    {
+      "id": "shy",
+      "source": "wx/1.png",
+      "family": "F1",
+      "role": "body",
+      "caption": "捂嘴害羞（静态单帧）",
+      "mood": "shy",
+      "states": [
+        "idle"
+      ]
+    },
+    {
+      "id": "milk-tea",
+      "source": "QQ表情/表情包_03_喝奶茶.gif",
+      "family": "F1",
+      "role": "body",
+      "caption": "叼吸管喝奶茶",
+      "mood": "break",
+      "states": [
+        "idle"
+      ]
+    },
+    {
+      "id": "starry-formula",
+      "source": "QQ表情/表情包_05_星空公式.gif",
+      "family": "F1",
+      "role": "body",
+      "caption": "满屏公式（带背景板）",
+      "mood": "think",
+      "states": [
+        "thinking"
+      ]
+    },
+    {
+      "id": "dizzy",
+      "source": "QQ表情/表情包_43_双眼变成绿色蚊香漩涡.gif",
+      "family": "F5",
+      "role": "body",
+      "caption": "蚊香眼，晕",
+      "mood": "dizzy",
+      "states": [
+        "thinking"
+      ]
+    },
+    {
+      "id": "stunned",
+      "source": "QQ表情/表情包_30_圆睁大眼嘴巴张成小小.gif",
+      "family": "F5",
+      "role": "body",
+      "caption": "圆睁大眼 + 问号",
+      "mood": "puzzled",
+      "states": [
+        "thinking"
+      ]
+    },
+    {
+      "id": "wink",
+      "source": "wx/3.png",
+      "family": "F1",
+      "role": "body",
+      "caption": "眨眼（静态单帧）",
+      "mood": "wink",
+      "states": [
+        "thinking"
+      ]
+    },
+    {
+      "id": "please",
+      "source": "QQ表情/表情包_42_闭眼低头脸颊通红双手.gif",
+      "family": "F5",
+      "role": "body",
+      "caption": "双手合十拜托",
+      "mood": "please",
+      "states": [
+        "thinking"
+      ]
+    },
+    {
+      "id": "star-eyes",
+      "source": "QQ表情/表情包_39_变成金色星星眼脸红张.gif",
+      "family": "F5",
+      "role": "body",
+      "caption": "金色星星眼",
+      "mood": "starry",
+      "states": [
+        "thinking"
+      ]
+    },
+    {
+      "id": "grass-holding",
+      "source": "QQ表情/表情包_40_空白背景中人物歪头冒.gif",
+      "family": "F5",
+      "role": "body",
+      "caption": "「握草」—— 图上烘焙了两个字；主体常驻显示 ⚠️",
+      "mood": "troll",
+      "states": [
+        "thinking"
+      ]
+    },
+    {
+      "id": "writing",
+      "source": "wx/8.png",
+      "family": "F1",
+      "role": "body",
+      "caption": "伏案写字",
+      "mood": "work",
+      "states": [
+        "working"
+      ]
+    },
+    {
+      "id": "megaphone",
+      "source": "QQ表情/表情包_46_举着蓝白扩音喇叭用力.gif",
+      "family": "F5",
+      "role": "body",
+      "caption": "举喇叭喊话",
+      "mood": "shout",
+      "states": [
+        "working"
+      ]
+    },
+    {
+      "id": "follow-me",
+      "source": "QQ表情/表情包_44_双手高举一块白牌牌上.gif",
+      "family": "F5",
+      "role": "body",
+      "caption": "举牌「求关注！」",
+      "mood": "call",
+      "states": [
+        "working"
+      ]
+    },
+    {
+      "id": "annoyed",
+      "source": "QQ表情/表情包_02_生气鼓脸.gif",
+      "family": "F1",
+      "role": "body",
+      "caption": "生气鼓脸，举着纸",
+      "mood": "annoy",
+      "states": [
+        "working"
+      ]
+    },
+    {
+      "id": "cover-mouth",
+      "source": "QQ表情/表情包_01_捂嘴害羞.gif",
+      "family": "F1",
+      "role": "body",
+      "caption": "捂嘴 + 头顶十字",
+      "mood": "shy",
+      "states": [
+        "waiting"
+      ]
+    },
+    {
+      "id": "hungry",
+      "source": "QQ表情/表情包_45_双手端着一只白碗闭眼.gif",
+      "family": "F5",
+      "role": "body",
+      "caption": "端着空碗等饭",
+      "mood": "food",
+      "states": [
+        "waiting"
+      ]
+    },
+    {
+      "id": "heart-eyes",
+      "source": "QQ表情/表情包_06_爱心眼.gif",
+      "family": "F1",
+      "role": "body",
+      "caption": "爱心眼冒泡泡",
+      "mood": "love",
+      "states": [
+        "happy"
+      ]
+    },
+    {
+      "id": "joy",
+      "source": "wx/2.png",
+      "family": "F1",
+      "role": "body",
+      "caption": "抱着绿植开心",
+      "mood": "joy",
+      "states": [
+        "happy"
+      ]
+    },
+    {
+      "id": "content",
+      "source": "QQ表情/表情包_32_闭眼弯月笑脸颊泛红双.gif",
+      "family": "F5",
+      "role": "body",
+      "caption": "双手举红心，满足",
+      "mood": "love",
+      "states": [
+        "happy"
+      ]
+    },
+    {
+      "id": "all-ok",
+      "source": "QQ表情/表情包_49_闭眼开心地笑脸颊泛红.gif",
+      "family": "F5",
+      "role": "body",
+      "caption": "双手 OK，搞定",
+      "mood": "done",
+      "states": [
+        "happy"
+      ]
+    },
+    {
+      "id": "muscle",
+      "source": "QQ表情/表情包_31_明黄背景眯眼咧嘴吐舌.gif",
+      "family": "F5",
+      "role": "body",
+      "caption": "秀肌肉（后半段明黄满幅底）",
+      "mood": "proud",
+      "states": [
+        "happy"
+      ]
+    },
+    {
+      "id": "starry",
+      "source": "wx/5.png",
+      "family": "F1",
+      "role": "body",
+      "caption": "星星眼比耶，期待",
+      "mood": "starry",
+      "states": [
+        "happy"
+      ]
+    },
+    {
+      "id": "cheerful",
+      "source": "QQ表情/表情包_36_微笑着张嘴脸颊泛红四.gif",
+      "family": "F5",
+      "role": "body",
+      "caption": "微笑招手，冒小花",
+      "mood": "cheer",
+      "states": [
+        "happy"
+      ]
+    },
+    {
+      "id": "excited",
+      "source": "QQ表情/表情包_48_先睁着大眼微笑后半段.gif",
+      "family": "F5",
+      "role": "body",
+      "caption": "惊喜挥手眨眼",
+      "mood": "excited",
+      "states": [
+        "happy"
+      ]
+    },
+    {
+      "id": "snack",
+      "source": "wx/4.png",
+      "family": "F1",
+      "role": "body",
+      "caption": "吃东西（静态单帧）",
+      "mood": "food",
+      "states": [
+        "happy"
+      ]
+    },
+    {
+      "id": "watermelon",
+      "source": "QQ表情/表情包_37_双手抱着一大块西瓜眯.gif",
+      "family": "F5",
+      "role": "body",
+      "caption": "抱西瓜吃瓜围观",
+      "mood": "watch",
+      "states": [
+        "happy"
+      ]
+    },
+    {
+      "id": "cat-paws",
+      "source": "QQ表情/表情包_34_头顶冒出粉色猫耳脸颊.gif",
+      "family": "F5",
+      "role": "body",
+      "caption": "猫耳 + 猫爪卖萌",
+      "mood": "cute",
+      "states": [
+        "happy"
+      ]
+    },
+    {
+      "id": "listless",
+      "source": "QQ表情/表情包_35_双眼半睁无精打采嘴巴.gif",
+      "family": "F5",
+      "role": "body",
+      "caption": "无精打采 + 吐彩虹",
+      "mood": "dead",
+      "states": [
+        "error"
+      ]
+    },
+    {
+      "id": "sunglasses",
+      "source": "QQ表情/表情包_33_戴黑色墨镜单手推镜敬.gif",
+      "family": "F5",
+      "role": "body",
+      "caption": "墨镜流泪（后半段眼睛特写满幅）",
+      "mood": "cry",
+      "states": [
+        "error"
+      ]
+    },
+    {
+      "id": "knife",
+      "source": "QQ表情/表情包_41_举着一把小刀挡在脸前.gif",
+      "family": "F5",
+      "role": "body",
+      "caption": "持刀威胁，杀气",
+      "mood": "angry",
+      "states": [
+        "error"
+      ]
+    },
+    {
+      "id": "road-rage",
+      "source": "QQ表情/表情包_47_驾浅蓝小车从远处一路.gif",
+      "family": "F5",
+      "role": "body",
+      "caption": "开车路怒",
+      "mood": "rage",
+      "states": [
+        "error"
+      ]
+    },
+    {
+      "id": "poke-cheek",
+      "source": "QQ表情/表情包_04_戳脸颊.gif",
+      "family": "F1",
+      "role": "body",
+      "caption": "手指戳脸颊 + 汗滴",
+      "mood": "think",
+      "states": [
+        "error"
+      ]
+    },
+    {
+      "id": "sleepy",
+      "source": "wx/6.png",
+      "family": "F1",
+      "role": "body",
+      "caption": "趴桌睡着（静态单帧）",
+      "mood": "sleep",
+      "states": [
+        "sleeping"
+      ]
+    },
+    {
+      "id": "sleepy-zzz",
+      "source": "QQ表情/表情包_38_躺床上盖粉色被子闭眼.gif",
+      "family": "F5",
+      "role": "body",
+      "caption": "盖被睡觉 Zzz",
+      "mood": "sleep",
+      "states": [
+        "sleeping"
+      ]
+    },
+    {
+      "id": "08-love-you",
+      "source": "cutout/08-love-you.png",
+      "family": "F2",
+      "role": "bubble",
+      "caption": "爱你哦",
+      "mood": "love-you",
+      "keys": [
+        "inbox/inserted"
+      ],
+      "random": true,
+      "hasText": true
+    },
+    {
+      "id": "09-finger-heart",
+      "source": "cutout/09-finger-heart.png",
+      "family": "F2",
+      "role": "bubble",
+      "caption": "比心",
+      "mood": "finger-heart",
+      "keys": [
+        "happy",
+        "inbox/inserted"
+      ],
+      "random": true,
+      "hasText": true
+    },
+    {
+      "id": "10-blep",
+      "source": "cutout/10-blep.png",
+      "family": "F2",
+      "role": "bubble",
+      "caption": "略略略",
+      "mood": "blep",
+      "keys": [
+        "inbox/inserted"
+      ],
+      "random": true,
+      "hasText": true
+    },
+    {
+      "id": "11-hi",
+      "source": "cutout/11-hi.png",
+      "family": "F2",
+      "role": "bubble",
+      "caption": "hi～",
+      "mood": "hi",
+      "keys": [
+        "inbox/inserted"
+      ],
+      "random": true,
+      "hasText": true
+    },
+    {
+      "id": "12-good-night",
+      "source": "cutout/12-good-night.png",
+      "family": "F2",
+      "role": "bubble",
+      "caption": "晚安啦",
+      "mood": "good-night",
+      "keys": [
+        "waking"
+      ],
+      "random": false,
+      "hasText": true
+    },
+    {
+      "id": "13-wink",
+      "source": "cutout/13-wink.png",
+      "family": "F2",
+      "role": "bubble",
+      "caption": "眨眼",
+      "mood": "wink",
+      "keys": [
+        "inbox/inserted"
+      ],
+      "random": true,
+      "hasText": true
+    },
+    {
+      "id": "14-kiss",
+      "source": "cutout/14-kiss.png",
+      "family": "F2",
+      "role": "bubble",
+      "caption": "么么哒",
+      "mood": "kiss",
+      "keys": [
+        "happy"
+      ],
+      "random": false,
+      "hasText": true
+    },
+    {
+      "id": "15-cheer-up",
+      "source": "cutout/15-cheer-up.png",
+      "family": "F2",
+      "role": "bubble",
+      "caption": "加油",
+      "mood": "cheer-up",
+      "keys": [
+        "happy"
+      ],
+      "random": true,
+      "hasText": true
+    },
+    {
+      "id": "16-comfort",
+      "source": "cutout/16-comfort.png",
+      "family": "F2",
+      "role": "bubble",
+      "caption": "开心点嘛",
+      "mood": "comfort",
+      "keys": [
+        "happy"
+      ],
+      "random": false,
+      "hasText": true
+    },
+    {
+      "id": "17-yay",
+      "source": "cutout/17-yay.png",
+      "family": "F2",
+      "role": "bubble",
+      "caption": "好耶",
+      "mood": "yay",
+      "keys": [
+        "happy",
+        "notify-complete"
+      ],
+      "random": true,
+      "hasText": true
+    },
+    {
+      "id": "18-confused",
+      "source": "cutout/18-confused.png",
+      "family": "F2",
+      "role": "bubble",
+      "caption": "有点懵",
+      "mood": "confused",
+      "keys": [
+        "thinking"
+      ],
+      "random": true,
+      "hasText": true
+    },
+    {
+      "id": "19-thanks",
+      "source": "cutout/19-thanks.png",
+      "family": "F2",
+      "role": "bubble",
+      "caption": "谢谢哦",
+      "mood": "thanks",
+      "keys": [
+        "inbox/inserted"
+      ],
+      "random": false,
+      "hasText": true
+    },
+    {
+      "id": "20-thumbs-up",
+      "source": "cutout/20-thumbs-up.png",
+      "family": "F2",
+      "role": "bubble",
+      "caption": "默大契",
+      "mood": "thumbs-up",
+      "keys": [
+        "happy",
+        "notify-complete"
+      ],
+      "random": true,
+      "hasText": true
+    },
+    {
+      "id": "21-at-work",
+      "source": "cutout/21-at-work.png",
+      "family": "F2",
+      "role": "bubble",
+      "caption": "工作中",
+      "mood": "at-work",
+      "keys": [
+        "working"
+      ],
+      "random": true,
+      "hasText": true
+    },
+    {
+      "id": "22-annoyed",
+      "source": "cutout/22-annoyed.png",
+      "family": "F2",
+      "role": "bubble",
+      "caption": "好气人哦",
+      "mood": "annoyed",
+      "keys": [
+        "error",
+        "tool/failed"
+      ],
+      "random": true,
+      "hasText": true
+    },
+    {
+      "id": "23-you-are-the-best",
+      "source": "cutout/23-you-are-the-best.png",
+      "family": "F2",
+      "role": "bubble",
+      "caption": "你最好了",
+      "mood": "you-are-the-best",
+      "keys": [
+        "happy",
+        "notify-complete"
+      ],
+      "random": true,
+      "hasText": true
+    },
+    {
+      "id": "gif-24",
+      "source": "QQ表情/表情包_24_睡觉zzz.gif",
+      "family": "F3",
+      "role": "bubble",
+      "caption": "睡觉 zzz",
+      "mood": "idle",
+      "keys": [
+        "idle",
+        "sleeping"
+      ],
+      "random": true,
+      "hasText": false
+    },
+    {
+      "id": "gif-26",
+      "source": "QQ表情/表情包_26_趴面.gif",
+      "family": "F3",
+      "role": "bubble",
+      "caption": "趴面",
+      "mood": "idle",
+      "keys": [
+        "idle"
+      ],
+      "random": true,
+      "hasText": false
+    },
+    {
+      "id": "gif-28",
+      "source": "QQ表情/表情包_28_挂件吊坠.gif",
+      "family": "F3",
+      "role": "bubble",
+      "caption": "挂件吊坠",
+      "mood": "idle",
+      "keys": [
+        "idle"
+      ],
+      "random": true,
+      "hasText": false
+    },
+    {
+      "id": "gif-29",
+      "source": "QQ表情/表情包_29_抱小宠.gif",
+      "family": "F3",
+      "role": "bubble",
+      "caption": "抱小宠",
+      "mood": "idle",
+      "keys": [
+        "idle"
+      ],
+      "random": true,
+      "hasText": false
+    },
+    {
+      "id": "25-reading",
+      "source": "cutout/25-reading.png",
+      "family": "F3",
+      "role": "bubble",
+      "caption": "看书",
+      "mood": "read",
+      "keys": [
+        "working",
+        "thinking",
+        "idle"
+      ],
+      "random": true,
+      "hasText": false
+    },
+    {
+      "id": "angry-charge",
+      "source": "QQ表情/表情包_27_生气指人.gif",
+      "family": "F3b",
+      "role": "anim",
+      "caption": "生气蓄力→爆发（动图）",
+      "mood": "rage",
+      "keys": [
+        "error",
+        "tool/failed"
+      ],
+      "random": true
+    },
+    {
+      "id": "01-bored",
+      "source": "新表情包/1 (1).png",
+      "family": "F4",
+      "role": "bubble",
+      "caption": "庄很无聊",
+      "mood": "emo",
+      "keys": [
+        "thinking",
+        "waiting",
+        "idle"
+      ],
+      "random": true,
+      "hasText": true,
+      "dir": "new"
+    },
+    {
+      "id": "02-good-morning",
+      "source": "新表情包/1 (2).png",
+      "family": "F4",
+      "role": "bubble",
+      "caption": "早上好",
+      "mood": "emo",
+      "keys": [
+        "waking"
+      ],
+      "random": true,
+      "hasText": true,
+      "dir": "new"
+    },
+    {
+      "id": "03-dazed",
+      "source": "新表情包/10.png",
+      "family": "F4",
+      "role": "bubble",
+      "caption": "哦呀斯密",
+      "mood": "emo",
+      "keys": [
+        "sleeping"
+      ],
+      "random": true,
+      "hasText": true,
+      "dir": "new"
+    },
+    {
+      "id": "04-definitely",
+      "source": "新表情包/2 (1).png",
+      "family": "F4",
+      "role": "bubble",
+      "caption": "宜定可以",
+      "mood": "emo",
+      "keys": [
+        "happy",
+        "notify-complete"
+      ],
+      "random": true,
+      "hasText": true,
+      "dir": "new"
+    },
+    {
+      "id": "05-wink",
+      "source": "新表情包/2 (2).png",
+      "family": "F4",
+      "role": "bubble",
+      "caption": "Wink",
+      "mood": "emo",
+      "keys": [
+        "notify-complete"
+      ],
+      "random": true,
+      "hasText": true,
+      "dir": "new"
+    },
+    {
+      "id": "06-brain-overload",
+      "source": "新表情包/3 (1).png",
+      "family": "F4",
+      "role": "bubble",
+      "caption": "庄脑过载",
+      "mood": "emo",
+      "keys": [
+        "working",
+        "thinking"
+      ],
+      "random": true,
+      "hasText": true,
+      "dir": "new"
+    },
+    {
+      "id": "07-wants",
+      "source": "新表情包/3 (2).png",
+      "family": "F4",
+      "role": "bubble",
+      "caption": "庄想要",
+      "mood": "emo",
+      "keys": [
+        "working",
+        "waiting"
+      ],
+      "random": true,
+      "hasText": true,
+      "dir": "new"
+    },
+    {
+      "id": "08-miss-you",
+      "source": "新表情包/4 (1).png",
+      "family": "F4",
+      "role": "bubble",
+      "caption": "庄想你了",
+      "mood": "emo",
+      "keys": [
+        "inbox/inserted"
+      ],
+      "random": true,
+      "hasText": true,
+      "dir": "new"
+    },
+    {
+      "id": "09-got-it",
+      "source": "新表情包/4 (2).png",
+      "family": "F4",
+      "role": "bubble",
+      "caption": "庄得到",
+      "mood": "emo",
+      "keys": [
+        "notify-complete"
+      ],
+      "random": true,
+      "hasText": true,
+      "dir": "new"
+    },
+    {
+      "id": "10-hate-you",
+      "source": "新表情包/5 (1).png",
+      "family": "F4",
+      "role": "bubble",
+      "caption": "庄讨厌你",
+      "mood": "emo",
+      "keys": [
+        "error"
+      ],
+      "random": true,
+      "hasText": true,
+      "dir": "new"
+    },
+    {
+      "id": "11-sneak-snack",
+      "source": "新表情包/5 (2).png",
+      "family": "F4",
+      "role": "bubble",
+      "caption": "庄偷吃外卖",
+      "mood": "emo",
+      "keys": [
+        "idle"
+      ],
+      "random": true,
+      "hasText": true,
+      "dir": "new"
+    },
+    {
+      "id": "12-wake-up",
+      "source": "新表情包/5.png",
+      "family": "F4",
+      "role": "bubble",
+      "caption": "起床！别过少爷生活",
+      "mood": "emo",
+      "keys": [
+        "waking"
+      ],
+      "random": true,
+      "hasText": true,
+      "dir": "new"
+    },
+    {
+      "id": "13-so-good",
+      "source": "新表情包/6 (1).png",
+      "family": "F4",
+      "role": "bubble",
+      "caption": "太中啦",
+      "mood": "emo",
+      "keys": [
+        "happy",
+        "notify-complete"
+      ],
+      "random": true,
+      "hasText": true,
+      "dir": "new"
+    },
+    {
+      "id": "14-so-strong",
+      "source": "新表情包/6.png",
+      "family": "F4",
+      "role": "bubble",
+      "caption": "！强强！",
+      "mood": "emo",
+      "keys": [
+        "happy"
+      ],
+      "random": true,
+      "hasText": true,
+      "dir": "new"
+    },
+    {
+      "id": "15-so-loud",
+      "source": "新表情包/7 (1).png",
+      "family": "F4",
+      "role": "bubble",
+      "caption": "庄一直响",
+      "mood": "emo",
+      "keys": [
+        "waiting"
+      ],
+      "random": true,
+      "hasText": true,
+      "dir": "new"
+    },
+    {
+      "id": "16-knock-knock",
+      "source": "新表情包/7.png",
+      "family": "F4",
+      "role": "bubble",
+      "caption": "庄门戳你",
+      "mood": "emo",
+      "keys": [
+        "waiting",
+        "inbox/inserted"
+      ],
+      "random": true,
+      "hasText": true,
+      "dir": "new"
+    },
+    {
+      "id": "17-crying",
+      "source": "新表情包/8 (1).png",
+      "family": "F4",
+      "role": "bubble",
+      "caption": "庄一直哭",
+      "mood": "emo",
+      "keys": [
+        "error"
+      ],
+      "random": true,
+      "hasText": true,
+      "dir": "new"
+    },
+    {
+      "id": "18-disgusted",
+      "source": "新表情包/8.png",
+      "family": "F4",
+      "role": "bubble",
+      "caption": "庄感到恶心",
+      "mood": "emo",
+      "keys": [
+        "error",
+        "tool/failed"
+      ],
+      "random": true,
+      "hasText": true,
+      "dir": "new"
+    },
+    {
+      "id": "19-slacking",
+      "source": "新表情包/9 (1).png",
+      "family": "F4",
+      "role": "bubble",
+      "caption": "摸鱼ing",
+      "mood": "emo",
+      "keys": [
+        "working",
+        "idle"
+      ],
+      "random": true,
+      "hasText": true,
+      "dir": "new"
+    },
+    {
+      "id": "20-unhappy",
+      "source": "新表情包/9.png",
+      "family": "F4",
+      "role": "bubble",
+      "caption": "庄不开心",
+      "mood": "emo",
+      "keys": [
+        "error",
+        "tool/failed"
+      ],
+      "random": true,
+      "hasText": true,
+      "dir": "new"
+    }
+  ]
+}

@@ -23,128 +23,22 @@
  */
 
 /**
- * 状态/事件 key → 该情境下**合适**的表情文件（相对 `art/pet/`）。
+ * 情境映射表与排除名单：**自动生成，见 `emotes.data.js`**。
  *
- * key 的取值来自状态机的 `requestBubble` 调用点：
- *   · 9 个状态名（waking/idle/listening/thinking/working/waiting/happy/error/sleeping）
- *   · `notify-complete`（一回合干净结束的强提醒）
- *   · `tool/failed`（工具报错）
- *   · `inbox/inserted`（用户发来消息）
- *   · `idle-emote-*`（调皮档空闲主动卖萌）—— 前缀匹配到 `idle`
+ * 归属（哪张图在哪些情境下出现）现在由 `assets/catalog.json` 决定，
+ * `tools/prepare-pet.py` 从台账生成 `emotes.data.js`。改归属请改台账再重跑管线，
+ * **不要改这两张表** —— 以前它们手写在这里、旁边还另有一份 Python 表，
+ * 两处真相各改一半是常态（现已消除）。
+ *
+ * 情境 key 的取值来自状态机的 `requestBubble` 调用点：9 个状态名（`listening`
+ * 2026-10-07 起只弹气泡、不再作为主体状态）、`notify-complete`、`tool/failed`、
+ * `inbox/inserted`、`idle-emote-*`（前缀归到 `idle`）。
+ *
+ * 这里**重新导出**（而不是改调用方的 import）是有意的：现有 4 处 import
+ * （`index.js` / `atlas.js` / 两个测试）一个字都不用动。
  */
-export const EMOTE_BY_KEY = {
-  // ── 完成 / 好消息：庆祝、夸人、比心 ──────────────────────────────────────
-  happy: [
-    'bubble/17-yay.png',                    // 好耶
-    'bubble/09-finger-heart.png',           // 比心
-    'bubble/15-cheer-up.png',               // 加油
-    'bubble/23-you-are-the-best.png',       // 你最好了
-    'bubble/new/13-so-good.png',            // 太中啦
-    'bubble/new/14-so-strong.png',          // ！强强！
-    'bubble/20-thumbs-up.png',                // 默大契（点赞）
-    'bubble/new/04-definitely.png',         // 宜定可以（肯定的回应）
-    'bubble/16-comfort.png',                // 开心点嘛（安慰）
-    'bubble/14-kiss.png'                    // 么么哒（亲密）
-  ],
-  'notify-complete': [
-    'bubble/17-yay.png',                    // 好耶
-    'bubble/new/13-so-good.png',            // 太中啦
-    'bubble/23-you-are-the-best.png',       // 你最好了
-    'bubble/20-thumbs-up.png',              // 默大契（点赞）
-    'bubble/new/09-got-it.png',             // 庄得到
-    'bubble/new/05-wink.png',               // Wink
-    'bubble/new/04-definitely.png'          // 宜定可以
-  ],
-
-  // ── 干活中：工作、摸鱼、脑过载 ───────────────────────────────────────────
-  working: [
-    'bubble/21-at-work.png',                // 工作中
-    'bubble/new/19-slacking.png',           // 摸鱼ing
-    'bubble/new/06-brain-overload.png',     // 庄脑过载
-    'bubble/new/07-wants.png',              // 庄想要
-    'bubble/25-reading.png'                 // 看书（无文字）
-  ],
-
-  // ── 思考中：懵、过载、无聊 ───────────────────────────────────────────────
-  thinking: [
-    'bubble/18-confused.png',               // 有点懵
-    'bubble/new/06-brain-overload.png',
-    'bubble/new/01-bored.png',              // 庄很无聊
-    'bubble/25-reading.png'
-  ],
-
-  // ── 等你处理：想要、得到、无聊（不要用庆祝类，会误导）──────────────────
-  waiting: [
-    'bubble/new/07-wants.png',              // 庄想要
-    'bubble/new/01-bored.png',
-    'bubble/new/15-so-loud.png',            // 庄一直响（提醒感）
-    'bubble/new/16-knock-knock.png'         // 庄门戳你（提醒感）
-  ],
-
-  // ── 出错：生气、不开心、讨厌、哭 ─────────────────────────────────────────
-  error: [
-    'bubble/22-annoyed.png',                // 好气人哦
-    'bubble/angry-charge.gif',              // 生气蓄力→爆发（动图）
-    'bubble/new/20-unhappy.png',            // 庄不开心
-    'bubble/new/10-hate-you.png',           // 庄讨厌你
-    'bubble/new/17-crying.png',             // 庄一直哭
-    'bubble/new/18-disgusted.png'           // 庄感到恶心
-  ],
-  'tool/failed': [
-    'bubble/22-annoyed.png',
-    'bubble/angry-charge.gif',              // 一肚子火正好对上"工具炸了"
-    'bubble/new/20-unhappy.png',
-    'bubble/new/18-disgusted.png'
-  ],
-
-  // ── 用户发来消息：打招呼、爱心、想你 ─────────────────────────────────────
-  'inbox/inserted': [
-    'bubble/11-hi.png',                     // hi～
-    'bubble/08-love-you.png',               // 爱你哦
-    'bubble/09-finger-heart.png',
-    'bubble/new/08-miss-you.png',           // 庄想你了
-    'bubble/13-wink.png',                   // 眨眼
-    'bubble/10-blep.png'                    // 略略略（熟人打趣）
-  ],
-  listening: [
-    'bubble/11-hi.png',
-    'bubble/13-wink.png',                   // 眨眼
-    'bubble/10-blep.png',                   // 略略略（熟人打趣）
-    'bubble/new/16-knock-knock.png',
-    'bubble/19-thanks.png'                  // 谢谢哦（回应类）
-  ],
-
-  // ── 空闲 / 睡觉：摸鱼、无聊、睡 ──────────────────────────────────────────
-  idle: [
-    'bubble/new/19-slacking.png',           // 摸鱼ing
-    'bubble/new/01-bored.png',
-    'bubble/gif-24.png',                    // 睡觉zzz（无文字）
-    'bubble/new/11-sneak-snack.png',        // 庄偷吃外卖
-    'bubble/25-reading.png',
-    'bubble/gif-26.png',                    // 趴面
-    'bubble/gif-28.png',                    // 挂件吊坠
-    'bubble/gif-29.png'                     // 抱小宠
-  ],
-  sleeping: [
-    'bubble/gif-24.png',                    // 睡觉zzz
-    'bubble/new/03-dazed.png'               // 哦呀斯密
-  ],
-
-  // ── 刚醒：起床、早上好 ───────────────────────────────────────────────────
-  waking: [
-    'bubble/new/12-wake-up.png',            // 起床！别过少爷生活
-    'bubble/new/02-good-morning.png',       // 早上好
-    'bubble/12-good-night.png'              // 晚安啦（时差党用得上）
-  ]
-}
-
-/** 全池回落时排除掉这些 —— 它们语义太强，随机撒容易莫名其妙。 */
-export const EMOTE_EXCLUDE_FROM_RANDOM = [
-  'bubble/16-comfort.png',                  // 开心点嘛：安慰语，随机撒会显得没头没脑
-  'bubble/14-kiss.png',                     // 么么哒：太亲密，只在明确情境用
-  'bubble/19-thanks.png',                   // 谢谢哦：需要上下文
-  'bubble/12-good-night.png'                // 晚安啦：时点性强
-]
+export { EMOTE_BY_KEY, EMOTE_EXCLUDE_FROM_RANDOM } from './emotes.data.js'
+import { EMOTE_BY_KEY, EMOTE_EXCLUDE_FROM_RANDOM } from './emotes.data.js'
 
 /**
  * 从**候选文件**里挑一张，跳过「语义太强、不该随机撒」的那些。

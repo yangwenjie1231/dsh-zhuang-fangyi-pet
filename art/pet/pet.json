@@ -1,4 +1,921 @@
 {
+  "assets": {
+    "bubble/08-love-you.png": {
+      "caption": "爱你哦",
+      "family": "F2",
+      "hasText": true,
+      "id": "08-love-you",
+      "keys": [
+        "inbox/inserted"
+      ],
+      "mood": "love-you",
+      "opaque": false,
+      "random": true,
+      "role": "bubble"
+    },
+    "bubble/09-finger-heart.png": {
+      "caption": "比心",
+      "family": "F2",
+      "hasText": true,
+      "id": "09-finger-heart",
+      "keys": [
+        "happy",
+        "inbox/inserted"
+      ],
+      "mood": "finger-heart",
+      "opaque": false,
+      "random": true,
+      "role": "bubble"
+    },
+    "bubble/10-blep.png": {
+      "caption": "略略略",
+      "family": "F2",
+      "hasText": true,
+      "id": "10-blep",
+      "keys": [
+        "inbox/inserted"
+      ],
+      "mood": "blep",
+      "opaque": false,
+      "random": true,
+      "role": "bubble"
+    },
+    "bubble/11-hi.png": {
+      "caption": "hi～",
+      "family": "F2",
+      "hasText": true,
+      "id": "11-hi",
+      "keys": [
+        "inbox/inserted"
+      ],
+      "mood": "hi",
+      "opaque": false,
+      "random": true,
+      "role": "bubble"
+    },
+    "bubble/12-good-night.png": {
+      "caption": "晚安啦",
+      "family": "F2",
+      "hasText": true,
+      "id": "12-good-night",
+      "keys": [
+        "waking"
+      ],
+      "mood": "good-night",
+      "opaque": false,
+      "random": false,
+      "role": "bubble"
+    },
+    "bubble/13-wink.png": {
+      "caption": "眨眼",
+      "family": "F2",
+      "hasText": true,
+      "id": "13-wink",
+      "keys": [
+        "inbox/inserted"
+      ],
+      "mood": "wink",
+      "opaque": false,
+      "random": true,
+      "role": "bubble"
+    },
+    "bubble/14-kiss.png": {
+      "caption": "么么哒",
+      "family": "F2",
+      "hasText": true,
+      "id": "14-kiss",
+      "keys": [
+        "happy"
+      ],
+      "mood": "kiss",
+      "opaque": false,
+      "random": false,
+      "role": "bubble"
+    },
+    "bubble/15-cheer-up.png": {
+      "caption": "加油",
+      "family": "F2",
+      "hasText": true,
+      "id": "15-cheer-up",
+      "keys": [
+        "happy"
+      ],
+      "mood": "cheer-up",
+      "opaque": false,
+      "random": true,
+      "role": "bubble"
+    },
+    "bubble/16-comfort.png": {
+      "caption": "开心点嘛",
+      "family": "F2",
+      "hasText": true,
+      "id": "16-comfort",
+      "keys": [
+        "happy"
+      ],
+      "mood": "comfort",
+      "opaque": false,
+      "random": false,
+      "role": "bubble"
+    },
+    "bubble/17-yay.png": {
+      "caption": "好耶",
+      "family": "F2",
+      "hasText": true,
+      "id": "17-yay",
+      "keys": [
+        "happy",
+        "notify-complete"
+      ],
+      "mood": "yay",
+      "opaque": false,
+      "random": true,
+      "role": "bubble"
+    },
+    "bubble/18-confused.png": {
+      "caption": "有点懵",
+      "family": "F2",
+      "hasText": true,
+      "id": "18-confused",
+      "keys": [
+        "thinking"
+      ],
+      "mood": "confused",
+      "opaque": false,
+      "random": true,
+      "role": "bubble"
+    },
+    "bubble/19-thanks.png": {
+      "caption": "谢谢哦",
+      "family": "F2",
+      "hasText": true,
+      "id": "19-thanks",
+      "keys": [
+        "inbox/inserted"
+      ],
+      "mood": "thanks",
+      "opaque": false,
+      "random": false,
+      "role": "bubble"
+    },
+    "bubble/20-thumbs-up.png": {
+      "caption": "默大契",
+      "family": "F2",
+      "hasText": true,
+      "id": "20-thumbs-up",
+      "keys": [
+        "happy",
+        "notify-complete"
+      ],
+      "mood": "thumbs-up",
+      "opaque": false,
+      "random": true,
+      "role": "bubble"
+    },
+    "bubble/21-at-work.png": {
+      "caption": "工作中",
+      "family": "F2",
+      "hasText": true,
+      "id": "21-at-work",
+      "keys": [
+        "working"
+      ],
+      "mood": "at-work",
+      "opaque": false,
+      "random": true,
+      "role": "bubble"
+    },
+    "bubble/22-annoyed.png": {
+      "caption": "好气人哦",
+      "family": "F2",
+      "hasText": true,
+      "id": "22-annoyed",
+      "keys": [
+        "error",
+        "tool/failed"
+      ],
+      "mood": "annoyed",
+      "opaque": false,
+      "random": true,
+      "role": "bubble"
+    },
+    "bubble/23-you-are-the-best.png": {
+      "caption": "你最好了",
+      "family": "F2",
+      "hasText": true,
+      "id": "23-you-are-the-best",
+      "keys": [
+        "happy",
+        "notify-complete"
+      ],
+      "mood": "you-are-the-best",
+      "opaque": false,
+      "random": true,
+      "role": "bubble"
+    },
+    "bubble/25-reading.png": {
+      "caption": "看书",
+      "family": "F3",
+      "hasText": false,
+      "id": "25-reading",
+      "keys": [
+        "working",
+        "thinking",
+        "idle"
+      ],
+      "mood": "read",
+      "opaque": false,
+      "random": true,
+      "role": "bubble"
+    },
+    "bubble/angry-charge.gif": {
+      "caption": "生气蓄力→爆发（动图）",
+      "family": "F3b",
+      "hasText": false,
+      "id": "angry-charge",
+      "keys": [
+        "error",
+        "tool/failed"
+      ],
+      "mood": "rage",
+      "opaque": true,
+      "random": true,
+      "role": "anim"
+    },
+    "bubble/gif-24.png": {
+      "caption": "睡觉 zzz",
+      "family": "F3",
+      "hasText": false,
+      "id": "gif-24",
+      "keys": [
+        "idle",
+        "sleeping"
+      ],
+      "mood": "idle",
+      "opaque": false,
+      "random": true,
+      "role": "bubble"
+    },
+    "bubble/gif-26.png": {
+      "caption": "趴面",
+      "family": "F3",
+      "hasText": false,
+      "id": "gif-26",
+      "keys": [
+        "idle"
+      ],
+      "mood": "idle",
+      "opaque": false,
+      "random": true,
+      "role": "bubble"
+    },
+    "bubble/gif-28.png": {
+      "caption": "挂件吊坠",
+      "family": "F3",
+      "hasText": false,
+      "id": "gif-28",
+      "keys": [
+        "idle"
+      ],
+      "mood": "idle",
+      "opaque": false,
+      "random": true,
+      "role": "bubble"
+    },
+    "bubble/gif-29.png": {
+      "caption": "抱小宠",
+      "family": "F3",
+      "hasText": false,
+      "id": "gif-29",
+      "keys": [
+        "idle"
+      ],
+      "mood": "idle",
+      "opaque": false,
+      "random": true,
+      "role": "bubble"
+    },
+    "bubble/new/01-bored.png": {
+      "caption": "庄很无聊",
+      "family": "F4",
+      "hasText": true,
+      "id": "01-bored",
+      "keys": [
+        "thinking",
+        "waiting",
+        "idle"
+      ],
+      "mood": "emo",
+      "opaque": true,
+      "random": true,
+      "role": "bubble"
+    },
+    "bubble/new/02-good-morning.png": {
+      "caption": "早上好",
+      "family": "F4",
+      "hasText": true,
+      "id": "02-good-morning",
+      "keys": [
+        "waking"
+      ],
+      "mood": "emo",
+      "opaque": true,
+      "random": true,
+      "role": "bubble"
+    },
+    "bubble/new/03-dazed.png": {
+      "caption": "哦呀斯密",
+      "family": "F4",
+      "hasText": true,
+      "id": "03-dazed",
+      "keys": [
+        "sleeping"
+      ],
+      "mood": "emo",
+      "opaque": true,
+      "random": true,
+      "role": "bubble"
+    },
+    "bubble/new/04-definitely.png": {
+      "caption": "宜定可以",
+      "family": "F4",
+      "hasText": true,
+      "id": "04-definitely",
+      "keys": [
+        "happy",
+        "notify-complete"
+      ],
+      "mood": "emo",
+      "opaque": true,
+      "random": true,
+      "role": "bubble"
+    },
+    "bubble/new/05-wink.png": {
+      "caption": "Wink",
+      "family": "F4",
+      "hasText": true,
+      "id": "05-wink",
+      "keys": [
+        "notify-complete"
+      ],
+      "mood": "emo",
+      "opaque": true,
+      "random": true,
+      "role": "bubble"
+    },
+    "bubble/new/06-brain-overload.png": {
+      "caption": "庄脑过载",
+      "family": "F4",
+      "hasText": true,
+      "id": "06-brain-overload",
+      "keys": [
+        "working",
+        "thinking"
+      ],
+      "mood": "emo",
+      "opaque": true,
+      "random": true,
+      "role": "bubble"
+    },
+    "bubble/new/07-wants.png": {
+      "caption": "庄想要",
+      "family": "F4",
+      "hasText": true,
+      "id": "07-wants",
+      "keys": [
+        "working",
+        "waiting"
+      ],
+      "mood": "emo",
+      "opaque": true,
+      "random": true,
+      "role": "bubble"
+    },
+    "bubble/new/08-miss-you.png": {
+      "caption": "庄想你了",
+      "family": "F4",
+      "hasText": true,
+      "id": "08-miss-you",
+      "keys": [
+        "inbox/inserted"
+      ],
+      "mood": "emo",
+      "opaque": true,
+      "random": true,
+      "role": "bubble"
+    },
+    "bubble/new/09-got-it.png": {
+      "caption": "庄得到",
+      "family": "F4",
+      "hasText": true,
+      "id": "09-got-it",
+      "keys": [
+        "notify-complete"
+      ],
+      "mood": "emo",
+      "opaque": true,
+      "random": true,
+      "role": "bubble"
+    },
+    "bubble/new/10-hate-you.png": {
+      "caption": "庄讨厌你",
+      "family": "F4",
+      "hasText": true,
+      "id": "10-hate-you",
+      "keys": [
+        "error"
+      ],
+      "mood": "emo",
+      "opaque": true,
+      "random": true,
+      "role": "bubble"
+    },
+    "bubble/new/11-sneak-snack.png": {
+      "caption": "庄偷吃外卖",
+      "family": "F4",
+      "hasText": true,
+      "id": "11-sneak-snack",
+      "keys": [
+        "idle"
+      ],
+      "mood": "emo",
+      "opaque": true,
+      "random": true,
+      "role": "bubble"
+    },
+    "bubble/new/12-wake-up.png": {
+      "caption": "起床！别过少爷生活",
+      "family": "F4",
+      "hasText": true,
+      "id": "12-wake-up",
+      "keys": [
+        "waking"
+      ],
+      "mood": "emo",
+      "opaque": true,
+      "random": true,
+      "role": "bubble"
+    },
+    "bubble/new/13-so-good.png": {
+      "caption": "太中啦",
+      "family": "F4",
+      "hasText": true,
+      "id": "13-so-good",
+      "keys": [
+        "happy",
+        "notify-complete"
+      ],
+      "mood": "emo",
+      "opaque": true,
+      "random": true,
+      "role": "bubble"
+    },
+    "bubble/new/14-so-strong.png": {
+      "caption": "！强强！",
+      "family": "F4",
+      "hasText": true,
+      "id": "14-so-strong",
+      "keys": [
+        "happy"
+      ],
+      "mood": "emo",
+      "opaque": true,
+      "random": true,
+      "role": "bubble"
+    },
+    "bubble/new/15-so-loud.png": {
+      "caption": "庄一直响",
+      "family": "F4",
+      "hasText": true,
+      "id": "15-so-loud",
+      "keys": [
+        "waiting"
+      ],
+      "mood": "emo",
+      "opaque": true,
+      "random": true,
+      "role": "bubble"
+    },
+    "bubble/new/16-knock-knock.png": {
+      "caption": "庄门戳你",
+      "family": "F4",
+      "hasText": true,
+      "id": "16-knock-knock",
+      "keys": [
+        "waiting",
+        "inbox/inserted"
+      ],
+      "mood": "emo",
+      "opaque": true,
+      "random": true,
+      "role": "bubble"
+    },
+    "bubble/new/17-crying.png": {
+      "caption": "庄一直哭",
+      "family": "F4",
+      "hasText": true,
+      "id": "17-crying",
+      "keys": [
+        "error"
+      ],
+      "mood": "emo",
+      "opaque": true,
+      "random": true,
+      "role": "bubble"
+    },
+    "bubble/new/18-disgusted.png": {
+      "caption": "庄感到恶心",
+      "family": "F4",
+      "hasText": true,
+      "id": "18-disgusted",
+      "keys": [
+        "error",
+        "tool/failed"
+      ],
+      "mood": "emo",
+      "opaque": true,
+      "random": true,
+      "role": "bubble"
+    },
+    "bubble/new/19-slacking.png": {
+      "caption": "摸鱼ing",
+      "family": "F4",
+      "hasText": true,
+      "id": "19-slacking",
+      "keys": [
+        "working",
+        "idle"
+      ],
+      "mood": "emo",
+      "opaque": true,
+      "random": true,
+      "role": "bubble"
+    },
+    "bubble/new/20-unhappy.png": {
+      "caption": "庄不开心",
+      "family": "F4",
+      "hasText": true,
+      "id": "20-unhappy",
+      "keys": [
+        "error",
+        "tool/failed"
+      ],
+      "mood": "emo",
+      "opaque": true,
+      "random": true,
+      "role": "bubble"
+    },
+    "error-knife.png": {
+      "caption": "持刀威胁，杀气",
+      "family": "F5",
+      "id": "knife",
+      "mood": "angry",
+      "role": "body",
+      "states": [
+        "error"
+      ]
+    },
+    "error-listless.png": {
+      "caption": "无精打采 + 吐彩虹",
+      "family": "F5",
+      "id": "listless",
+      "mood": "dead",
+      "role": "body",
+      "states": [
+        "error"
+      ]
+    },
+    "error-poke-cheek.png": {
+      "caption": "手指戳脸颊 + 汗滴",
+      "family": "F1",
+      "id": "poke-cheek",
+      "mood": "think",
+      "role": "body",
+      "states": [
+        "error"
+      ]
+    },
+    "error-road-rage.png": {
+      "caption": "开车路怒",
+      "family": "F5",
+      "id": "road-rage",
+      "mood": "rage",
+      "role": "body",
+      "states": [
+        "error"
+      ]
+    },
+    "error-sunglasses.png": {
+      "caption": "墨镜流泪（后半段眼睛特写满幅）",
+      "family": "F5",
+      "id": "sunglasses",
+      "mood": "cry",
+      "role": "body",
+      "states": [
+        "error"
+      ]
+    },
+    "happy-all-ok.png": {
+      "caption": "双手 OK，搞定",
+      "family": "F5",
+      "id": "all-ok",
+      "mood": "done",
+      "role": "body",
+      "states": [
+        "happy"
+      ]
+    },
+    "happy-cat-paws.png": {
+      "caption": "猫耳 + 猫爪卖萌",
+      "family": "F5",
+      "id": "cat-paws",
+      "mood": "cute",
+      "role": "body",
+      "states": [
+        "happy"
+      ]
+    },
+    "happy-cheerful.png": {
+      "caption": "微笑招手，冒小花",
+      "family": "F5",
+      "id": "cheerful",
+      "mood": "cheer",
+      "role": "body",
+      "states": [
+        "happy"
+      ]
+    },
+    "happy-content.png": {
+      "caption": "双手举红心，满足",
+      "family": "F5",
+      "id": "content",
+      "mood": "love",
+      "role": "body",
+      "states": [
+        "happy"
+      ]
+    },
+    "happy-excited.png": {
+      "caption": "惊喜挥手眨眼",
+      "family": "F5",
+      "id": "excited",
+      "mood": "excited",
+      "role": "body",
+      "states": [
+        "happy"
+      ]
+    },
+    "happy-heart-eyes.png": {
+      "caption": "爱心眼冒泡泡",
+      "family": "F1",
+      "id": "heart-eyes",
+      "mood": "love",
+      "role": "body",
+      "states": [
+        "happy"
+      ]
+    },
+    "happy-joy.png": {
+      "caption": "抱着绿植开心",
+      "family": "F1",
+      "id": "joy",
+      "mood": "joy",
+      "role": "body",
+      "states": [
+        "happy"
+      ]
+    },
+    "happy-muscle.png": {
+      "caption": "秀肌肉（后半段明黄满幅底）",
+      "family": "F5",
+      "id": "muscle",
+      "mood": "proud",
+      "role": "body",
+      "states": [
+        "happy"
+      ]
+    },
+    "happy-snack.png": {
+      "caption": "吃东西（静态单帧）",
+      "family": "F1",
+      "id": "snack",
+      "mood": "food",
+      "role": "body",
+      "states": [
+        "happy"
+      ]
+    },
+    "happy-starry.png": {
+      "caption": "星星眼比耶，期待",
+      "family": "F1",
+      "id": "starry",
+      "mood": "starry",
+      "role": "body",
+      "states": [
+        "happy"
+      ]
+    },
+    "happy-watermelon.png": {
+      "caption": "抱西瓜吃瓜围观",
+      "family": "F5",
+      "id": "watermelon",
+      "mood": "watch",
+      "role": "body",
+      "states": [
+        "happy"
+      ]
+    },
+    "idle-milk-tea.png": {
+      "caption": "叼吸管喝奶茶",
+      "family": "F1",
+      "id": "milk-tea",
+      "mood": "break",
+      "role": "body",
+      "states": [
+        "idle"
+      ]
+    },
+    "idle-shy.png": {
+      "caption": "捂嘴害羞（静态单帧）",
+      "family": "F1",
+      "id": "shy",
+      "mood": "shy",
+      "role": "body",
+      "states": [
+        "idle"
+      ]
+    },
+    "idle-smile.png": {
+      "caption": "平静微笑，日常待机",
+      "family": "F1",
+      "id": "smile",
+      "mood": "calm",
+      "role": "body",
+      "states": [
+        "idle"
+      ]
+    },
+    "sleeping-sleepy-zzz.png": {
+      "caption": "盖被睡觉 Zzz",
+      "family": "F5",
+      "id": "sleepy-zzz",
+      "mood": "sleep",
+      "role": "body",
+      "states": [
+        "sleeping"
+      ]
+    },
+    "sleeping-sleepy.png": {
+      "caption": "趴桌睡着（静态单帧）",
+      "family": "F1",
+      "id": "sleepy",
+      "mood": "sleep",
+      "role": "body",
+      "states": [
+        "sleeping"
+      ]
+    },
+    "thinking-dizzy.png": {
+      "caption": "蚊香眼，晕",
+      "family": "F5",
+      "id": "dizzy",
+      "mood": "dizzy",
+      "role": "body",
+      "states": [
+        "thinking"
+      ]
+    },
+    "thinking-grass-holding.png": {
+      "caption": "「握草」—— 图上烘焙了两个字；主体常驻显示 ⚠️",
+      "family": "F5",
+      "id": "grass-holding",
+      "mood": "troll",
+      "role": "body",
+      "states": [
+        "thinking"
+      ]
+    },
+    "thinking-please.png": {
+      "caption": "双手合十拜托",
+      "family": "F5",
+      "id": "please",
+      "mood": "please",
+      "role": "body",
+      "states": [
+        "thinking"
+      ]
+    },
+    "thinking-star-eyes.png": {
+      "caption": "金色星星眼",
+      "family": "F5",
+      "id": "star-eyes",
+      "mood": "starry",
+      "role": "body",
+      "states": [
+        "thinking"
+      ]
+    },
+    "thinking-starry-formula.png": {
+      "caption": "满屏公式（带背景板）",
+      "family": "F1",
+      "id": "starry-formula",
+      "mood": "think",
+      "role": "body",
+      "states": [
+        "thinking"
+      ]
+    },
+    "thinking-stunned.png": {
+      "caption": "圆睁大眼 + 问号",
+      "family": "F5",
+      "id": "stunned",
+      "mood": "puzzled",
+      "role": "body",
+      "states": [
+        "thinking"
+      ]
+    },
+    "thinking-wink.png": {
+      "caption": "眨眼（静态单帧）",
+      "family": "F1",
+      "id": "wink",
+      "mood": "wink",
+      "role": "body",
+      "states": [
+        "thinking"
+      ]
+    },
+    "waiting-cover-mouth.png": {
+      "caption": "捂嘴 + 头顶十字",
+      "family": "F1",
+      "id": "cover-mouth",
+      "mood": "shy",
+      "role": "body",
+      "states": [
+        "waiting"
+      ]
+    },
+    "waiting-hungry.png": {
+      "caption": "端着空碗等饭",
+      "family": "F5",
+      "id": "hungry",
+      "mood": "food",
+      "role": "body",
+      "states": [
+        "waiting"
+      ]
+    },
+    "waking-cheer.png": {
+      "caption": "打招呼「！」惊讶转头",
+      "family": "F1",
+      "id": "cheer",
+      "mood": "greet",
+      "role": "body",
+      "states": [
+        "waking"
+      ]
+    },
+    "working-annoyed.png": {
+      "caption": "生气鼓脸，举着纸",
+      "family": "F1",
+      "id": "annoyed",
+      "mood": "annoy",
+      "role": "body",
+      "states": [
+        "working"
+      ]
+    },
+    "working-follow-me.png": {
+      "caption": "举牌「求关注！」",
+      "family": "F5",
+      "id": "follow-me",
+      "mood": "call",
+      "role": "body",
+      "states": [
+        "working"
+      ]
+    },
+    "working-megaphone.png": {
+      "caption": "举喇叭喊话",
+      "family": "F5",
+      "id": "megaphone",
+      "mood": "shout",
+      "role": "body",
+      "states": [
+        "working"
+      ]
+    },
+    "working-writing.png": {
+      "caption": "伏案写字",
+      "family": "F1",
+      "id": "writing",
+      "mood": "work",
+      "role": "body",
+      "states": [
+        "working"
+      ]
+    }
+  },
   "bubble": [
     {
       "file": "bubble/08-love-you.png",
@@ -298,202 +1215,177 @@
     }
   ],
   "files": {
-    "error-2.png": {
+    "error-knife.png": {
       "frameMs": 40,
       "frameWidth": 256,
       "frames": 25
     },
-    "error-3.png": {
+    "error-listless.png": {
       "frameMs": 40,
       "frameWidth": 256,
       "frames": 25
     },
-    "error-4.png": {
-      "frameMs": 40,
-      "frameWidth": 256,
-      "frames": 25
-    },
-    "error.png": {
+    "error-poke-cheek.png": {
       "frameMs": 30,
       "frameWidth": 256,
       "frames": 33
     },
-    "happy-2.png": {
+    "error-road-rage.png": {
+      "frameMs": 40,
+      "frameWidth": 256,
+      "frames": 25
+    },
+    "error-sunglasses.png": {
+      "frameMs": 40,
+      "frameWidth": 256,
+      "frames": 25
+    },
+    "happy-all-ok.png": {
+      "frameMs": 40,
+      "frameWidth": 256,
+      "frames": 25
+    },
+    "happy-cat-paws.png": {
+      "frameMs": 40,
+      "frameWidth": 256,
+      "frames": 25
+    },
+    "happy-cheerful.png": {
+      "frameMs": 40,
+      "frameWidth": 256,
+      "frames": 25
+    },
+    "happy-content.png": {
+      "frameMs": 40,
+      "frameWidth": 256,
+      "frames": 25
+    },
+    "happy-excited.png": {
+      "frameMs": 40,
+      "frameWidth": 256,
+      "frames": 25
+    },
+    "happy-heart-eyes.png": {
+      "frameMs": 30,
+      "frameWidth": 256,
+      "frames": 33
+    },
+    "happy-joy.png": {
       "frameMs": 0,
       "frameWidth": 274,
       "frames": 1
     },
-    "happy-3.png": {
+    "happy-muscle.png": {
+      "frameMs": 40,
+      "frameWidth": 256,
+      "frames": 25
+    },
+    "happy-snack.png": {
       "frameMs": 0,
-      "frameWidth": 239,
+      "frameWidth": 218,
       "frames": 1
     },
-    "happy-4.png": {
-      "frameMs": 30,
-      "frameWidth": 256,
-      "frames": 33
-    },
-    "happy-5.png": {
-      "frameMs": 40,
-      "frameWidth": 256,
-      "frames": 25
-    },
-    "happy-6.png": {
-      "frameMs": 40,
-      "frameWidth": 256,
-      "frames": 25
-    },
-    "happy-7.png": {
-      "frameMs": 40,
-      "frameWidth": 256,
-      "frames": 25
-    },
-    "happy-8.png": {
-      "frameMs": 40,
-      "frameWidth": 256,
-      "frames": 25
-    },
-    "happy.png": {
-      "frameMs": 30,
-      "frameWidth": 256,
-      "frames": 33
-    },
-    "idle-2.png": {
-      "frameMs": 0,
-      "frameWidth": 256,
-      "frames": 1
-    },
-    "idle-3.png": {
-      "frameMs": 0,
-      "frameWidth": 288,
-      "frames": 1
-    },
-    "idle-4.png": {
-      "frameMs": 40,
-      "frameWidth": 256,
-      "frames": 25
-    },
-    "idle-5.png": {
-      "frameMs": 40,
-      "frameWidth": 256,
-      "frames": 25
-    },
-    "idle.png": {
-      "frameMs": 30,
-      "frameWidth": 256,
-      "frames": 33
-    },
-    "listening-2.png": {
-      "frameMs": 30,
-      "frameWidth": 256,
-      "frames": 33
-    },
-    "listening-3.png": {
-      "frameMs": 40,
-      "frameWidth": 256,
-      "frames": 25
-    },
-    "listening-4.png": {
-      "frameMs": 40,
-      "frameWidth": 256,
-      "frames": 25
-    },
-    "listening.png": {
-      "frameMs": 0,
-      "frameWidth": 288,
-      "frames": 1
-    },
-    "sleeping-2.png": {
-      "frameMs": 40,
-      "frameWidth": 256,
-      "frames": 25
-    },
-    "sleeping.png": {
-      "frameMs": 0,
-      "frameWidth": 284,
-      "frames": 1
-    },
-    "thinking-2.png": {
+    "happy-starry.png": {
       "frameMs": 0,
       "frameWidth": 241,
       "frames": 1
     },
-    "thinking-3.png": {
-      "frameMs": 30,
-      "frameWidth": 256,
-      "frames": 33
-    },
-    "thinking-4.png": {
+    "happy-watermelon.png": {
       "frameMs": 40,
       "frameWidth": 256,
       "frames": 25
     },
-    "thinking-5.png": {
-      "frameMs": 40,
-      "frameWidth": 256,
-      "frames": 25
-    },
-    "thinking.png": {
-      "frameMs": 30,
-      "frameWidth": 256,
-      "frames": 33
-    },
-    "waiting-2.png": {
-      "frameMs": 0,
-      "frameWidth": 256,
-      "frames": 1
-    },
-    "waiting-3.png": {
-      "frameMs": 40,
-      "frameWidth": 256,
-      "frames": 25
-    },
-    "waiting-4.png": {
-      "frameMs": 40,
-      "frameWidth": 256,
-      "frames": 25
-    },
-    "waiting-5.png": {
-      "frameMs": 40,
-      "frameWidth": 256,
-      "frames": 25
-    },
-    "waiting.png": {
-      "frameMs": 30,
-      "frameWidth": 256,
-      "frames": 33
-    },
-    "waking-2.png": {
-      "frameMs": 30,
-      "frameWidth": 256,
-      "frames": 33
-    },
-    "waking-3.png": {
-      "frameMs": 40,
-      "frameWidth": 256,
-      "frames": 25
-    },
-    "waking.png": {
-      "frameMs": 0,
-      "frameWidth": 239,
-      "frames": 1
-    },
-    "working-2.png": {
+    "idle-milk-tea.png": {
       "frameMs": 30,
       "frameWidth": 256,
       "frames": 44
     },
-    "working-3.png": {
+    "idle-shy.png": {
+      "frameMs": 0,
+      "frameWidth": 256,
+      "frames": 1
+    },
+    "idle-smile.png": {
+      "frameMs": 30,
+      "frameWidth": 256,
+      "frames": 33
+    },
+    "sleeping-sleepy-zzz.png": {
       "frameMs": 40,
       "frameWidth": 256,
       "frames": 25
     },
-    "working-4.png": {
+    "sleeping-sleepy.png": {
+      "frameMs": 0,
+      "frameWidth": 284,
+      "frames": 1
+    },
+    "thinking-dizzy.png": {
       "frameMs": 40,
       "frameWidth": 256,
       "frames": 25
     },
-    "working.png": {
+    "thinking-grass-holding.png": {
+      "frameMs": 40,
+      "frameWidth": 256,
+      "frames": 25
+    },
+    "thinking-please.png": {
+      "frameMs": 40,
+      "frameWidth": 256,
+      "frames": 25
+    },
+    "thinking-star-eyes.png": {
+      "frameMs": 40,
+      "frameWidth": 256,
+      "frames": 25
+    },
+    "thinking-starry-formula.png": {
+      "frameMs": 30,
+      "frameWidth": 256,
+      "frames": 33
+    },
+    "thinking-stunned.png": {
+      "frameMs": 40,
+      "frameWidth": 256,
+      "frames": 25
+    },
+    "thinking-wink.png": {
+      "frameMs": 0,
+      "frameWidth": 288,
+      "frames": 1
+    },
+    "waiting-cover-mouth.png": {
+      "frameMs": 30,
+      "frameWidth": 256,
+      "frames": 33
+    },
+    "waiting-hungry.png": {
+      "frameMs": 40,
+      "frameWidth": 256,
+      "frames": 25
+    },
+    "waking-cheer.png": {
+      "frameMs": 0,
+      "frameWidth": 239,
+      "frames": 1
+    },
+    "working-annoyed.png": {
+      "frameMs": 30,
+      "frameWidth": 256,
+      "frames": 33
+    },
+    "working-follow-me.png": {
+      "frameMs": 40,
+      "frameWidth": 256,
+      "frames": 25
+    },
+    "working-megaphone.png": {
+      "frameMs": 40,
+      "frameWidth": 256,
+      "frames": 25
+    },
+    "working-writing.png": {
       "frameMs": 0,
       "frameWidth": 266,
       "frames": 1
@@ -505,15 +1397,15 @@
   "states": {
     "error": {
       "anchorY": 1.0,
-      "file": "error.png",
+      "file": "error-listless.png",
       "frameHeight": 256,
-      "frameMs": 30,
+      "frameMs": 40,
       "frameWidth": 256,
-      "frames": 33
+      "frames": 25
     },
     "happy": {
       "anchorY": 1.0,
-      "file": "happy.png",
+      "file": "happy-heart-eyes.png",
       "frameHeight": 256,
       "frameMs": 30,
       "frameWidth": 256,
@@ -521,23 +1413,15 @@
     },
     "idle": {
       "anchorY": 1.0,
-      "file": "idle.png",
+      "file": "idle-smile.png",
       "frameHeight": 256,
       "frameMs": 30,
       "frameWidth": 256,
       "frames": 33
     },
-    "listening": {
-      "anchorY": 1.0,
-      "file": "listening.png",
-      "frameHeight": 256,
-      "frameMs": 0,
-      "frameWidth": 288,
-      "frames": 1
-    },
     "sleeping": {
       "anchorY": 1.0,
-      "file": "sleeping.png",
+      "file": "sleeping-sleepy.png",
       "frameHeight": 256,
       "frameMs": 0,
       "frameWidth": 284,
@@ -545,7 +1429,7 @@
     },
     "thinking": {
       "anchorY": 1.0,
-      "file": "thinking.png",
+      "file": "thinking-starry-formula.png",
       "frameHeight": 256,
       "frameMs": 30,
       "frameWidth": 256,
@@ -553,7 +1437,7 @@
     },
     "waiting": {
       "anchorY": 1.0,
-      "file": "waiting.png",
+      "file": "waiting-cover-mouth.png",
       "frameHeight": 256,
       "frameMs": 30,
       "frameWidth": 256,
@@ -561,7 +1445,7 @@
     },
     "waking": {
       "anchorY": 1.0,
-      "file": "waking.png",
+      "file": "waking-cheer.png",
       "frameHeight": 256,
       "frameMs": 0,
       "frameWidth": 239,
@@ -569,7 +1453,7 @@
     },
     "working": {
       "anchorY": 1.0,
-      "file": "working.png",
+      "file": "working-writing.png",
       "frameHeight": 256,
       "frameMs": 0,
       "frameWidth": 266,
@@ -578,62 +1462,55 @@
   },
   "variants": {
     "error": [
-      "error.png",
-      "error-2.png",
-      "error-3.png",
-      "error-4.png"
+      "error-listless.png",
+      "error-sunglasses.png",
+      "error-knife.png",
+      "error-road-rage.png",
+      "error-poke-cheek.png"
     ],
     "happy": [
-      "happy.png",
-      "happy-2.png",
-      "happy-3.png",
-      "happy-4.png",
-      "happy-5.png",
-      "happy-6.png",
-      "happy-7.png",
-      "happy-8.png"
+      "happy-heart-eyes.png",
+      "happy-joy.png",
+      "happy-content.png",
+      "happy-all-ok.png",
+      "happy-muscle.png",
+      "happy-starry.png",
+      "happy-cheerful.png",
+      "happy-excited.png",
+      "happy-snack.png",
+      "happy-watermelon.png",
+      "happy-cat-paws.png"
     ],
     "idle": [
-      "idle.png",
-      "idle-2.png",
-      "idle-3.png",
-      "idle-4.png",
-      "idle-5.png"
-    ],
-    "listening": [
-      "listening.png",
-      "listening-2.png",
-      "listening-3.png",
-      "listening-4.png"
+      "idle-smile.png",
+      "idle-shy.png",
+      "idle-milk-tea.png"
     ],
     "sleeping": [
-      "sleeping.png",
-      "sleeping-2.png"
+      "sleeping-sleepy.png",
+      "sleeping-sleepy-zzz.png"
     ],
     "thinking": [
-      "thinking.png",
-      "thinking-2.png",
-      "thinking-3.png",
-      "thinking-4.png",
-      "thinking-5.png"
+      "thinking-starry-formula.png",
+      "thinking-dizzy.png",
+      "thinking-stunned.png",
+      "thinking-wink.png",
+      "thinking-please.png",
+      "thinking-star-eyes.png",
+      "thinking-grass-holding.png"
     ],
     "waiting": [
-      "waiting.png",
-      "waiting-2.png",
-      "waiting-3.png",
-      "waiting-4.png",
-      "waiting-5.png"
+      "waiting-cover-mouth.png",
+      "waiting-hungry.png"
     ],
     "waking": [
-      "waking.png",
-      "waking-2.png",
-      "waking-3.png"
+      "waking-cheer.png"
     ],
     "working": [
-      "working.png",
-      "working-2.png",
-      "working-3.png",
-      "working-4.png"
+      "working-writing.png",
+      "working-megaphone.png",
+      "working-follow-me.png",
+      "working-annoyed.png"
     ]
   },
   "version": 1

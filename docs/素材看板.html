@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>庄方宜桌宠 · 素材看板</title>
+<style>
+:root { --bg:#f6f6f8; --card:#fff; --ink:#1b1d21; --dim:#6b7280; --line:#e3e4e8; --prop:#2563eb; }
+@media (prefers-color-scheme: dark) { :root { --bg:#15171b; --card:#1d2025; --ink:#e8eaed; --dim:#9aa1ab; --line:#2c313a; --prop:#7aa2f7; } }
+* { box-sizing: border-box; }
+body { margin:0; padding:24px 20px 60px; background:var(--bg); color:var(--ink);
+  font:14px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",system-ui,sans-serif; }
+h1 { font-size:20px; margin:0 0 6px; }
+h2 { font-size:16px; margin:0 0 10px; }
+.sub { color:var(--dim); }
+.stats { display:flex; gap:10px; flex-wrap:wrap; margin:16px 0; }
+.stat { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:8px 14px; font-size:12px; color:var(--dim); }
+.stat b { color:var(--ink); font-size:15px; }
+.card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:14px; }
+.grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:10px; }
+.item { display:flex; gap:10px; align-items:center; border:1px solid var(--line); border-radius:10px; padding:8px; }
+.sprite { flex:0 0 auto; border-radius:8px; background-color:#ececf1; background-repeat:no-repeat; cursor:pointer; }
+@media (prefers-color-scheme: dark) { .sprite { background-color:#2a2e35; } }
+.meta { min-width:0; }
+.name { font-weight:600; }
+.cap { color:var(--dim); font-size:12px; }
+.geo { color:var(--dim); font-size:11px; font-family:ui-monospace,Consolas,monospace; word-break:break-all; }
+.badge { display:inline-block; font-size:11px; padding:1px 6px; border-radius:999px; border:1px solid currentColor; color:var(--prop); margin-left:6px; }
+.bgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:10px; }
+.bcell { border:1px solid var(--line); border-radius:10px; padding:8px; text-align:center; }
+.bcell img { max-width:100%; border-radius:6px; }
+.bcell .k { font-size:11px; color:var(--dim); margin-top:3px; }
+code { font-family:ui-monospace,Consolas,monospace; font-size:12px; background:color-mix(in srgb,var(--ink) 8%,transparent); padding:1px 5px; border-radius:4px; }
+</style>
+</head>
+<body>
+<h1>庄方宜桌宠 · 素材看板</h1>
+<div class="sub">
+  数据来自 <code>assets/catalog.json</code>（素材台账，唯一真相）与真实产物 <code>art/pet/pet.json</code>。
+  每格都是<strong>会动的精灵条带</strong>（点一下暂停）—— 认图以<strong>中间帧</strong>为准。
+  重新生成：先 <code>python tools/prepare-pet.py</code>，再 <code>node tools/build-asset-review.mjs</code>。
+</div>
+<div class="stats">
+  <div class="stat"><b>35</b> 主体素材（一图一状态，零复用）</div>
+  <div class="stat"><b>8</b> 个状态</div>
+  <div class="stat"><b>42</b> 气泡素材</div>
+  <div class="stat"><b>11</b> 个气泡情境</div>
+</div>
+<div class="card">
+  <h2>waking<span class="sub" style="font-weight:400"> · 1 张</span></h2>
+  <div class="grid"><div class="item">
+  <div class="sprite" data-file="waking-cheer.png" data-frames="1" data-fw="239" data-ms="0"></div>
+  <div class="meta">
+    <div class="name">cheer<span class="badge">主图</span></div>
+    <div class="cap">打招呼「！」惊讶转头</div>
+    <div class="geo">wx/7.png · 1帧×239@0ms</div>
+  </div>
+</div></div>
+</div>
+<div class="card">
+  <h2>idle<span class="sub" style="font-weight:400"> · 3 张</span></h2>
+  <div class="grid"><div class="item">
+  <div class="sprite" data-file="idle-smile.png" data-frames="33" data-fw="256" data-ms="30"></div>
+  <div class="meta">
+    <div class="name">smile<span class="badge">主图</span></div>
+    <div class="cap">平静微笑，日常待机</div>
+    <div class="geo">QQ表情/表情包_07_微笑.gif · 33帧×256@30ms</div>
+  </div>
+</div>
+<div class="item">
+  <div class="sprite" data-file="idle-shy.png" data-frames="1" data-fw="256" data-ms="0"></div>
+  <div class="meta">
+    <div class="name">shy</div>
+    <div class="cap">捂嘴害羞（静态单帧）</div>
+    <div class="geo">wx/1.png · 1帧×256@0ms</div>
+  </div>
+</div>
+<div class="item">
+  <div class="sprite" data-file="idle-milk-tea.png" data-frames="44" data-fw="256" data-ms="30"></div>
+  <div class="meta">
+    <div class="name">milk-tea</div>
+    <div class="cap">叼吸管喝奶茶</div>
+    <div class="geo">QQ表情/表情包_03_喝奶茶.gif · 44帧×256@30ms</div>
+  </div>
+</div></div>
+</div>
+<div class="card">
+  <h2>thinking<span class="sub" style="font-weight:400"> · 7 张</span></h2>
+  <div class="grid"><div class="item">
+  <div class="sprite" data-file="thinking-starry-formula.png" data-frames="33" data-fw="256" data-ms="30"></div>
+  <div class="meta">
+    <div class="name">starry-formula<span class="badge">主图</span></div>
+    <div class="cap">满屏公式（带背景板）</div>
+    <div class="geo">QQ表情/表情包_05_星空公式.gif · 33帧×256@30ms</div>
+  </div>
+</div>
+<div class="item">
+  <div class="sprite" data-file="thinking-dizzy.png" data-frames="25" data-fw="256" data-ms="40"></div>
+  <div class="meta">
+    <div class="name">dizzy</div>
+    <div class="cap">蚊香眼，晕</div>
+    <div class="geo">QQ表情/表情包_43_双眼变成绿色蚊香漩涡.gif · 25帧×256@40ms</div>
+  </div>
+</div>
+<div class="item">
+  <div class="sprite" data-file="thinking-stunned.png" data-frames="25" data-fw="256" data-ms="40"></div>
+  <div class="meta">
+    <div class="name">stunned</div>
+    <div class="cap">圆睁大眼 + 问号</div>
+    <div class="geo">QQ表情/表情包_30_圆睁大眼嘴巴张成小小.gif · 25帧×256@40ms</div>
+  </div>
+</div>
+<div class="item">
+  <div class="sprite" data-file="thinking-wink.png" data-frames="1" data-fw="288" data-ms="0"></div>
+  <div class="meta">
+    <div class="name">wink</div>
+    <div class="cap">眨眼（静态单帧）</div>
+    <div class="geo">wx/3.png · 1帧×288@0ms</div>
+  </div>
+</div>
+<div class="item">
+  <div class="sprite" data-file="thinking-please.png" data-frames="25" data-fw="256" data-ms="40"></div>
+  <div class="meta">
+    <div class="name">please</div>
+    <div class="cap">双手合十拜托</div>
+    <div class="geo">QQ表情/表情包_42_闭眼低头脸颊通红双手.gif · 25帧×256@40ms</div>
+  </div>
+</div>
+<div class="item">
+  <div class="sprite" data-file="thinking-star-eyes.png" data-frames="25" data-fw="256" data-ms="40"></div>
+  <div class="meta">
+    <div class="name">star-eyes</div>
+    <div class="cap">金色星星眼</div>
+    <div class="geo">QQ表情/表情包_39_变成金色星星眼脸红张.gif · 25帧×256@40ms</div>
+  </div>
+</div>
+<div class="item">
+  <div class="sprite" data-file="thinking-grass-holding.png" data-frames="25" data-fw="256" data-ms="40"></div>
+  <div class="meta">
+    <div class="name">grass-holding</div>
+    <div class="cap">「握草」—— 图上烘焙了两个字；主体常驻显示 ⚠️</div>
+    <div class="geo">QQ表情/表情包_40_空白背景中人物歪头冒.gif · 25帧×256@40ms</div>
+  </div>
+</div></div>
+</div>
+<div class="card">
+  <h2>working<span class="sub" style="font-weight:400"> · 4 张</span></h2>
+  <div class="grid"><div class="item">
+  <div class="sprite" data-file="working-writing.png" data-frames="1" data-fw="266" data-ms="0"></div>
+  <div class="meta">
+    <div class="name">writing<span class="badge">主图</span></div>
+    <div class="cap">伏案写字</div>
+    <div class="geo">wx/8.png · 1帧×266@0ms</div>
+  </div>
+</div>
+<div class="item">
+  <div class="sprite" data-file="working-megaphone.png" data-frames="25" data-fw="256" data-ms="40"></div>
+  <div class="meta">
+    <div class="name">megaphone</div>
+    <div class="cap">举喇叭喊话</div>
+    <div class="geo">QQ表情/表情包_46_举着蓝白扩音喇叭用力.gif · 25帧×256@40ms</div>
+  </div>
+</div>
+<div class="item">
+  <div class="sprite" data-file="working-follow-me.png" data-frames="25" data-fw="256" data-ms="40"></div>
+  <div class="meta">
+    <div class="name">follow-me</div>
+    <div class="cap">举牌「求关注！」</div>
+    <div class="geo">QQ表情/表情包_44_双手高举一块白牌牌上.gif · 25帧×256@40ms</div>
+  </div>
+</div>
+<div class="item">
+  <div class="sprite" data-file="working-annoyed.png" data-frames="33" data-fw="256" data-ms="30"></div>
+  <div class="meta">
+    <div class="name">annoyed</div>
+    <div class="cap">生气鼓脸，举着纸</div>
+    <div class="geo">QQ表情/表情包_02_生气鼓脸.gif · 33帧×256@30ms</div>
+  </div>
+</div></div>
+</div>
+<div class="card">
+  <h2>waiting<span class="sub" style="font-weight:400"> · 2 张</span></h2>
+  <div class="grid"><div class="item">
+  <div class="sprite" data-file="waiting-cover-mouth.png" data-frames="33" data-fw="256" data-ms="30"></div>
+  <div class="meta">
+    <div class="name">cover-mouth<span class="badge">主图</span></div>
+    <div class="cap">捂嘴 + 头顶十字</div>
+    <div class="geo">QQ表情/表情包_01_捂嘴害羞.gif · 33帧×256@30ms</div>
+  </div>
+</div>
+<div class="item">
+  <div class="sprite" data-file="waiting-hungry.png" data-frames="25" data-fw="256" data-ms="40"></div>
+  <div class="meta">
+    <div class="name">hungry</div>
+    <div class="cap">端着空碗等饭</div>
+    <div class="geo">QQ表情/表情包_45_双手端着一只白碗闭眼.gif · 25帧×256@40ms</div>
+  </div>
+</div></div>
+</div>
+<div class="card">
+  <h2>happy<span class="sub" style="font-weight:400"> · 11 张</span></h2>
+  <div class="grid"><div class="item">
+  <div class="sprite" data-file="happy-heart-eyes.png" data-frames="33" data-fw="256" data-ms="30"></div>
+  <div class="meta">
+    <div class="name">heart-eyes<span class="badge">主图</span></div>
+    <div class="cap">爱心眼冒泡泡</div>
+    <div class="geo">QQ表情/表情包_06_爱心眼.gif · 33帧×256@30ms</div>
+  </div>
+</div>
+<div class="item">
+  <div class="sprite" data-file="happy-joy.png" data-frames="1" data-fw="274" data-ms="0"></div>
+  <div class="meta">
+    <div class="name">joy</div>
+    <div class="cap">抱着绿植开心</div>
+    <div class="geo">wx/2.png · 1帧×274@0ms</div>
+  </div>
+</div>
+<div class="item">
+  <div class="sprite" data-file="happy-content.png" data-frames="25" data-fw="256" data-ms="40"></div>
+  <div class="meta">
+    <div class="name">content</div>
+    <div class="cap">双手举红心，满足</div>
+    <div class="geo">QQ表情/表情包_32_闭眼弯月笑脸颊泛红双.gif · 25帧×256@40ms</div>
+  </div>
+</div>
+<div class="item">
+  <div class="sprite" data-file="happy-all-ok.png" data-frames="25" data-fw="256" data-ms="40"></div>
+  <div class="meta">
+    <div class="name">all-ok</div>
+    <div class="cap">双手 OK，搞定</div>
+    <div class="geo">QQ表情/表情包_49_闭眼开心地笑脸颊泛红.gif · 25帧×256@40ms</div>
+  </div>
+</div>
+<div class="item">
+  <div class="sprite" data-file="happy-muscle.png" data-frames="25" data-fw="256" data-ms="40"></div>
+  <div class="meta">
+    <div class="name">muscle</div>
+    <div class="cap">秀肌肉（后半段明黄满幅底）</div>
+    <div class="geo">QQ表情/表情包_31_明黄背景眯眼咧嘴吐舌.gif · 25帧×256@40ms</div>
+  </div>
+</div>
+<div class="item">
+  <div class="sprite" data-file="happy-starry.png" data-frames="1" data-fw="241" data-ms="0"></div>
+  <div class="meta">
+    <div class="name">starry</div>
+    <div class="cap">星星眼比耶，期待</div>
+    <div class="geo">wx/5.png · 1帧×241@0ms</div>
+  </div>
+</div>
+<div class="item">
+  <div class="sprite" data-file="happy-cheerful.png" data-frames="25" data-fw="256" data-ms="40"></div>
+  <div class="meta">
+    <div class="name">cheerful</div>
+    <div class="cap">微笑招手，冒小花</div>
+    <div class="geo">QQ表情/表情包_36_微笑着张嘴脸颊泛红四.gif · 25帧×256@40ms</div>
+  </div>
+</div>
+<div class="item">
+  <div class="sprite" data-file="happy-excited.png" data-frames="25" data-fw="256" data-ms="40"></div>
+  <div class="meta">
+    <div class="name">excited</div>
+    <div class="cap">惊喜挥手眨眼</div>
+    <div class="geo">QQ表情/表情包_48_先睁着大眼微笑后半段.gif · 25帧×256@40ms</div>
+  </div>
+</div>
+<div class="item">
+  <div class="sprite" data-file="happy-snack.png" data-frames="1" data-fw="218" data-ms="0"></div>
+  <div class="meta">
+    <div class="name">snack</div>
+    <div class="cap">吃东西（静态单帧）</div>
+    <div class="geo">wx/4.png · 1帧×218@0ms</div>
+  </div>
+</div>
+<div class="item">
+  <div class="sprite" data-file="happy-watermelon.png" data-frames="25" data-fw="256" data-ms="40"></div>
+  <div class="meta">
+    <div class="name">watermelon</div>
+    <div class="cap">抱西瓜吃瓜围观</div>
+    <div class="geo">QQ表情/表情包_37_双手抱着一大块西瓜眯.gif · 25帧×256@40ms</div>
+  </div>
+</div>
+<div class="item">
+  <div class="sprite" data-file="happy-cat-paws.png" data-frames="25" data-fw="256" data-ms="40"></div>
+  <div class="meta">
+    <div class="name">cat-paws</div>
+    <div class="cap">猫耳 + 猫爪卖萌</div>
+    <div class="geo">QQ表情/表情包_34_头顶冒出粉色猫耳脸颊.gif · 25帧×256@40ms</div>
+  </div>
+</div></div>
+</div>
+<div class="card">
+  <h2>error<span class="sub" style="font-weight:400"> · 5 张</span></h2>
+  <div class="grid"><div class="item">
+  <div class="sprite" data-file="error-listless.png" data-frames="25" data-fw="256" data-ms="40"></div>
+  <div class="meta">
+    <div class="name">listless<span class="badge">主图</span></div>
+    <div class="cap">无精打采 + 吐彩虹</div>
+    <div class="geo">QQ表情/表情包_35_双眼半睁无精打采嘴巴.gif · 25帧×256@40ms</div>
+  </div>
+</div>
+<div class="item">
+  <div class="sprite" data-file="error-sunglasses.png" data-frames="25" data-fw="256" data-ms="40"></div>
+  <div class="meta">
+    <div class="name">sunglasses</div>
+    <div class="cap">墨镜流泪（后半段眼睛特写满幅）</div>
+    <div class="geo">QQ表情/表情包_33_戴黑色墨镜单手推镜敬.gif · 25帧×256@40ms</div>
+  </div>
+</div>
+<div class="item">
+  <div class="sprite" data-file="error-knife.png" data-frames="25" data-fw="256" data-ms="40"></div>
+  <div class="meta">
+    <div class="name">knife</div>
+    <div class="cap">持刀威胁，杀气</div>
+    <div class="geo">QQ表情/表情包_41_举着一把小刀挡在脸前.gif · 25帧×256@40ms</div>
+  </div>
+</div>
+<div class="item">
+  <div class="sprite" data-file="error-road-rage.png" data-frames="25" data-fw="256" data-ms="40"></div>
+  <div class="meta">
+    <div class="name">road-rage</div>
+    <div class="cap">开车路怒</div>
+    <div class="geo">QQ表情/表情包_47_驾浅蓝小车从远处一路.gif · 25帧×256@40ms</div>
+  </div>
+</div>
+<div class="item">
+  <div class="sprite" data-file="error-poke-cheek.png" data-frames="33" data-fw="256" data-ms="30"></div>
+  <div class="meta">
+    <div class="name">poke-cheek</div>
+    <div class="cap">手指戳脸颊 + 汗滴</div>
+    <div class="geo">QQ表情/表情包_04_戳脸颊.gif · 33帧×256@30ms</div>
+  </div>
+</div></div>
+</div>
+<div class="card">
+  <h2>sleeping<span class="sub" style="font-weight:400"> · 2 张</span></h2>
+  <div class="grid"><div class="item">
+  <div class="sprite" data-file="sleeping-sleepy.png" data-frames="1" data-fw="284" data-ms="0"></div>
+  <div class="meta">
+    <div class="name">sleepy<span class="badge">主图</span></div>
+    <div class="cap">趴桌睡着（静态单帧）</div>
+    <div class="geo">wx/6.png · 1帧×284@0ms</div>
+  </div>
+</div>
+<div class="item">
+  <div class="sprite" data-file="sleeping-sleepy-zzz.png" data-frames="25" data-fw="256" data-ms="40"></div>
+  <div class="meta">
+    <div class="name">sleepy-zzz</div>
+    <div class="cap">盖被睡觉 Zzz</div>
+    <div class="geo">QQ表情/表情包_38_躺床上盖粉色被子闭眼.gif · 25帧×256@40ms</div>
+  </div>
+</div></div>
+</div>
+<div class="card">
+  <h2>气泡池<span class="sub" style="font-weight:400"> · 42 张（⊘ = 不参与「全池随机」兜底）</span></h2>
+  <div class="bgrid"><div class="bcell">
+  <img src="../art/pet/bubble/08-love-you.png" alt="08-love-you">
+  <div class="k"><b>08-love-you</b></div>
+  <div class="k">爱你哦</div>
+  <div class="k">inbox/inserted</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/09-finger-heart.png" alt="09-finger-heart">
+  <div class="k"><b>09-finger-heart</b></div>
+  <div class="k">比心</div>
+  <div class="k">happy / inbox/inserted</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/10-blep.png" alt="10-blep">
+  <div class="k"><b>10-blep</b></div>
+  <div class="k">略略略</div>
+  <div class="k">inbox/inserted</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/11-hi.png" alt="11-hi">
+  <div class="k"><b>11-hi</b></div>
+  <div class="k">hi～</div>
+  <div class="k">inbox/inserted</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/12-good-night.png" alt="12-good-night">
+  <div class="k"><b>12-good-night</b></div>
+  <div class="k">晚安啦</div>
+  <div class="k">waking ⊘</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/13-wink.png" alt="13-wink">
+  <div class="k"><b>13-wink</b></div>
+  <div class="k">眨眼</div>
+  <div class="k">inbox/inserted</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/14-kiss.png" alt="14-kiss">
+  <div class="k"><b>14-kiss</b></div>
+  <div class="k">么么哒</div>
+  <div class="k">happy ⊘</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/15-cheer-up.png" alt="15-cheer-up">
+  <div class="k"><b>15-cheer-up</b></div>
+  <div class="k">加油</div>
+  <div class="k">happy</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/16-comfort.png" alt="16-comfort">
+  <div class="k"><b>16-comfort</b></div>
+  <div class="k">开心点嘛</div>
+  <div class="k">happy ⊘</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/17-yay.png" alt="17-yay">
+  <div class="k"><b>17-yay</b></div>
+  <div class="k">好耶</div>
+  <div class="k">happy / notify-complete</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/18-confused.png" alt="18-confused">
+  <div class="k"><b>18-confused</b></div>
+  <div class="k">有点懵</div>
+  <div class="k">thinking</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/19-thanks.png" alt="19-thanks">
+  <div class="k"><b>19-thanks</b></div>
+  <div class="k">谢谢哦</div>
+  <div class="k">inbox/inserted ⊘</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/20-thumbs-up.png" alt="20-thumbs-up">
+  <div class="k"><b>20-thumbs-up</b></div>
+  <div class="k">默大契</div>
+  <div class="k">happy / notify-complete</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/21-at-work.png" alt="21-at-work">
+  <div class="k"><b>21-at-work</b></div>
+  <div class="k">工作中</div>
+  <div class="k">working</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/22-annoyed.png" alt="22-annoyed">
+  <div class="k"><b>22-annoyed</b></div>
+  <div class="k">好气人哦</div>
+  <div class="k">error / tool/failed</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/23-you-are-the-best.png" alt="23-you-are-the-best">
+  <div class="k"><b>23-you-are-the-best</b></div>
+  <div class="k">你最好了</div>
+  <div class="k">happy / notify-complete</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/gif-24.png" alt="gif-24">
+  <div class="k"><b>gif-24</b></div>
+  <div class="k">睡觉 zzz</div>
+  <div class="k">idle / sleeping</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/gif-26.png" alt="gif-26">
+  <div class="k"><b>gif-26</b></div>
+  <div class="k">趴面</div>
+  <div class="k">idle</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/gif-28.png" alt="gif-28">
+  <div class="k"><b>gif-28</b></div>
+  <div class="k">挂件吊坠</div>
+  <div class="k">idle</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/gif-29.png" alt="gif-29">
+  <div class="k"><b>gif-29</b></div>
+  <div class="k">抱小宠</div>
+  <div class="k">idle</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/25-reading.png" alt="25-reading">
+  <div class="k"><b>25-reading</b></div>
+  <div class="k">看书</div>
+  <div class="k">working / thinking / idle</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/angry-charge.gif" alt="angry-charge">
+  <div class="k"><b>angry-charge</b></div>
+  <div class="k">生气蓄力→爆发（动图）</div>
+  <div class="k">error / tool/failed</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/new/01-bored.png" alt="01-bored">
+  <div class="k"><b>01-bored</b></div>
+  <div class="k">庄很无聊</div>
+  <div class="k">thinking / waiting / idle</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/new/02-good-morning.png" alt="02-good-morning">
+  <div class="k"><b>02-good-morning</b></div>
+  <div class="k">早上好</div>
+  <div class="k">waking</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/new/03-dazed.png" alt="03-dazed">
+  <div class="k"><b>03-dazed</b></div>
+  <div class="k">哦呀斯密</div>
+  <div class="k">sleeping</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/new/04-definitely.png" alt="04-definitely">
+  <div class="k"><b>04-definitely</b></div>
+  <div class="k">宜定可以</div>
+  <div class="k">happy / notify-complete</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/new/05-wink.png" alt="05-wink">
+  <div class="k"><b>05-wink</b></div>
+  <div class="k">Wink</div>
+  <div class="k">notify-complete</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/new/06-brain-overload.png" alt="06-brain-overload">
+  <div class="k"><b>06-brain-overload</b></div>
+  <div class="k">庄脑过载</div>
+  <div class="k">working / thinking</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/new/07-wants.png" alt="07-wants">
+  <div class="k"><b>07-wants</b></div>
+  <div class="k">庄想要</div>
+  <div class="k">working / waiting</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/new/08-miss-you.png" alt="08-miss-you">
+  <div class="k"><b>08-miss-you</b></div>
+  <div class="k">庄想你了</div>
+  <div class="k">inbox/inserted</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/new/09-got-it.png" alt="09-got-it">
+  <div class="k"><b>09-got-it</b></div>
+  <div class="k">庄得到</div>
+  <div class="k">notify-complete</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/new/10-hate-you.png" alt="10-hate-you">
+  <div class="k"><b>10-hate-you</b></div>
+  <div class="k">庄讨厌你</div>
+  <div class="k">error</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/new/11-sneak-snack.png" alt="11-sneak-snack">
+  <div class="k"><b>11-sneak-snack</b></div>
+  <div class="k">庄偷吃外卖</div>
+  <div class="k">idle</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/new/12-wake-up.png" alt="12-wake-up">
+  <div class="k"><b>12-wake-up</b></div>
+  <div class="k">起床！别过少爷生活</div>
+  <div class="k">waking</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/new/13-so-good.png" alt="13-so-good">
+  <div class="k"><b>13-so-good</b></div>
+  <div class="k">太中啦</div>
+  <div class="k">happy / notify-complete</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/new/14-so-strong.png" alt="14-so-strong">
+  <div class="k"><b>14-so-strong</b></div>
+  <div class="k">！强强！</div>
+  <div class="k">happy</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/new/15-so-loud.png" alt="15-so-loud">
+  <div class="k"><b>15-so-loud</b></div>
+  <div class="k">庄一直响</div>
+  <div class="k">waiting</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/new/16-knock-knock.png" alt="16-knock-knock">
+  <div class="k"><b>16-knock-knock</b></div>
+  <div class="k">庄门戳你</div>
+  <div class="k">waiting / inbox/inserted</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/new/17-crying.png" alt="17-crying">
+  <div class="k"><b>17-crying</b></div>
+  <div class="k">庄一直哭</div>
+  <div class="k">error</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/new/18-disgusted.png" alt="18-disgusted">
+  <div class="k"><b>18-disgusted</b></div>
+  <div class="k">庄感到恶心</div>
+  <div class="k">error / tool/failed</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/new/19-slacking.png" alt="19-slacking">
+  <div class="k"><b>19-slacking</b></div>
+  <div class="k">摸鱼ing</div>
+  <div class="k">working / idle</div>
+</div>
+<div class="bcell">
+  <img src="../art/pet/bubble/new/20-unhappy.png" alt="20-unhappy">
+  <div class="k"><b>20-unhappy</b></div>
+  <div class="k">庄不开心</div>
+  <div class="k">error / tool/failed</div>
+</div></div>
+</div>
+<script id="payload" type="application/json">{"frameHeight":256}</script>
+<script>
+const D = JSON.parse(document.getElementById('payload').textContent);
+const FH = D.frameHeight || 256;
+const H = 72;                       // 缩略显示高度（px）
+document.querySelectorAll('.sprite[data-file]').forEach(el => {
+  const n = Math.max(1, Number(el.dataset.frames) | 0);
+  const fw = Number(el.dataset.fw) || 256;
+  const ms = Math.max(30, Number(el.dataset.ms) || 40);
+  const scale = H / FH;
+  el.style.width = Math.round(H * fw / FH) + 'px';
+  el.style.height = H + 'px';
+  el.style.backgroundImage = 'url("../art/pet/' + el.dataset.file + '")';
+  el.style.backgroundSize = Math.round(n * fw * scale) + 'px ' + H + 'px';
+  if (n > 1) {
+    el.style.setProperty('--end', -Math.round((n - 1) * fw * scale) + 'px');
+    el.style.animation = 'play ' + (ms * n / 1000) + 's steps(' + n + ') infinite';
+  }
+  el.title = el.dataset.file + ' · 点击暂停/继续';
+  el.addEventListener('click', () => {
+    el.style.animationPlayState = el.style.animationPlayState === 'paused' ? 'running' : 'paused';
+  });
+});
+</script>
+<style>@keyframes play { from { background-position-x: 0; } to { background-position-x: var(--end); } }</style>
+</body>
+</html>

@@ -318,6 +318,15 @@ export function createHandler (deps) {
           states: atlas.states,
           variants: atlas.variants,
           files: atlas.files,
+          /**
+           * 素材台账（产物路径 → 语义 id / 画面说明）。
+           *
+           * 为什么必须透传：`files` 字段曾因为只在这一跳被吃掉而**静默失效**过
+           * （宿主自检直接读 pet.json 是绿的，走 HTTP 却拿到缺字段的清单，
+           * 症状是"变体永远按错几何切"）。`assets` 是同一个坑的同一条防线：
+           * exe 与 e2e 断言都靠它把 `error-listless.png` 和「吐彩虹」对上号。
+           */
+          assets: atlas.assets,
           bubble: atlas.bubble,
           missing: atlas.missing,
           report: atlasReport(atlas)

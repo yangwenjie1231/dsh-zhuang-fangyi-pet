@@ -41,6 +41,16 @@ export function emptyAtlas () {
     variants: {},
     /** 每个文件自己的几何（契约 §4 的 `files`）。见 `geometryFor()`。 */
     files: {},
+    /**
+     * 产物路径 → 身份（契约 §4 v-next 的 `assets`）。
+     *
+     * 解决的问题：产物按位置编号时（`idle-4.png`），清单里没有任何字段能说出
+     * "这张图画的是什么"，诊断与测试只能数张数。现在产物名与本表都带语义 id，
+     * 于是 `error-listless.png` ↔「无精打采 + 吐彩虹」可以对上号。
+     *
+     * **可选字段**：旧清单没有它，这里就是空对象，两侧照常工作。
+     */
+    assets: {},
     bubble: [],
     missing: [],
     /** 白名单：相对 `art/pet/` 的路径集合，由清单派生。 */
@@ -140,6 +150,32 @@ export function normalizeAtlas (raw) {
         addFile(file)
       }
       if (kept.length > 0) out.variants[state] = kept
+    }
+  }
+
+  // ── assets：产物路径 → 身份（**可选**附加段，旧清单没有就当空）────────────
+  //
+  // 谁生成：`tools/prepare-pet.py` 从 `assets/catalog.json`（素材台账）派生。
+  // 这里只做**形状净化**并把它挂进白名单（这样诊断/画廊能按 id 取图）——
+  // 归属逻辑不在这里做，避免清单与台账两处各判一次。
+  if (raw.assets !== null && typeof raw.assets === 'object' && !Array.isArray(raw.assets)) {
+    for (const [file, entry] of Object.entries(raw.assets)) {
+      if (!isSafeRel(file)) continue
+      if (entry === null || typeof entry !== 'object') continue
+      const key = file.replace(/\\/g, '/')
+      out.assets[key] = {
+        id: typeof entry.id === 'string' ? entry.id : '',
+        role: entry.role === 'bubble' || entry.role === 'anim' ? entry.role : 'body',
+        family: typeof entry.family === 'string' ? entry.family : '',
+        caption: typeof entry.caption === 'string' ? entry.caption : '',
+        mood: typeof entry.mood === 'string' ? entry.mood : '',
+        states: Array.isArray(entry.states)
+          ? entry.states.filter(s => VALID_STATES.includes(s))
+          : [],
+        keys: Array.isArray(entry.keys) ? entry.keys.filter(k => typeof k === 'string') : [],
+        hasText: entry.hasText === true,
+        random: entry.random !== false
+      }
     }
   }
 
@@ -403,8 +439,12 @@ export function resolveBubbleFile (entry, dark) {
  * @returns {object}
  */
 export function atlasReport (atlas) {
-  const covered = VALID_STATES.filter(s => atlas.states?.[s] !== undefined)
-  const uncovered = VALID_STATES.filter(s => atlas.states?.[s] === undefined)
+  // ⚠️ `listening` 故意**不算进覆盖率**：2026-10-07 起它降级为纯气泡，
+  // 清单里本来就不会有它的条目 —— 把它算成"未覆盖"会天天误报。
+  // 契约 §1 的 9 个状态名不变（向后兼容），只是运行时不再产出它。
+  const reportable = VALID_STATES.filter(s => s !== 'listening')
+  const covered = reportable.filter(s => atlas.states?.[s] !== undefined)
+  const uncovered = reportable.filter(s => atlas.states?.[s] === undefined)
   const bubbles = Array.isArray(atlas.bubble) ? atlas.bubble : []
   // 覆盖率：哪些气泡图**永远不会被按状态挑中**（只能靠全池兜底或画廊看到）。
   // 这不是错误（全池与画廊仍会展示它们），但新增素材后值得一眼看见 ——
@@ -429,6 +469,42 @@ export function atlasReport (atlas) {
       unused
     },
     /** 全池兜底时会被跳过的图（语义太强，见 `EMOTE_EXCLUDE_FROM_RANDOM`）。 */
-    excludedCount: EMOTE_EXCLUDE_FROM_RANDOM.length
+    excludedCount: EMOTE_EXCLUDE_FROM_RANDOM.length,
+    /**
+     * 素材台账（`assets` 段）：每个状态**每张图**的语义 id 与画面说明。
+     *
+     * 这一段的存在是为了回答"她现在这张图画的是什么" —— 以前产物按序号编号，
+     * 清单里没有身份字段，只能靠数变体张数反推归属（e2e 里就是这么写的）。
+     */
+    assets: assetLedger(atlas)
   }
+}
+
+/**
+ * 把 `assets` 段整理成「状态 → [{file, id, caption, frames, frameMs}]」，
+ * 供 `/pet/diag` 直接打印。清单没有这一段时返回空对象（旧清单照常）。
+ *
+ * @param {object} atlas
+ * @returns {Record<string, object[]>}
+ */
+export function assetLedger (atlas) {
+  const out = {}
+  const assets = atlas?.assets ?? {}
+  for (const [state, list] of Object.entries(atlas?.variants ?? {})) {
+    const rows = []
+    for (const file of list) {
+      const meta = assets[file]
+      const geom = atlas?.files?.[file] ?? {}
+      rows.push({
+        file,
+        id: meta?.id ?? null,
+        caption: meta?.caption ?? null,
+        frames: geom.frames ?? null,
+        frameMs: geom.frameMs ?? null,
+        canonical: atlas?.states?.[state]?.file === file
+      })
+    }
+    if (rows.length > 0) out[state] = rows
+  }
+  return out
 }
