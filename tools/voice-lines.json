@@ -43,6 +43,14 @@
       "why": "单击。合成：官方 0.9~2.5 秒的短句全是战斗喊招（灭 / 我这就来），套到点击上很奇怪。"
     },
     {
+      "name": "click-1v2",
+      "event": "pet/click",
+      "source": "synth",
+      "text": "嗯？我在呢。",
+      "why": "单击。合成：官方 0.9~2.5 秒的短句全是战斗喊招（灭 / 我这就来），套到点击上很奇怪。",
+      "variant": 2
+    },
+    {
       "name": "click-2",
       "event": "pet/click",
       "source": "synth",
@@ -50,11 +58,27 @@
       "why": "点击轮换。她第一反应总是关心你的课题 —— 符合人设。"
     },
     {
+      "name": "click-2v2",
+      "event": "pet/click",
+      "source": "synth",
+      "text": "怎么啦，实验卡住了？",
+      "why": "点击轮换。她第一反应总是关心你的课题 —— 符合人设。",
+      "variant": 2
+    },
+    {
       "name": "click-3",
       "event": "pet/click",
       "source": "synth",
       "text": "别急，我在听。",
       "why": "点击轮换。"
+    },
+    {
+      "name": "click-3v2",
+      "event": "pet/click",
+      "source": "synth",
+      "text": "别急，我在听。",
+      "why": "点击轮换。",
+      "variant": 2
     },
     {
       "name": "click-4",
@@ -80,11 +104,27 @@
       "why": "AI 开始干活。合成：官方「作战开始1」是不怕苦战只怕无谓之战，与日常干活无关。"
     },
     {
+      "name": "work-start-1v2",
+      "event": "agent/working",
+      "source": "synth",
+      "text": "好，交给我吧。",
+      "why": "AI 开始干活。合成：官方「作战开始1」是不怕苦战只怕无谓之战，与日常干活无关。",
+      "variant": 2
+    },
+    {
       "name": "work-start-2",
       "event": "agent/working",
       "source": "synth",
       "text": "我看看……嗯，思路有了。",
       "why": "干活轮换。她的典型节奏：先看，再给方向。"
+    },
+    {
+      "name": "work-start-2v2",
+      "event": "agent/working",
+      "source": "synth",
+      "text": "我看看……嗯，思路有了。",
+      "why": "干活轮换。她的典型节奏：先看，再给方向。",
+      "variant": 2
     },
     {
       "name": "work-start-3",
@@ -102,6 +142,14 @@
       "why": "AI 干完活（用户点名的完成时提醒）。合成：官方「作战胜利1」是赢这一次其实不算很难，套到改代码上很奇怪。"
     },
     {
+      "name": "done-1v2",
+      "event": "turn/complete",
+      "source": "synth",
+      "text": "做完了，你看看。",
+      "why": "AI 干完活（用户点名的完成时提醒）。合成：官方「作战胜利1」是赢这一次其实不算很难，套到改代码上很奇怪。",
+      "variant": 2
+    },
+    {
       "name": "done-2",
       "event": "turn/complete",
       "source": "synth",
@@ -109,11 +157,27 @@
       "why": "完成轮换。"
     },
     {
+      "name": "done-2v2",
+      "event": "turn/complete",
+      "source": "synth",
+      "text": "好了，结果都在这里。",
+      "why": "完成轮换。",
+      "variant": 2
+    },
+    {
       "name": "done-3",
       "event": "turn/complete",
       "source": "synth",
       "text": "成了。比预想的顺利。",
       "why": "完成轮换 —— 她的风暴平息语气。"
+    },
+    {
+      "name": "done-3v2",
+      "event": "turn/complete",
+      "source": "synth",
+      "text": "成了。比预想的顺利。",
+      "why": "完成轮换 —— 她的风暴平息语气。",
+      "variant": 2
     },
     {
       "name": "done-4",
@@ -131,6 +195,14 @@
       "why": "出错。合成：官方只有「小心！」一条短提示，语义太窄。"
     },
     {
+      "name": "error-1v2",
+      "event": "agent/error",
+      "source": "synth",
+      "text": "出问题了，我看一下。",
+      "why": "出错。合成：官方只有「小心！」一条短提示，语义太窄。",
+      "variant": 2
+    },
+    {
       "name": "error-2",
       "event": "agent/error",
       "source": "real",
@@ -144,6 +216,14 @@
       "source": "synth",
       "text": "别慌，先看看报错。",
       "why": "出错轮换。她的风格是遇事不慌、先定位问题。"
+    },
+    {
+      "name": "error-3v2",
+      "event": "agent/error",
+      "source": "synth",
+      "text": "别慌，先看看报错。",
+      "why": "出错轮换。她的风格是遇事不慌、先定位问题。",
+      "variant": 2
     },
     {
       "name": "waiting-1",
@@ -161,11 +241,27 @@
       "why": "审批轮换。说清为什么叫你，比只说等你更有用。"
     },
     {
+      "name": "waiting-2v2",
+      "event": "attention/approval",
+      "source": "synth",
+      "text": "管理员，这里需要你定一下。",
+      "why": "审批轮换。说清为什么叫你，比只说等你更有用。",
+      "variant": 2
+    },
+    {
       "name": "thinking-1",
       "event": "agent/thinking",
       "source": "synth",
-      "text": "让我想想...",
+      "text": "让我想想……",
       "why": "这条才是「让我想想」的正确位置 —— v1 把它放在回复到达时，时序倒置（话都说完了才说这句）。"
+    },
+    {
+      "name": "thinking-1v2",
+      "event": "agent/thinking",
+      "source": "synth",
+      "text": "让我想想……",
+      "why": "这条才是「让我想想」的正确位置 —— v1 把它放在回复到达时，时序倒置（话都说完了才说这句）。",
+      "variant": 2
     },
     {
       "name": "thinking-2",
@@ -175,11 +271,27 @@
       "why": "思考轮换。"
     },
     {
+      "name": "thinking-2v2",
+      "event": "agent/thinking",
+      "source": "synth",
+      "text": "嗯……我理一理。",
+      "why": "思考轮换。",
+      "variant": 2
+    },
+    {
       "name": "pomodoro-start",
       "event": "pomodoro/start",
       "source": "synth",
       "text": "好，开始专注。这段时间就交给我吧。",
       "why": "开始专注。"
+    },
+    {
+      "name": "pomodoro-startv2",
+      "event": "pomodoro/start",
+      "source": "synth",
+      "text": "好，开始专注。这段时间就交给我吧。",
+      "why": "开始专注。",
+      "variant": 2
     },
     {
       "name": "pomodoro-focus-end",
@@ -197,6 +309,14 @@
       "why": "休息结束 → 回来干活。官方素材里没有回来继续的短句。"
     },
     {
+      "name": "pomodoro-break-endv2",
+      "event": "pomodoro/break-end",
+      "source": "synth",
+      "text": "歇够了，我们继续吧。",
+      "why": "休息结束 → 回来干活。官方素材里没有回来继续的短句。",
+      "variant": 2
+    },
+    {
       "name": "pomodoro-long-end",
       "event": "pomodoro/long-end",
       "source": "synth",
@@ -204,11 +324,27 @@
       "why": "长休结束。"
     },
     {
+      "name": "pomodoro-long-endv2",
+      "event": "pomodoro/long-end",
+      "source": "synth",
+      "text": "长休息结束了，状态不错，接着来。",
+      "why": "长休结束。",
+      "variant": 2
+    },
+    {
       "name": "pomodoro-long-start",
       "event": "pomodoro/long-start",
       "source": "synth",
       "text": "这一轮做得很扎实，去好好休息一下吧。",
       "why": "进入长休息（每 4 轮一次，用户点名的功能）—— v1 完全没覆盖这个时机。"
+    },
+    {
+      "name": "pomodoro-long-startv2",
+      "event": "pomodoro/long-start",
+      "source": "synth",
+      "text": "这一轮做得很扎实，去好好休息一下吧。",
+      "why": "进入长休息（每 4 轮一次，用户点名的功能）—— v1 完全没覆盖这个时机。",
+      "variant": 2
     },
     {
       "name": "feed-1",
@@ -224,6 +360,14 @@
       "source": "synth",
       "text": "给我的？那我不客气了。",
       "why": "投喂轮换 —— 比发现资源更像被投喂的反应。"
+    },
+    {
+      "name": "feed-2v2",
+      "event": "pet/feed",
+      "source": "synth",
+      "text": "给我的？那我不客气了。",
+      "why": "投喂轮换 —— 比发现资源更像被投喂的反应。",
+      "variant": 2
     },
     {
       "name": "praise-1",
@@ -249,11 +393,27 @@
       "why": "夸奖轮换。她摆手推辞的典型反应。"
     },
     {
+      "name": "praise-3v2",
+      "event": "pet/praise",
+      "source": "synth",
+      "text": "好了好了，可别再夸了。",
+      "why": "夸奖轮换。她摆手推辞的典型反应。",
+      "variant": 2
+    },
+    {
       "name": "pet-head-1",
       "event": "pet/pet-head",
       "source": "synth",
       "text": "嗯……这样也挺好的。",
       "why": "摸摸头。官方素材里没有亲密互动的短句。"
+    },
+    {
+      "name": "pet-head-1v2",
+      "event": "pet/pet-head",
+      "source": "synth",
+      "text": "嗯……这样也挺好的。",
+      "why": "摸摸头。官方素材里没有亲密互动的短句。",
+      "variant": 2
     },
     {
       "name": "pet-head-2",
@@ -263,11 +423,27 @@
       "why": "摸头轮换 —— 她守不住闲又其实受用，比一味顺从更像她。"
     },
     {
+      "name": "pet-head-2v2",
+      "event": "pet/pet-head",
+      "source": "synth",
+      "text": "别闹，我还有份报告要写呢。",
+      "why": "摸头轮换 —— 她守不住闲又其实受用，比一味顺从更像她。",
+      "variant": 2
+    },
+    {
       "name": "sleepy-1",
       "event": "pet/sleeping",
       "source": "synth",
       "text": "有点困了，我先眯一会儿。",
       "why": "进入睡眠。"
+    },
+    {
+      "name": "sleepy-1v2",
+      "event": "pet/sleeping",
+      "source": "synth",
+      "text": "有点困了，我先眯一会儿。",
+      "why": "进入睡眠。",
+      "variant": 2
     },
     {
       "name": "sleepy-2",
@@ -277,11 +453,27 @@
       "why": "睡眠轮换 —— 她的分秒必争连打盹都要限时。"
     },
     {
+      "name": "sleepy-2v2",
+      "event": "pet/sleeping",
+      "source": "synth",
+      "text": "呼……就十分钟。",
+      "why": "睡眠轮换 —— 她的分秒必争连打盹都要限时。",
+      "variant": 2
+    },
+    {
       "name": "chat-reply-1",
       "event": "chat/reply",
       "source": "synth",
       "text": "嗯，我说完了。",
       "why": "聊天回复到达时的提示音（正文在气泡里）。v1 用的是让我想想 —— 时序倒置。"
+    },
+    {
+      "name": "chat-reply-1v2",
+      "event": "chat/reply",
+      "source": "synth",
+      "text": "嗯，我说完了。",
+      "why": "聊天回复到达时的提示音（正文在气泡里）。v1 用的是让我想想 —— 时序倒置。",
+      "variant": 2
     },
     {
       "name": "chat-reply-2",
@@ -291,11 +483,27 @@
       "why": "回复轮换。"
     },
     {
+      "name": "chat-reply-2v2",
+      "event": "chat/reply",
+      "source": "synth",
+      "text": "你看这样行吗？",
+      "why": "回复轮换。",
+      "variant": 2
+    },
+    {
       "name": "chat-reply-3",
       "event": "chat/reply",
       "source": "synth",
       "text": "喏，都在上面了。",
       "why": "回复轮换 —— 指向气泡里的正文。"
+    },
+    {
+      "name": "chat-reply-3v2",
+      "event": "chat/reply",
+      "source": "synth",
+      "text": "喏，都在上面了。",
+      "why": "回复轮换 —— 指向气泡里的正文。",
+      "variant": 2
     },
     {
       "name": "session-start",
@@ -305,11 +513,27 @@
       "why": "新会话出现 —— v1 没覆盖。"
     },
     {
+      "name": "session-startv2",
+      "event": "session/start",
+      "source": "synth",
+      "text": "新的对话，我们从头理一理。",
+      "why": "新会话出现 —— v1 没覆盖。",
+      "variant": 2
+    },
+    {
       "name": "approval-done",
       "event": "attention/cleared",
       "source": "synth",
       "text": "好，那我继续了。",
       "why": "你处理完审批后她接着干 —— 有始有终，v1 没覆盖。"
+    },
+    {
+      "name": "approval-donev2",
+      "event": "attention/cleared",
+      "source": "synth",
+      "text": "好，那我继续了。",
+      "why": "你处理完审批后她接着干 —— 有始有终，v1 没覆盖。",
+      "variant": 2
     },
     {
       "name": "idle-long",
@@ -319,11 +543,27 @@
       "why": "长时间空闲时的一句（低频，避免吵闹）。"
     },
     {
+      "name": "idle-longv2",
+      "event": "pet/idle-long",
+      "source": "synth",
+      "text": "闲下来反而有点不习惯……要不要找点事做？",
+      "why": "长时间空闲时的一句（低频，避免吵闹）。",
+      "variant": 2
+    },
+    {
       "name": "thinking-3",
       "event": "agent/thinking",
       "source": "synth",
       "text": "这个问题……有点意思。",
       "why": "思考轮换。她遇到有意思的难题会来精神 —— 不是抱怨，是起兴致。"
+    },
+    {
+      "name": "thinking-3v2",
+      "event": "agent/thinking",
+      "source": "synth",
+      "text": "这个问题……有点意思。",
+      "why": "思考轮换。她遇到有意思的难题会来精神 —— 不是抱怨，是起兴致。",
+      "variant": 2
     },
     {
       "name": "thinking-4",
@@ -333,11 +573,27 @@
       "why": "思考轮换。她的思考是\"抓线索\"式的，与\"我理一理\"不同。"
     },
     {
+      "name": "thinking-4v2",
+      "event": "agent/thinking",
+      "source": "synth",
+      "text": "先别打断，我快抓到了。",
+      "why": "思考轮换。她的思考是\"抓线索\"式的，与\"我理一理\"不同。",
+      "variant": 2
+    },
+    {
       "name": "thinking-5",
       "event": "agent/thinking",
       "source": "synth",
       "text": "让我把条件捋一遍。",
       "why": "思考轮换 —— 研究员本能：先摆条件再下判断。"
+    },
+    {
+      "name": "thinking-5v2",
+      "event": "agent/thinking",
+      "source": "synth",
+      "text": "让我把条件捋一遍。",
+      "why": "思考轮换 —— 研究员本能：先摆条件再下判断。",
+      "variant": 2
     },
     {
       "name": "thinking-6",
@@ -347,11 +603,27 @@
       "why": "思考轮换。她的口头禅是\"验证\"而不是\"我觉得\"。"
     },
     {
+      "name": "thinking-6v2",
+      "event": "agent/thinking",
+      "source": "synth",
+      "text": "嗯，有个想法，验证一下。",
+      "why": "思考轮换。她的口头禅是\"验证\"而不是\"我觉得\"。",
+      "variant": 2
+    },
+    {
       "name": "work-start-4",
       "event": "agent/working",
       "source": "synth",
       "text": "在做了，稍等。",
       "why": "干活轮换 —— 最短的一句，适合连轴转时不啰嗦。"
+    },
+    {
+      "name": "work-start-4v2",
+      "event": "agent/working",
+      "source": "synth",
+      "text": "在做了，稍等。",
+      "why": "干活轮换 —— 最短的一句，适合连轴转时不啰嗦。",
+      "variant": 2
     },
     {
       "name": "work-start-5",
@@ -361,11 +633,27 @@
       "why": "干活轮换。她的担当：主动分走一半，不让你守着。"
     },
     {
+      "name": "work-start-5v2",
+      "event": "agent/working",
+      "source": "synth",
+      "text": "这部分交给我，你去忙别的。",
+      "why": "干活轮换。她的担当：主动分走一半，不让你守着。",
+      "variant": 2
+    },
+    {
       "name": "work-start-6",
       "event": "agent/working",
       "source": "synth",
       "text": "思路通了，剩下的就是体力活。",
       "why": "干活轮换 —— 把\"难\"和\"烦\"分开说，是她评估任务的方式。"
+    },
+    {
+      "name": "work-start-6v2",
+      "event": "agent/working",
+      "source": "synth",
+      "text": "思路通了，剩下的就是体力活。",
+      "why": "干活轮换 —— 把\"难\"和\"烦\"分开说，是她评估任务的方式。",
+      "variant": 2
     },
     {
       "name": "done-5",
@@ -375,11 +663,27 @@
       "why": "完成轮换。呼应\"按你要的\"—— 强调是照你的要求做的。"
     },
     {
+      "name": "done-5v2",
+      "event": "turn/complete",
+      "source": "synth",
+      "text": "喏，按你要的改好了。",
+      "why": "完成轮换。呼应\"按你要的\"—— 强调是照你的要求做的。",
+      "variant": 2
+    },
+    {
       "name": "done-6",
       "event": "turn/complete",
       "source": "synth",
       "text": "这一版应该没有问题了。",
       "why": "完成轮换 —— 她的措辞留有余地（\"应该\"），不把话说满。"
+    },
+    {
+      "name": "done-6v2",
+      "event": "turn/complete",
+      "source": "synth",
+      "text": "这一版应该没有问题了。",
+      "why": "完成轮换 —— 她的措辞留有余地（\"应该\"），不把话说满。",
+      "variant": 2
     },
     {
       "name": "done-7",
@@ -389,11 +693,27 @@
       "why": "完成轮换 —— 交付口吻，把最后一步交回给你。"
     },
     {
+      "name": "done-7v2",
+      "event": "turn/complete",
+      "source": "synth",
+      "text": "收工。你验收一下。",
+      "why": "完成轮换 —— 交付口吻，把最后一步交回给你。",
+      "variant": 2
+    },
+    {
       "name": "chat-reply-4",
       "event": "chat/reply",
       "source": "synth",
       "text": "我说完了，你怎么想？",
       "why": "回复轮换 —— 说完了还问一句，把话头递回去。"
+    },
+    {
+      "name": "chat-reply-4v2",
+      "event": "chat/reply",
+      "source": "synth",
+      "text": "我说完了，你怎么想？",
+      "why": "回复轮换 —— 说完了还问一句，把话头递回去。",
+      "variant": 2
     },
     {
       "name": "chat-reply-5",
@@ -403,11 +723,27 @@
       "why": "回复轮换 —— 口语化的收束，比\"我说完了\"更轻。"
     },
     {
+      "name": "chat-reply-5v2",
+      "event": "chat/reply",
+      "source": "synth",
+      "text": "大概就是这个意思。",
+      "why": "回复轮换 —— 口语化的收束，比\"我说完了\"更轻。",
+      "variant": 2
+    },
+    {
       "name": "chat-reply-6",
       "event": "chat/reply",
       "source": "synth",
       "text": "先这样，不够再问我。",
       "why": "回复轮换 —— 留个口子，不把对话做死。"
+    },
+    {
+      "name": "chat-reply-6v2",
+      "event": "chat/reply",
+      "source": "synth",
+      "text": "先这样，不够再问我。",
+      "why": "回复轮换 —— 留个口子，不把对话做死。",
+      "variant": 2
     },
     {
       "name": "error-4",
@@ -417,11 +753,27 @@
       "why": "出错轮换 —— 先叫停再排查，比\"出问题了\"更急一点。"
     },
     {
+      "name": "error-4v2",
+      "event": "agent/error",
+      "source": "synth",
+      "text": "等一下，这里不对劲。",
+      "why": "出错轮换 —— 先叫停再排查，比\"出问题了\"更急一点。",
+      "variant": 2
+    },
+    {
       "name": "error-5",
       "event": "agent/error",
       "source": "synth",
       "text": "报错了。别急，我看看。",
       "why": "出错轮换 —— 一半报信一半安抚，符合她稳住场面的习惯。"
+    },
+    {
+      "name": "error-5v2",
+      "event": "agent/error",
+      "source": "synth",
+      "text": "报错了。别急，我看看。",
+      "why": "出错轮换 —— 一半报信一半安抚，符合她稳住场面的习惯。",
+      "variant": 2
     },
     {
       "name": "error-6",
@@ -431,11 +783,27 @@
       "why": "出错轮换 —— 给出\"能解决\"的信号，而不是只报告坏消息。"
     },
     {
+      "name": "error-6v2",
+      "event": "agent/error",
+      "source": "synth",
+      "text": "这个错我见过，有办法。",
+      "why": "出错轮换 —— 给出\"能解决\"的信号，而不是只报告坏消息。",
+      "variant": 2
+    },
+    {
       "name": "wake-2",
       "event": "pet/wake",
       "source": "synth",
       "text": "来了。今天从哪儿开始？",
       "why": "出现轮换 —— 直接问进度，符合她一上来就想干活。"
+    },
+    {
+      "name": "wake-2v2",
+      "event": "pet/wake",
+      "source": "synth",
+      "text": "来了。今天从哪儿开始？",
+      "why": "出现轮换 —— 直接问进度，符合她一上来就想干活。",
+      "variant": 2
     },
     {
       "name": "wake-3",
@@ -445,11 +813,27 @@
       "why": "出现轮换 —— 报到 + 待命，简洁。"
     },
     {
+      "name": "wake-3v2",
+      "event": "pet/wake",
+      "source": "synth",
+      "text": "我在这儿。有什么要做的？",
+      "why": "出现轮换 —— 报到 + 待命，简洁。",
+      "variant": 2
+    },
+    {
       "name": "session-start-2",
       "event": "session/start",
       "source": "synth",
       "text": "新的一页，从哪儿说起？",
       "why": "新会话轮换。"
+    },
+    {
+      "name": "session-start-2v2",
+      "event": "session/start",
+      "source": "synth",
+      "text": "新的一页，从哪儿说起？",
+      "why": "新会话轮换。",
+      "variant": 2
     },
     {
       "name": "session-start-3",
@@ -459,11 +843,27 @@
       "why": "新会话轮换 —— 最短的一条，不打扰。"
     },
     {
+      "name": "session-start-3v2",
+      "event": "session/start",
+      "source": "synth",
+      "text": "好，我准备好了。",
+      "why": "新会话轮换 —— 最短的一条，不打扰。",
+      "variant": 2
+    },
+    {
       "name": "idle-long-2",
       "event": "pet/idle-long",
       "source": "synth",
       "text": "安静了这么久……在想什么呢？",
       "why": "空闲轮换 —— 关心你在想什么，而不是催你干活。"
+    },
+    {
+      "name": "idle-long-2v2",
+      "event": "pet/idle-long",
+      "source": "synth",
+      "text": "安静了这么久……在想什么呢？",
+      "why": "空闲轮换 —— 关心你在想什么，而不是催你干活。",
+      "variant": 2
     },
     {
       "name": "idle-long-3",
@@ -473,11 +873,27 @@
       "why": "空闲轮换 —— 她的陪伴是不打扰式的。"
     },
     {
+      "name": "idle-long-3v2",
+      "event": "pet/idle-long",
+      "source": "synth",
+      "text": "没事做的话，我陪你待会儿。",
+      "why": "空闲轮换 —— 她的陪伴是不打扰式的。",
+      "variant": 2
+    },
+    {
       "name": "approval-done-2",
       "event": "attention/cleared",
       "source": "synth",
       "text": "好，那这件事翻篇了。",
       "why": "审批结束轮换。"
+    },
+    {
+      "name": "approval-done-2v2",
+      "event": "attention/cleared",
+      "source": "synth",
+      "text": "好，那这件事翻篇了。",
+      "why": "审批结束轮换。",
+      "variant": 2
     },
     {
       "name": "approval-done-3",
@@ -487,11 +903,27 @@
       "why": "审批结束轮换 —— 最短，衔接回工作。"
     },
     {
+      "name": "approval-done-3v2",
+      "event": "attention/cleared",
+      "source": "synth",
+      "text": "收到，我接着做。",
+      "why": "审批结束轮换 —— 最短，衔接回工作。",
+      "variant": 2
+    },
+    {
       "name": "pomodoro-start-2",
       "event": "pomodoro/start",
       "source": "synth",
       "text": "计时开始了，专心。",
       "why": "专注开始轮换 —— 计时场景下她的话要短。"
+    },
+    {
+      "name": "pomodoro-start-2v2",
+      "event": "pomodoro/start",
+      "source": "synth",
+      "text": "计时开始了，专心。",
+      "why": "专注开始轮换 —— 计时场景下她的话要短。",
+      "variant": 2
     },
     {
       "name": "pomodoro-break-end-2",
@@ -501,11 +933,27 @@
       "why": "短休息结束轮换。"
     },
     {
+      "name": "pomodoro-break-end-2v2",
+      "event": "pomodoro/break-end",
+      "source": "synth",
+      "text": "休息结束，回来吧。",
+      "why": "短休息结束轮换。",
+      "variant": 2
+    },
+    {
       "name": "pomodoro-long-end-2",
       "event": "pomodoro/long-end",
       "source": "synth",
       "text": "睡饱了，继续。",
       "why": "长休息结束轮换。"
+    },
+    {
+      "name": "pomodoro-long-end-2v2",
+      "event": "pomodoro/long-end",
+      "source": "synth",
+      "text": "睡饱了，继续。",
+      "why": "长休息结束轮换。",
+      "variant": 2
     },
     {
       "name": "pomodoro-long-start-2",
@@ -515,11 +963,27 @@
       "why": "长休息开始轮换 —— 认可这一轮的付出。"
     },
     {
+      "name": "pomodoro-long-start-2v2",
+      "event": "pomodoro/long-start",
+      "source": "synth",
+      "text": "这一轮辛苦你了，去放松一下。",
+      "why": "长休息开始轮换 —— 认可这一轮的付出。",
+      "variant": 2
+    },
+    {
       "name": "feed-3",
       "event": "pet/feed",
       "source": "synth",
       "text": "谢谢，我正好有点饿。",
       "why": "投喂轮换 —— 接受得自然，不像客套。"
+    },
+    {
+      "name": "feed-3v2",
+      "event": "pet/feed",
+      "source": "synth",
+      "text": "谢谢，我正好有点饿。",
+      "why": "投喂轮换 —— 接受得自然，不像客套。",
+      "variant": 2
     },
     {
       "name": "sleepy-3",
@@ -529,11 +993,27 @@
       "why": "睡眠轮换 —— \"撑不住\"比\"有点困\"更累一档，对应更长的空闲。"
     },
     {
+      "name": "sleepy-3v2",
+      "event": "pet/sleeping",
+      "source": "synth",
+      "text": "撑不住了……我睡一小会儿。",
+      "why": "睡眠轮换 —— \"撑不住\"比\"有点困\"更累一档，对应更长的空闲。",
+      "variant": 2
+    },
+    {
       "name": "pet-head-3",
       "event": "pet/pet-head",
       "source": "synth",
       "text": "嗯……就一下。",
       "why": "摸头轮换 —— 嘴上设限、其实没躲，与 pet-head-2 的\"别闹\"同一路子但更软。"
+    },
+    {
+      "name": "pet-head-3v2",
+      "event": "pet/pet-head",
+      "source": "synth",
+      "text": "嗯……就一下。",
+      "why": "摸头轮换 —— 嘴上设限、其实没躲，与 pet-head-2 的\"别闹\"同一路子但更软。",
+      "variant": 2
     },
     {
       "name": "praise-4",
@@ -543,6 +1023,14 @@
       "why": "被夸轮换 —— 不推辞也不得意，收下。"
     },
     {
+      "name": "praise-4v2",
+      "event": "pet/praise",
+      "source": "synth",
+      "text": "这话我记下了。",
+      "why": "被夸轮换 —— 不推辞也不得意，收下。",
+      "variant": 2
+    },
+    {
       "name": "click-6",
       "event": "pet/click",
       "source": "synth",
@@ -550,11 +1038,27 @@
       "why": "点击轮换 —— 最短的应答，高频点击时不啰嗦。"
     },
     {
+      "name": "click-6v2",
+      "event": "pet/click",
+      "source": "synth",
+      "text": "在的，你说。",
+      "why": "点击轮换 —— 最短的应答，高频点击时不啰嗦。",
+      "variant": 2
+    },
+    {
       "name": "click-7",
       "event": "pet/click",
       "source": "synth",
       "text": "嗯？需要我做什么？",
       "why": "点击轮换 —— 把点击理解成\"有活要派\"，符合她随时待命的状态。"
+    },
+    {
+      "name": "click-7v2",
+      "event": "pet/click",
+      "source": "synth",
+      "text": "嗯？需要我做什么？",
+      "why": "点击轮换 —— 把点击理解成\"有活要派\"，符合她随时待命的状态。",
+      "variant": 2
     }
   ]
 }

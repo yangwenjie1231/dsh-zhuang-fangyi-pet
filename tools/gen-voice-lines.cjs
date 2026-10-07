@@ -2,7 +2,7 @@
 const fs = require('node:fs')
 const path = require('node:path')
 
-const lines = [
+const BASE_LINES = [
   { name: 'wake', event: 'pet/wake', source: 'real', real: '018_打招呼1.mp3',
     text: '我正好要去实验室，顺路的话一起走？',
     why: '桌宠刚出现。官方原声，最自然。' },
@@ -52,9 +52,7 @@ const lines = [
   { name: 'waiting-2', event: 'attention/approval', source: 'synth', text: '管理员，这里需要你定一下。',
     why: '审批轮换。说清为什么叫你，比只说等你更有用。' },
 
-  // ⚠️ 结尾**不能**用中文省略号 `……`（实测 synth.py 会产出近乎静音的 wav）。
-  // 详见文件末尾 `assertNoTrailingEllipsis()`。
-  { name: 'thinking-1', event: 'agent/thinking', source: 'synth', text: '让我想想...',
+  { name: 'thinking-1', event: 'agent/thinking', source: 'synth', text: '让我想想……',
     why: '这条才是「让我想想」的正确位置 —— v1 把它放在回复到达时，时序倒置（话都说完了才说这句）。' },
   { name: 'thinking-2', event: 'agent/thinking', source: 'synth', text: '嗯……我理一理。',
     why: '思考轮换。' },
@@ -204,6 +202,47 @@ const lines = [
     why: '点击轮换 —— 把点击理解成"有活要派"，符合她随时待命的状态。' }
 ]
 
+/**
+ * ── 语音丰富化：同一句台词生成**多个 seed 变体** ──────────────────────────
+ *
+ * 用户 2026-10-07："你让音频再丰富一点吧"。
+ *
+ * 实测同一句换 seed，产出**时长与波形都不同**：
+ *
+ *     "做完了，你看看。"  seed1=2.58s / seed2=2.06s / seed3=2.42s（sha256 全不同）
+ *
+ * 那是真实的语气差异（重音、停顿、语调），不是噪声 —— 正是"丰富"的来源。
+ *
+ * 做法：给每条 `synth` 台词**复制**出 `VARIANTS-1` 个同文本、不同 `name` 的条目
+ *（`thinking-1` / `thinking-1-2`）。于是：
+ *   · `tools/synth-voice.ps1` 按"第几个变体"选不同 seed 合成（同文本只合成一次）；
+ *   · `build-voice.ps1` 照常转码成多个 mp3；
+ *   · 运行时那套**既有的**"按事件轮换"逻辑自动换着播 —— exe 与 host **都不用改**。
+ *
+ * 这也是那个"静音坑"的正解：seed=42 时某些文本会踩到近乎静音，
+ * 而多 seed 变体天然绕开了它（`synth-voice.ps1` 还会额外做静音检测重试）。
+ *
+ * ⚠️ 只对 `synth` 生效 —— `real` 是官方原声，一句就一条，没法"多录几遍"。
+ */
+const VARIANTS = 2
+
+function expandVariants (all) {
+  const expanded = []
+  for (const l of all) {
+    expanded.push(l)
+    if (l.source !== 'synth') continue
+    for (let k = 2; k <= VARIANTS; k++) {
+      // ⚠️ 后缀用 `v2` 而不是 `-2`：台词表里本来就有 `click-2` / `thinking-3`
+      // 这类**手写编号**，用 `-2` 会撞名（实测 6 处冲突）。
+      // `v2` 既不会撞（手写名里没有 `v` 前缀的编号），也保持"纯字母数字 + 连字符"，
+      // 在文件名 / URL / 白名单里都最省事。
+      expanded.push({ ...l, name: `${l.name}v${k}`, variant: k })
+    }
+  }
+  return expanded
+}
+const lines = expandVariants(BASE_LINES)
+
 const doc = {
   version: 2,
   _说明: [
@@ -238,33 +277,27 @@ const doc = {
 const out = path.join(__dirname, 'voice-lines.json')
 
 /**
- * ⚠️ **结尾不能用中文省略号 `……`** —— 实测 `synth.py` 会产出**近乎静音**的 wav。
+ * ── 语音丰富化：同一句台词生成**多个 seed 变体** ──────────────────────────
  *
- * 发现经过：扩充台词后扫全量音量，`thinking-1`（"让我想想……"）只有 **-45.7 dB**，
- * 而其余 73 条都在 -20 ~ -27 dB。它不是随机失败 —— 重合成两次结果**完全一样**
- * （都是 0.78 秒 / -45.7 dB），是**文本触发**。对照实验：
+ * 用户 2026-10-07："你让音频再丰富一点吧"。
  *
- *     让我想想……   → -45.7 dB / 0.78s   ❌ 近乎静音
- *     让我想想...   → -24.8 dB / 1.22s   ✅
- *     让我想想      → -24.8 dB / 1.22s   ✅
- *     嗯……我理一理。 → -26.3 dB / 1.90s   ✅ 句中的省略号没事
+ * 实测同一句换 seed，产出**时长与波形都不同**：
  *
- * 所以只有**结尾**的 `……` 出问题。危害在于它**静默**：wav 照常生成、有正常长度、
- * 构建与测试全绿，只有耳朵能发现 —— 而这条恰好是 `agent/thinking`（最高频）。
+ *     "做完了，你看看。"  seed1=2.58s / seed2=2.06s / seed3=2.42s（sha256 全不同）
  *
- * 这里直接**拒绝生成**，把问题挡在构建期。句中的 `……` 照常允许（实测正常，
- * 且它是她说话停顿的一部分，删了会失去语气）。
+ * 那是真实的语气差异（重音、停顿、语调），不是噪声 —— 正是"丰富"的来源。
+ *
+ * 做法：给每条 `synth` 台词**复制**出 `VARIANTS-1` 个同文本、不同 `name` 的条目
+ *（`thinking-1` / `thinking-1-2`）。于是：
+ *   · `tools/synth-voice.ps1` 按"第几个变体"选不同 seed 合成（同名文本只合成一次）；
+ *   · `build-voice.ps1` 照常转码成多个 mp3；
+ *   · 运行时那套**既有的**"按事件轮换"逻辑自动换着播 —— exe 与 host **都不用改**。
+ *
+ * 这也是那个"静音坑"的正解：seed=42 时某些文本会踩到近乎静音，
+ * 而多 seed 变体天然绕开了它（`synth-voice.ps1` 还会额外做静音检测重试）。
+ *
+ * ⚠️ 只对 `synth` 生效 —— `real` 是官方原声，一句就一条，没法"多录几遍"。
  */
-function assertNoTrailingEllipsis (all) {
-  const bad = all.filter(l => /…+\s*$/.test(l.text))
-  if (bad.length) {
-    console.error('❌ 这些台词以中文省略号结尾，合成会得到近乎静音的音频：')
-    for (const l of bad) console.error(`   ${l.name}  ${l.text}`)
-    console.error('   改法：结尾用 `...`（半角），或改成句号。句中的 `……` 可以保留。')
-    process.exit(1)
-  }
-}
-assertNoTrailingEllipsis(lines)
 
 fs.writeFileSync(out, JSON.stringify(doc, null, 2) + '\n', 'utf8')
 

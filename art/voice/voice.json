@@ -1,9 +1,9 @@
 {
     "version":  1,
-    "generatedAt":  "2026-10-07T04:06:53Z",
-    "count":  74,
-    "totalMs":  229522,
-    "totalBytes":  1877348,
+    "generatedAt":  "2026-10-07T05:40:22Z",
+    "count":  137,
+    "totalMs":  416866,
+    "totalBytes":  3411904,
     "lines":  [
                   {
                       "name":  "wake",
@@ -24,6 +24,15 @@
                       "bytes":  23867
                   },
                   {
+                      "name":  "click-1v2",
+                      "file":  "click-1v2.mp3",
+                      "event":  "pet/click",
+                      "source":  "synth",
+                      "text":  "嗯？我在呢。",
+                      "durationMs":  1860,
+                      "bytes":  15508
+                  },
+                  {
                       "name":  "click-2",
                       "file":  "click-2.mp3",
                       "event":  "pet/click",
@@ -33,6 +42,15 @@
                       "bytes":  27629
                   },
                   {
+                      "name":  "click-2v2",
+                      "file":  "click-2v2.mp3",
+                      "event":  "pet/click",
+                      "source":  "synth",
+                      "text":  "怎么啦，实验卡住了？",
+                      "durationMs":  2901,
+                      "bytes":  23867
+                  },
+                  {
                       "name":  "click-3",
                       "file":  "click-3.mp3",
                       "event":  "pet/click",
@@ -40,6 +58,15 @@
                       "text":  "别急，我在听。",
                       "durationMs":  2500,
                       "bytes":  20524
+                  },
+                  {
+                      "name":  "click-3v2",
+                      "file":  "click-3v2.mp3",
+                      "event":  "pet/click",
+                      "source":  "synth",
+                      "text":  "别急，我在听。",
+                      "durationMs":  2580,
+                      "bytes":  21150
                   },
                   {
                       "name":  "click-4",
@@ -69,6 +96,15 @@
                       "bytes":  23031
                   },
                   {
+                      "name":  "work-start-1v2",
+                      "file":  "work-start-1v2.mp3",
+                      "event":  "agent/working",
+                      "source":  "synth",
+                      "text":  "好，交给我吧。",
+                      "durationMs":  2780,
+                      "bytes":  22822
+                  },
+                  {
                       "name":  "work-start-2",
                       "file":  "work-start-2.mp3",
                       "event":  "agent/working",
@@ -76,6 +112,15 @@
                       "text":  "我看看……嗯，思路有了。",
                       "durationMs":  4060,
                       "bytes":  33062
+                  },
+                  {
+                      "name":  "work-start-2v2",
+                      "file":  "work-start-2v2.mp3",
+                      "event":  "agent/working",
+                      "source":  "synth",
+                      "text":  "我看看……嗯，思路有了。",
+                      "durationMs":  2820,
+                      "bytes":  23031
                   },
                   {
                       "name":  "work-start-3",
@@ -96,6 +141,15 @@
                       "bytes":  19270
                   },
                   {
+                      "name":  "done-1v2",
+                      "file":  "done-1v2.mp3",
+                      "event":  "turn/complete",
+                      "source":  "synth",
+                      "text":  "做完了，你看看。",
+                      "durationMs":  2580,
+                      "bytes":  21150
+                  },
+                  {
                       "name":  "done-2",
                       "file":  "done-2.mp3",
                       "event":  "turn/complete",
@@ -105,6 +159,15 @@
                       "bytes":  26375
                   },
                   {
+                      "name":  "done-2v2",
+                      "file":  "done-2v2.mp3",
+                      "event":  "turn/complete",
+                      "source":  "synth",
+                      "text":  "好了，结果都在这里。",
+                      "durationMs":  2780,
+                      "bytes":  22822
+                  },
+                  {
                       "name":  "done-3",
                       "file":  "done-3.mp3",
                       "event":  "turn/complete",
@@ -112,6 +175,15 @@
                       "text":  "成了。比预想的顺利。",
                       "durationMs":  3020,
                       "bytes":  24703
+                  },
+                  {
+                      "name":  "done-3v2",
+                      "file":  "done-3v2.mp3",
+                      "event":  "turn/complete",
+                      "source":  "synth",
+                      "text":  "成了。比预想的顺利。",
+                      "durationMs":  3100,
+                      "bytes":  25330
                   },
                   {
                       "name":  "done-4",
@@ -132,6 +204,15 @@
                       "bytes":  22404
                   },
                   {
+                      "name":  "error-1v2",
+                      "file":  "error-1v2.mp3",
+                      "event":  "agent/error",
+                      "source":  "synth",
+                      "text":  "出问题了，我看一下。",
+                      "durationMs":  2820,
+                      "bytes":  23031
+                  },
+                  {
                       "name":  "error-2",
                       "file":  "error-2.mp3",
                       "event":  "agent/error",
@@ -148,6 +229,15 @@
                       "text":  "别慌，先看看报错。",
                       "durationMs":  2620,
                       "bytes":  21568
+                  },
+                  {
+                      "name":  "error-3v2",
+                      "file":  "error-3v2.mp3",
+                      "event":  "agent/error",
+                      "source":  "synth",
+                      "text":  "别慌，先看看报错。",
+                      "durationMs":  2980,
+                      "bytes":  24494
                   },
                   {
                       "name":  "waiting-1",
@@ -168,13 +258,31 @@
                       "bytes":  28465
                   },
                   {
+                      "name":  "waiting-2v2",
+                      "file":  "waiting-2v2.mp3",
+                      "event":  "attention/approval",
+                      "source":  "synth",
+                      "text":  "管理员，这里需要你定一下。",
+                      "durationMs":  3340,
+                      "bytes":  27211
+                  },
+                  {
                       "name":  "thinking-1",
                       "file":  "thinking-1.mp3",
                       "event":  "agent/thinking",
                       "source":  "synth",
-                      "text":  "让我想想...",
+                      "text":  "让我想想……",
                       "durationMs":  1220,
                       "bytes":  10284
+                  },
+                  {
+                      "name":  "thinking-1v2",
+                      "file":  "thinking-1v2.mp3",
+                      "event":  "agent/thinking",
+                      "source":  "synth",
+                      "text":  "让我想想……",
+                      "durationMs":  2100,
+                      "bytes":  17389
                   },
                   {
                       "name":  "thinking-2",
@@ -186,6 +294,15 @@
                       "bytes":  15717
                   },
                   {
+                      "name":  "thinking-2v2",
+                      "file":  "thinking-2v2.mp3",
+                      "event":  "agent/thinking",
+                      "source":  "synth",
+                      "text":  "嗯……我理一理。",
+                      "durationMs":  2540,
+                      "bytes":  20941
+                  },
+                  {
                       "name":  "pomodoro-start",
                       "file":  "pomodoro-start.mp3",
                       "event":  "pomodoro/start",
@@ -193,6 +310,15 @@
                       "text":  "好，开始专注。这段时间就交给我吧。",
                       "durationMs":  5300,
                       "bytes":  42884
+                  },
+                  {
+                      "name":  "pomodoro-startv2",
+                      "file":  "pomodoro-startv2.mp3",
+                      "event":  "pomodoro/start",
+                      "source":  "synth",
+                      "text":  "好，开始专注。这段时间就交给我吧。",
+                      "durationMs":  5260,
+                      "bytes":  42675
                   },
                   {
                       "name":  "pomodoro-focus-end",
@@ -213,6 +339,15 @@
                       "bytes":  21777
                   },
                   {
+                      "name":  "pomodoro-break-endv2",
+                      "file":  "pomodoro-break-endv2.mp3",
+                      "event":  "pomodoro/break-end",
+                      "source":  "synth",
+                      "text":  "歇够了，我们继续吧。",
+                      "durationMs":  2740,
+                      "bytes":  22404
+                  },
+                  {
                       "name":  "pomodoro-long-end",
                       "file":  "pomodoro-long-end.mp3",
                       "event":  "pomodoro/long-end",
@@ -222,6 +357,15 @@
                       "bytes":  33062
                   },
                   {
+                      "name":  "pomodoro-long-endv2",
+                      "file":  "pomodoro-long-endv2.mp3",
+                      "event":  "pomodoro/long-end",
+                      "source":  "synth",
+                      "text":  "长休息结束了，状态不错，接着来。",
+                      "durationMs":  4181,
+                      "bytes":  34107
+                  },
+                  {
                       "name":  "pomodoro-long-start",
                       "file":  "pomodoro-long-start.mp3",
                       "event":  "pomodoro/long-start",
@@ -229,6 +373,15 @@
                       "text":  "这一轮做得很扎实，去好好休息一下吧。",
                       "durationMs":  3860,
                       "bytes":  31390
+                  },
+                  {
+                      "name":  "pomodoro-long-startv2",
+                      "file":  "pomodoro-long-startv2.mp3",
+                      "event":  "pomodoro/long-start",
+                      "source":  "synth",
+                      "text":  "这一轮做得很扎实，去好好休息一下吧。",
+                      "durationMs":  4181,
+                      "bytes":  34107
                   },
                   {
                       "name":  "feed-1",
@@ -247,6 +400,15 @@
                       "text":  "给我的？那我不客气了。",
                       "durationMs":  3340,
                       "bytes":  27211
+                  },
+                  {
+                      "name":  "feed-2v2",
+                      "file":  "feed-2v2.mp3",
+                      "event":  "pet/feed",
+                      "source":  "synth",
+                      "text":  "给我的？那我不客气了。",
+                      "durationMs":  3220,
+                      "bytes":  26375
                   },
                   {
                       "name":  "praise-1",
@@ -276,6 +438,15 @@
                       "bytes":  24076
                   },
                   {
+                      "name":  "praise-3v2",
+                      "file":  "praise-3v2.mp3",
+                      "event":  "pet/praise",
+                      "source":  "synth",
+                      "text":  "好了好了，可别再夸了。",
+                      "durationMs":  3020,
+                      "bytes":  24703
+                  },
+                  {
                       "name":  "pet-head-1",
                       "file":  "pet-head-1.mp3",
                       "event":  "pet/pet-head",
@@ -283,6 +454,15 @@
                       "text":  "嗯……这样也挺好的。",
                       "durationMs":  3380,
                       "bytes":  27629
+                  },
+                  {
+                      "name":  "pet-head-1v2",
+                      "file":  "pet-head-1v2.mp3",
+                      "event":  "pet/pet-head",
+                      "source":  "synth",
+                      "text":  "嗯……这样也挺好的。",
+                      "durationMs":  3620,
+                      "bytes":  29510
                   },
                   {
                       "name":  "pet-head-2",
@@ -294,6 +474,15 @@
                       "bytes":  27211
                   },
                   {
+                      "name":  "pet-head-2v2",
+                      "file":  "pet-head-2v2.mp3",
+                      "event":  "pet/pet-head",
+                      "source":  "synth",
+                      "text":  "别闹，我还有份报告要写呢。",
+                      "durationMs":  3540,
+                      "bytes":  28883
+                  },
+                  {
                       "name":  "sleepy-1",
                       "file":  "sleepy-1.mp3",
                       "event":  "pet/sleeping",
@@ -301,6 +490,15 @@
                       "text":  "有点困了，我先眯一会儿。",
                       "durationMs":  3180,
                       "bytes":  25957
+                  },
+                  {
+                      "name":  "sleepy-1v2",
+                      "file":  "sleepy-1v2.mp3",
+                      "event":  "pet/sleeping",
+                      "source":  "synth",
+                      "text":  "有点困了，我先眯一会儿。",
+                      "durationMs":  3220,
+                      "bytes":  26375
                   },
                   {
                       "name":  "sleepy-2",
@@ -312,6 +510,15 @@
                       "bytes":  30764
                   },
                   {
+                      "name":  "sleepy-2v2",
+                      "file":  "sleepy-2v2.mp3",
+                      "event":  "pet/sleeping",
+                      "source":  "synth",
+                      "text":  "呼……就十分钟。",
+                      "durationMs":  3660,
+                      "bytes":  29928
+                  },
+                  {
                       "name":  "chat-reply-1",
                       "file":  "chat-reply-1.mp3",
                       "event":  "chat/reply",
@@ -319,6 +526,15 @@
                       "text":  "嗯，我说完了。",
                       "durationMs":  3020,
                       "bytes":  24703
+                  },
+                  {
+                      "name":  "chat-reply-1v2",
+                      "file":  "chat-reply-1v2.mp3",
+                      "event":  "chat/reply",
+                      "source":  "synth",
+                      "text":  "嗯，我说完了。",
+                      "durationMs":  2740,
+                      "bytes":  22404
                   },
                   {
                       "name":  "chat-reply-2",
@@ -330,6 +546,15 @@
                       "bytes":  17598
                   },
                   {
+                      "name":  "chat-reply-2v2",
+                      "file":  "chat-reply-2v2.mp3",
+                      "event":  "chat/reply",
+                      "source":  "synth",
+                      "text":  "你看这样行吗？",
+                      "durationMs":  2060,
+                      "bytes":  16971
+                  },
+                  {
                       "name":  "chat-reply-3",
                       "file":  "chat-reply-3.mp3",
                       "event":  "chat/reply",
@@ -337,6 +562,15 @@
                       "text":  "喏，都在上面了。",
                       "durationMs":  2380,
                       "bytes":  19688
+                  },
+                  {
+                      "name":  "chat-reply-3v2",
+                      "file":  "chat-reply-3v2.mp3",
+                      "event":  "chat/reply",
+                      "source":  "synth",
+                      "text":  "喏，都在上面了。",
+                      "durationMs":  2660,
+                      "bytes":  21777
                   },
                   {
                       "name":  "session-start",
@@ -348,6 +582,15 @@
                       "bytes":  26375
                   },
                   {
+                      "name":  "session-startv2",
+                      "file":  "session-startv2.mp3",
+                      "event":  "session/start",
+                      "source":  "synth",
+                      "text":  "新的对话，我们从头理一理。",
+                      "durationMs":  2940,
+                      "bytes":  24076
+                  },
+                  {
                       "name":  "approval-done",
                       "file":  "approval-done.mp3",
                       "event":  "attention/cleared",
@@ -355,6 +598,15 @@
                       "text":  "好，那我继续了。",
                       "durationMs":  2980,
                       "bytes":  24494
+                  },
+                  {
+                      "name":  "approval-donev2",
+                      "file":  "approval-donev2.mp3",
+                      "event":  "attention/cleared",
+                      "source":  "synth",
+                      "text":  "好，那我继续了。",
+                      "durationMs":  2820,
+                      "bytes":  23031
                   },
                   {
                       "name":  "idle-long",
@@ -366,8 +618,26 @@
                       "bytes":  45810
                   },
                   {
+                      "name":  "idle-longv2",
+                      "file":  "idle-longv2.mp3",
+                      "event":  "pet/idle-long",
+                      "source":  "synth",
+                      "text":  "闲下来反而有点不习惯……要不要找点事做？",
+                      "durationMs":  5420,
+                      "bytes":  43929
+                  },
+                  {
                       "name":  "thinking-3",
                       "file":  "thinking-3.mp3",
+                      "event":  "agent/thinking",
+                      "source":  "synth",
+                      "text":  "这个问题……有点意思。",
+                      "durationMs":  3260,
+                      "bytes":  26584
+                  },
+                  {
+                      "name":  "thinking-3v2",
+                      "file":  "thinking-3v2.mp3",
                       "event":  "agent/thinking",
                       "source":  "synth",
                       "text":  "这个问题……有点意思。",
@@ -384,6 +654,15 @@
                       "bytes":  21777
                   },
                   {
+                      "name":  "thinking-4v2",
+                      "file":  "thinking-4v2.mp3",
+                      "event":  "agent/thinking",
+                      "source":  "synth",
+                      "text":  "先别打断，我快抓到了。",
+                      "durationMs":  1940,
+                      "bytes":  16135
+                  },
+                  {
                       "name":  "thinking-5",
                       "file":  "thinking-5.mp3",
                       "event":  "agent/thinking",
@@ -391,6 +670,15 @@
                       "text":  "让我把条件捋一遍。",
                       "durationMs":  1780,
                       "bytes":  14881
+                  },
+                  {
+                      "name":  "thinking-5v2",
+                      "file":  "thinking-5v2.mp3",
+                      "event":  "agent/thinking",
+                      "source":  "synth",
+                      "text":  "让我把条件捋一遍。",
+                      "durationMs":  1700,
+                      "bytes":  14254
                   },
                   {
                       "name":  "thinking-6",
@@ -402,6 +690,15 @@
                       "bytes":  35361
                   },
                   {
+                      "name":  "thinking-6v2",
+                      "file":  "thinking-6v2.mp3",
+                      "event":  "agent/thinking",
+                      "source":  "synth",
+                      "text":  "嗯，有个想法，验证一下。",
+                      "durationMs":  4100,
+                      "bytes":  33271
+                  },
+                  {
                       "name":  "work-start-4",
                       "file":  "work-start-4.mp3",
                       "event":  "agent/working",
@@ -409,6 +706,15 @@
                       "text":  "在做了，稍等。",
                       "durationMs":  2820,
                       "bytes":  23031
+                  },
+                  {
+                      "name":  "work-start-4v2",
+                      "file":  "work-start-4v2.mp3",
+                      "event":  "agent/working",
+                      "source":  "synth",
+                      "text":  "在做了，稍等。",
+                      "durationMs":  1780,
+                      "bytes":  14881
                   },
                   {
                       "name":  "work-start-5",
@@ -420,6 +726,15 @@
                       "bytes":  27211
                   },
                   {
+                      "name":  "work-start-5v2",
+                      "file":  "work-start-5v2.mp3",
+                      "event":  "agent/working",
+                      "source":  "synth",
+                      "text":  "这部分交给我，你去忙别的。",
+                      "durationMs":  3180,
+                      "bytes":  25957
+                  },
+                  {
                       "name":  "work-start-6",
                       "file":  "work-start-6.mp3",
                       "event":  "agent/working",
@@ -427,6 +742,15 @@
                       "text":  "思路通了，剩下的就是体力活。",
                       "durationMs":  3460,
                       "bytes":  28256
+                  },
+                  {
+                      "name":  "work-start-6v2",
+                      "file":  "work-start-6v2.mp3",
+                      "event":  "agent/working",
+                      "source":  "synth",
+                      "text":  "思路通了，剩下的就是体力活。",
+                      "durationMs":  3820,
+                      "bytes":  31181
                   },
                   {
                       "name":  "done-5",
@@ -438,6 +762,15 @@
                       "bytes":  25957
                   },
                   {
+                      "name":  "done-5v2",
+                      "file":  "done-5v2.mp3",
+                      "event":  "turn/complete",
+                      "source":  "synth",
+                      "text":  "喏，按你要的改好了。",
+                      "durationMs":  3020,
+                      "bytes":  24703
+                  },
+                  {
                       "name":  "done-6",
                       "file":  "done-6.mp3",
                       "event":  "turn/complete",
@@ -445,6 +778,15 @@
                       "text":  "这一版应该没有问题了。",
                       "durationMs":  2820,
                       "bytes":  23031
+                  },
+                  {
+                      "name":  "done-6v2",
+                      "file":  "done-6v2.mp3",
+                      "event":  "turn/complete",
+                      "source":  "synth",
+                      "text":  "这一版应该没有问题了。",
+                      "durationMs":  3220,
+                      "bytes":  26375
                   },
                   {
                       "name":  "done-7",
@@ -456,6 +798,15 @@
                       "bytes":  21777
                   },
                   {
+                      "name":  "done-7v2",
+                      "file":  "done-7v2.mp3",
+                      "event":  "turn/complete",
+                      "source":  "synth",
+                      "text":  "收工。你验收一下。",
+                      "durationMs":  2820,
+                      "bytes":  23031
+                  },
+                  {
                       "name":  "chat-reply-4",
                       "file":  "chat-reply-4.mp3",
                       "event":  "chat/reply",
@@ -463,6 +814,15 @@
                       "text":  "我说完了，你怎么想？",
                       "durationMs":  2740,
                       "bytes":  22404
+                  },
+                  {
+                      "name":  "chat-reply-4v2",
+                      "file":  "chat-reply-4v2.mp3",
+                      "event":  "chat/reply",
+                      "source":  "synth",
+                      "text":  "我说完了，你怎么想？",
+                      "durationMs":  2380,
+                      "bytes":  19688
                   },
                   {
                       "name":  "chat-reply-5",
@@ -474,6 +834,15 @@
                       "bytes":  20524
                   },
                   {
+                      "name":  "chat-reply-5v2",
+                      "file":  "chat-reply-5v2.mp3",
+                      "event":  "chat/reply",
+                      "source":  "synth",
+                      "text":  "大概就是这个意思。",
+                      "durationMs":  2340,
+                      "bytes":  19270
+                  },
+                  {
                       "name":  "chat-reply-6",
                       "file":  "chat-reply-6.mp3",
                       "event":  "chat/reply",
@@ -481,6 +850,15 @@
                       "text":  "先这样，不够再问我。",
                       "durationMs":  2820,
                       "bytes":  23031
+                  },
+                  {
+                      "name":  "chat-reply-6v2",
+                      "file":  "chat-reply-6v2.mp3",
+                      "event":  "chat/reply",
+                      "source":  "synth",
+                      "text":  "先这样，不够再问我。",
+                      "durationMs":  2980,
+                      "bytes":  24494
                   },
                   {
                       "name":  "error-4",
@@ -492,6 +870,15 @@
                       "bytes":  20941
                   },
                   {
+                      "name":  "error-4v2",
+                      "file":  "error-4v2.mp3",
+                      "event":  "agent/error",
+                      "source":  "synth",
+                      "text":  "等一下，这里不对劲。",
+                      "durationMs":  3060,
+                      "bytes":  25121
+                  },
+                  {
                       "name":  "error-5",
                       "file":  "error-5.mp3",
                       "event":  "agent/error",
@@ -499,6 +886,15 @@
                       "text":  "报错了。别急，我看看。",
                       "durationMs":  3860,
                       "bytes":  31390
+                  },
+                  {
+                      "name":  "error-5v2",
+                      "file":  "error-5v2.mp3",
+                      "event":  "agent/error",
+                      "source":  "synth",
+                      "text":  "报错了。别急，我看看。",
+                      "durationMs":  3540,
+                      "bytes":  28883
                   },
                   {
                       "name":  "error-6",
@@ -510,6 +906,15 @@
                       "bytes":  28883
                   },
                   {
+                      "name":  "error-6v2",
+                      "file":  "error-6v2.mp3",
+                      "event":  "agent/error",
+                      "source":  "synth",
+                      "text":  "这个错我见过，有办法。",
+                      "durationMs":  3660,
+                      "bytes":  29928
+                  },
+                  {
                       "name":  "wake-2",
                       "file":  "wake-2.mp3",
                       "event":  "pet/wake",
@@ -517,6 +922,15 @@
                       "text":  "来了。今天从哪儿开始？",
                       "durationMs":  3580,
                       "bytes":  29301
+                  },
+                  {
+                      "name":  "wake-2v2",
+                      "file":  "wake-2v2.mp3",
+                      "event":  "pet/wake",
+                      "source":  "synth",
+                      "text":  "来了。今天从哪儿开始？",
+                      "durationMs":  3260,
+                      "bytes":  26584
                   },
                   {
                       "name":  "wake-3",
@@ -528,8 +942,26 @@
                       "bytes":  22404
                   },
                   {
+                      "name":  "wake-3v2",
+                      "file":  "wake-3v2.mp3",
+                      "event":  "pet/wake",
+                      "source":  "synth",
+                      "text":  "我在这儿。有什么要做的？",
+                      "durationMs":  2780,
+                      "bytes":  22822
+                  },
+                  {
                       "name":  "session-start-2",
                       "file":  "session-start-2.mp3",
+                      "event":  "session/start",
+                      "source":  "synth",
+                      "text":  "新的一页，从哪儿说起？",
+                      "durationMs":  2901,
+                      "bytes":  23867
+                  },
+                  {
+                      "name":  "session-start-2v2",
+                      "file":  "session-start-2v2.mp3",
                       "event":  "session/start",
                       "source":  "synth",
                       "text":  "新的一页，从哪儿说起？",
@@ -546,6 +978,15 @@
                       "bytes":  23449
                   },
                   {
+                      "name":  "session-start-3v2",
+                      "file":  "session-start-3v2.mp3",
+                      "event":  "session/start",
+                      "source":  "synth",
+                      "text":  "好，我准备好了。",
+                      "durationMs":  2780,
+                      "bytes":  22822
+                  },
+                  {
                       "name":  "idle-long-2",
                       "file":  "idle-long-2.mp3",
                       "event":  "pet/idle-long",
@@ -553,6 +994,15 @@
                       "text":  "安静了这么久……在想什么呢？",
                       "durationMs":  3580,
                       "bytes":  29301
+                  },
+                  {
+                      "name":  "idle-long-2v2",
+                      "file":  "idle-long-2v2.mp3",
+                      "event":  "pet/idle-long",
+                      "source":  "synth",
+                      "text":  "安静了这么久……在想什么呢？",
+                      "durationMs":  3980,
+                      "bytes":  32435
                   },
                   {
                       "name":  "idle-long-3",
@@ -564,6 +1014,15 @@
                       "bytes":  27838
                   },
                   {
+                      "name":  "idle-long-3v2",
+                      "file":  "idle-long-3v2.mp3",
+                      "event":  "pet/idle-long",
+                      "source":  "synth",
+                      "text":  "没事做的话，我陪你待会儿。",
+                      "durationMs":  3180,
+                      "bytes":  25957
+                  },
+                  {
                       "name":  "approval-done-2",
                       "file":  "approval-done-2.mp3",
                       "event":  "attention/cleared",
@@ -571,6 +1030,15 @@
                       "text":  "好，那这件事翻篇了。",
                       "durationMs":  3140,
                       "bytes":  25748
+                  },
+                  {
+                      "name":  "approval-done-2v2",
+                      "file":  "approval-done-2v2.mp3",
+                      "event":  "attention/cleared",
+                      "source":  "synth",
+                      "text":  "好，那这件事翻篇了。",
+                      "durationMs":  2220,
+                      "bytes":  18225
                   },
                   {
                       "name":  "approval-done-3",
@@ -582,6 +1050,15 @@
                       "bytes":  22195
                   },
                   {
+                      "name":  "approval-done-3v2",
+                      "file":  "approval-done-3v2.mp3",
+                      "event":  "attention/cleared",
+                      "source":  "synth",
+                      "text":  "收到，我接着做。",
+                      "durationMs":  2620,
+                      "bytes":  21568
+                  },
+                  {
                       "name":  "pomodoro-start-2",
                       "file":  "pomodoro-start-2.mp3",
                       "event":  "pomodoro/start",
@@ -589,6 +1066,15 @@
                       "text":  "计时开始了，专心。",
                       "durationMs":  2100,
                       "bytes":  17389
+                  },
+                  {
+                      "name":  "pomodoro-start-2v2",
+                      "file":  "pomodoro-start-2v2.mp3",
+                      "event":  "pomodoro/start",
+                      "source":  "synth",
+                      "text":  "计时开始了，专心。",
+                      "durationMs":  2660,
+                      "bytes":  21777
                   },
                   {
                       "name":  "pomodoro-break-end-2",
@@ -600,6 +1086,15 @@
                       "bytes":  20524
                   },
                   {
+                      "name":  "pomodoro-break-end-2v2",
+                      "file":  "pomodoro-break-end-2v2.mp3",
+                      "event":  "pomodoro/break-end",
+                      "source":  "synth",
+                      "text":  "休息结束，回来吧。",
+                      "durationMs":  2620,
+                      "bytes":  21568
+                  },
+                  {
                       "name":  "pomodoro-long-end-2",
                       "file":  "pomodoro-long-end-2.mp3",
                       "event":  "pomodoro/long-end",
@@ -607,6 +1102,15 @@
                       "text":  "睡饱了，继续。",
                       "durationMs":  2820,
                       "bytes":  23031
+                  },
+                  {
+                      "name":  "pomodoro-long-end-2v2",
+                      "file":  "pomodoro-long-end-2v2.mp3",
+                      "event":  "pomodoro/long-end",
+                      "source":  "synth",
+                      "text":  "睡饱了，继续。",
+                      "durationMs":  2620,
+                      "bytes":  21568
                   },
                   {
                       "name":  "pomodoro-long-start-2",
@@ -618,6 +1122,15 @@
                       "bytes":  28465
                   },
                   {
+                      "name":  "pomodoro-long-start-2v2",
+                      "file":  "pomodoro-long-start-2v2.mp3",
+                      "event":  "pomodoro/long-start",
+                      "source":  "synth",
+                      "text":  "这一轮辛苦你了，去放松一下。",
+                      "durationMs":  3420,
+                      "bytes":  27838
+                  },
+                  {
                       "name":  "feed-3",
                       "file":  "feed-3.mp3",
                       "event":  "pet/feed",
@@ -625,6 +1138,15 @@
                       "text":  "谢谢，我正好有点饿。",
                       "durationMs":  3660,
                       "bytes":  29928
+                  },
+                  {
+                      "name":  "feed-3v2",
+                      "file":  "feed-3v2.mp3",
+                      "event":  "pet/feed",
+                      "source":  "synth",
+                      "text":  "谢谢，我正好有点饿。",
+                      "durationMs":  3420,
+                      "bytes":  27838
                   },
                   {
                       "name":  "sleepy-3",
@@ -636,6 +1158,15 @@
                       "bytes":  33689
                   },
                   {
+                      "name":  "sleepy-3v2",
+                      "file":  "sleepy-3v2.mp3",
+                      "event":  "pet/sleeping",
+                      "source":  "synth",
+                      "text":  "撑不住了……我睡一小会儿。",
+                      "durationMs":  3220,
+                      "bytes":  26375
+                  },
+                  {
                       "name":  "pet-head-3",
                       "file":  "pet-head-3.mp3",
                       "event":  "pet/pet-head",
@@ -643,6 +1174,15 @@
                       "text":  "嗯……就一下。",
                       "durationMs":  3220,
                       "bytes":  26375
+                  },
+                  {
+                      "name":  "pet-head-3v2",
+                      "file":  "pet-head-3v2.mp3",
+                      "event":  "pet/pet-head",
+                      "source":  "synth",
+                      "text":  "嗯……就一下。",
+                      "durationMs":  1700,
+                      "bytes":  14254
                   },
                   {
                       "name":  "praise-4",
@@ -654,6 +1194,15 @@
                       "bytes":  11955
                   },
                   {
+                      "name":  "praise-4v2",
+                      "file":  "praise-4v2.mp3",
+                      "event":  "pet/praise",
+                      "source":  "synth",
+                      "text":  "这话我记下了。",
+                      "durationMs":  2140,
+                      "bytes":  17598
+                  },
+                  {
                       "name":  "click-6",
                       "file":  "click-6.mp3",
                       "event":  "pet/click",
@@ -663,6 +1212,15 @@
                       "bytes":  18643
                   },
                   {
+                      "name":  "click-6v2",
+                      "file":  "click-6v2.mp3",
+                      "event":  "pet/click",
+                      "source":  "synth",
+                      "text":  "在的，你说。",
+                      "durationMs":  2540,
+                      "bytes":  20941
+                  },
+                  {
                       "name":  "click-7",
                       "file":  "click-7.mp3",
                       "event":  "pet/click",
@@ -670,6 +1228,15 @@
                       "text":  "嗯？需要我做什么？",
                       "durationMs":  2940,
                       "bytes":  24076
+                  },
+                  {
+                      "name":  "click-7v2",
+                      "file":  "click-7v2.mp3",
+                      "event":  "pet/click",
+                      "source":  "synth",
+                      "text":  "嗯？需要我做什么？",
+                      "durationMs":  2020,
+                      "bytes":  16762
                   }
               ]
 }
