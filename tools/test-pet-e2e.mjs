@@ -1519,6 +1519,32 @@ await ok('⭐⭐ 装了语音 DSH 插件 → 委派给它（`zfhVoice` 服务，
   const st = await (await fetch(`${base}/api/zhuang-fangyi/pet/speech`)).json()
   assert.equal(st.service.mode, 'plugin', `状态应报 mode=plugin，实际 ${st.service.mode}`)
   assert.equal(st.service.pid, 777, '状态应来自插件而不是本地监管器')
+  // ②b ⭐⭐ 常驻 = **主动起好并预热**，不是"别停它"。
+  //
+  // 用户问过"为什么开了常驻，语音合成还是很慢"。量出来的答案是：
+  // 载入模型后的**第一次推理**要 ~21 秒（cuDNN 内核自动调优），
+  // 之后只要 2~3 秒 —— 而语音插件的 `preload()` 只加载模型、不做推理，
+  // 于是那 20 秒正好砸在用户第一句话上。常驻却照样逃不掉。
+  //
+  // 所以桌宠打开常驻后要在后台把服务起起来 + 跑一次**丢弃的**合成。
+  // 这条断言就是钉住它：预热必须真的发生（`start` 被调到、且有预热合成）。
+  {
+    const warmDeadline = Date.now() + 3000
+    while (Date.now() < warmDeadline && calls.start === 0) await new Promise(r => setTimeout(r, 30))
+    assert.ok(calls.start >= 1,
+      '常驻打开后应**主动启动**服务（`start()`），而不是等第一次说话 —— 否则"常驻"只是"别停它"')
+    const warmDeadline2 = Date.now() + 3000
+    while (Date.now() < warmDeadline2 && calls.synth.length === 0) await new Promise(r => setTimeout(r, 30))
+    assert.ok(calls.synth.length >= 1,
+      '常驻打开后应跑一次**预热合成**（把首次推理的 20 秒前移），实际一次都没调')
+    // 预热那句不能说成"要念的回复"：它必须是固定暖机文案，且**不交付给 exe**
+    const warmText = calls.synth[0]
+    assert.ok(!warmText.includes('插件路径'),
+      `预热用的应是固定暖机文案而不是回复正文，实际 ${JSON.stringify(warmText)}`)
+    const snapWarm = await (await fetch(`${base}/api/zhuang-fangyi/pet/state`)).json()
+    assert.ok(snapWarm.speak === null || snapWarm.speak === undefined,
+      `预热**不该出声**（不写 speak 块），实际 ${JSON.stringify(snapWarm.speak)}`)
+  }
   // ③ 发消息 + 回复 → 合成**走插件**
   await fetch(`${base}/api/zhuang-fangyi/pet/chat`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
@@ -1538,9 +1564,18 @@ await ok('⭐⭐ 装了语音 DSH 插件 → 委派给它（`zfhVoice` 服务，
   })
   const deadline = Date.now() + 6000
   while (Date.now() < deadline && calls.synth.length === 0) await new Promise(r => setTimeout(r, 50))
-  assert.equal(calls.synth.length, 1, `应调用插件的 synthesize 一次，实际 ${calls.synth.length}`)
-  assert.ok(!calls.synth[0].includes('**'), `送进插件的文本必须已清洗：${calls.synth[0]}`)
-  assert.ok(calls.synth[0].includes('插件路径'), '清洗后应保留文字')
+  // ⭐⭐ 委派给插件的 synthesize：**必须区分"预热"与"真念这句"**。
+  //
+  // 打开常驻后，桌宠会在后台先跑一次**丢弃的**合成来预热 —— 实测
+  // "载入模型后的第一次推理"要 21 秒（cuDNN 内核自动调优），而热态只要 2~3 秒；
+  // 语音插件的 `preload()` 只加载模型、不做推理，那 20 秒就落在用户第一句话上。
+  // 所以这里**不能**再断言"总共只调了一次"（那会把预热当成 bug），
+  // 而要断言：**真念的那一句在调用里**、且**只出现一次**、且**已清洗**。
+  const spokenCalls = calls.synth.filter(t => t.includes('插件路径'))
+  assert.equal(spokenCalls.length, 1,
+    `真回复应恰好送进插件一次，实际 ${spokenCalls.length} 次（全部调用：${JSON.stringify(calls.synth)}）`)
+  assert.ok(!spokenCalls[0].includes('**'), `送进插件的文本必须已清洗：${spokenCalls[0]}`)
+  assert.ok(spokenCalls[0].includes('插件路径'), '清洗后应保留文字')
   // ④ 服务控制委派给插件
   const ctl = await (await fetch(`${base}/api/zhuang-fangyi/pet/speech/service`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
@@ -1550,11 +1585,17 @@ await ok('⭐⭐ 装了语音 DSH 插件 → 委派给它（`zfhVoice` 服务，
   assert.equal(calls.stop, 1, '应真的调了插件的 stop')
   // ⭐⭐ 插件模式下「试一句」必须**让插件去启动服务**，而不是先做 HTTP 健康检查
   //（实测踩过：服务没起时立刻报"连不上"，明明只要让它启动就行）。
+  //
+  // ⚠️ 这里**不能断言"合成总调用次数"** —— 打开常驻后桌宠会在后台先跑一次
+  // **丢弃的**合成来预热（把 cuDNN 首次推理那 20 秒挪出用户的等待路径）。
+  // 断言固定次数等于把预热当成 bug。改为"记基线 → 断言增加"，锚的是语义。
+  const synthBeforeProbe = calls.synth.length
   const probe = await (await fetch(`${base}/api/zhuang-fangyi/pet/speech/probe`, { method: 'POST' })).json()
   assert.equal(probe.ok, true, `插件模式下试一句应成功，实际 ${JSON.stringify(probe.reason)}`)
   assert.equal(probe.mode, 'plugin', 'probe 应报 plugin 模式')
   assert.equal(probe.played, true, '应交付给 exe 播放')
-  assert.equal(calls.synth.length, 2, '第二次合成也应走插件（第 1 次是回复，第 2 次是试一句）')
+  assert.ok(calls.synth.length > synthBeforeProbe,
+    `试一句应真的走插件合成（调用数应从 ${synthBeforeProbe} 增加，实际 ${calls.synth.length}）`)
   // ⭐⭐ 应答里的 `cached` 必须**数盘**，不能推算
   //
   // 实测踩过：原来写的是 `status.cached + 1`（假设"这次探测必然新增一条缓存"）。

@@ -1147,8 +1147,77 @@ export function apply (ctx, config) {
    */
   const DEFAULT_IDLE_ACTION = 'stop'
 
+  /**
+   * 预热用的句子。
+   *
+   * 取中等长度（十几字）而不是"嗯。"：要让预热**走到真实长度会用到的那批
+   * CUDA 内核**（长短句的注意力形状不同），太短可能只热身了一部分。
+   */
+  const TTS_WARMUP_TEXT = '暖机一下，这样等下说话就不用等了。'
+
+  /**
+   * 预热：把"加载模型 + **第一次推理**"的耗时挪到用户开口之前。
+   *
+   * ── 为什么需要它（实测，本机 torch + GPU）───────────────────────────────
+   *
+   * 用户问"为什么开了常驻，语音合成还是很慢"。量下来是这样：
+   *
+   *   · 服务刚加载完模型后的**第一次**合成：**21 秒**；
+   *   · 同一批后续段落：2~3 秒（120 字那条回复的第 2~6 段实测
+   *     2.2s / 3.1s / 3.0s / 4.6s / 1.1s）；
+   *   · 已经热着的服务上再合成新文本（23 字）：**2.4 秒**。
+   *
+   * 而且 21 秒那次**不是"模型没进显存"**：`/health` 报 `loads=1`、`unloads=0`，
+   * 模型自 17:01:32 载入后一直驻留；21 秒发生在 **7 分钟之后**的第一次请求上。
+   * 那是 CUDA 首次推理的**内核自动调优**（不是模型加载）。
+   *
+   * 偏偏语音插件的 `preload()` **只加载模型、不做一次推理**
+   *（`api.py` 里 `preload()` 就一句 `_ = self.backend`），
+   * 于是这 20 秒正好落在用户的第一句话上 —— 开着常驻也一样逃不掉。
+   *
+   * ── 所以"常驻"不该只是"别停它" ──────────────────────────────────────────
+   *
+   * 打开常驻之后，桌宠应该在后台**主动把服务起好、并跑一次丢弃的合成**：
+   * 等用户真的说话时，热态只要 ~3× 实时。
+   *
+   * ⚠️ 预热的产物**不交付给 exe**（不写 `speechLatest`）—— 它只是暖机，
+   * 不该出声，也不该进语音缓存清单。
+   *
+   * 代价与取舍：常驻 = 用户已经同意占着显存，起服务 + 预热约 45 秒
+   * （24s 加载 + 21s 首次推理）全在后台；这期间若真的来了一次合成请求，
+   * 它会排在预热后面（服务内有串行锁）—— 但即使这样也比"自己付那 20 秒"快。
+   */
+  let warmupPromise = null
+  const warmupService = () => {
+    // 只在常驻时预热：非常驻是"用完就释放"，预热等于把刚释放的显存又占回去。
+    if (settings.get().ttsResident !== true) return
+    if (warmupPromise !== null) return   // 已经热过（或正在热）
+    warmupPromise = (async () => {
+      const started = Date.now()
+      try {
+        const svc = voiceService()
+        if (svc !== null) {
+          // 插件模式：控制权在它那儿（同一时间只该有一个监管者）。
+          if (typeof svc.start === 'function') await svc.start()
+          if (typeof svc.synthesize === 'function') await svc.synthesize(TTS_WARMUP_TEXT)
+        } else {
+          // 没装插件：桌宠自己起进程 + HTTP。
+          if (await supervisor.ensure()) await tts().synthesize(TTS_WARMUP_TEXT)
+        }
+        boot(`语音服务已预热（${Math.round((Date.now() - started) / 1000)}s，首次推理的开销已前移）`)
+      } catch (error) {
+        // 预热失败**不是错误**：真到说话时会再试一次并照常降级（退回固定台词）。
+        logger.debug?.(`zhuang-fangyi-pet: 语音预热失败（已忽略）：${error?.message ?? error}`)
+        // 允许下次设置变化时重试（否则一次失败就再也不热了）。
+        warmupPromise = null
+      }
+    })()
+  }
+
   const syncTtsService = () => {
     const cfg = settings.get()
+    // 常驻关掉 → 允许下次打开时重新预热（否则一次热过就再也不热了）。
+    if (cfg.ttsResident !== true) warmupPromise = null
     supervisor.configure({
       resident: cfg.ttsResident === true,
       idleStopSec: Number(cfg.ttsIdleStopSec) || 0,
@@ -1208,6 +1277,9 @@ export function apply (ctx, config) {
         logger.warn?.(`zhuang-fangyi-pet: 同步语音插件配置失败：${error?.message ?? error}`)
       }
     }
+    // ⭐ 配置推完就预热（fire-and-forget）—— 见 `warmupService` 的说明。
+    //    放在这里而不是"等第一次说话"：那 20 秒首次推理的开销必须前移。
+    void warmupService()
   }
   syncTtsService()
 
