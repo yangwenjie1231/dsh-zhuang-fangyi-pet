@@ -941,6 +941,7 @@ await ok('⭐⭐ AI 回答 → 合成 → 快照交付 → 字节可取（整条
       ttsUrl: `http://127.0.0.1:${ttsPort}`
     } })
   })
+  // ②b（占位：字数上限的回归断言放在本条链路**跑完之后** —— 见下方 ⑦）
   // ③ 真发一条消息建立会话
   const sent = await fetch(`${base}/api/zhuang-fangyi/pet/chat`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
@@ -995,6 +996,52 @@ await ok('⭐⭐ AI 回答 → 合成 → 快照交付 → 字节可取（整条
   const st = await (await fetch(`${base}/api/zhuang-fangyi/pet/speech`)).json()
   assert.equal(st.enabled, true, '状态应报已开启')
   assert.ok(st.cached >= 1, `应至少缓存 1 条，实际 ${st.cached}`)
+
+  // ⑦ ⭐⭐ 「每次朗读字数上限」改了要**立刻**生效。
+  //
+  // 钉住一个真实 bug：`tts()` 的缓存键原先只比 `url`，改了 maxChars 不会重建
+  // client → 新上限要等下次改地址或重启才生效。症状隐蔽：`/pet/speech` 的
+  // maxChars 立刻变了（它直接读设置），但真正决定"念多长"的是 client 里的旧值。
+  //
+  // ⚠️ 三个坑（都是回滚验证时露的馅，别改回去）：
+  //   1. 必须记**基线条数**再等新增 —— 写 `while (ttsCalls.length < 1)` 会立刻
+  //      退出（那时已非空），读到旧调用，断言永远成立；
+  //   2. 必须放在**会话已建立、且本链路自己的回复跑完之后** —— 合成只在
+  //      speakReplies/voice 都开、且有聊天会话时才走，提前发事件会被静默忽略；
+  //   3. 必须断言原文**长于**上限，否则"截短"无从谈起。
+  const callsBefore = ttsCalls.length
+  await fetch(`${base}/api/zhuang-fangyi/pet/settings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: { speechMaxChars: 12 } })
+  })
+  const longReply = '这是一句很长的回复，用来验证字数上限改了以后立刻生效，而不是等下次重启才生效。'
+  assert.ok(longReply.length > 12, '测试前提：原文必须长于上限')
+  local.emit('session/event', { id: 'chat-tts-1' }, {
+    type: 'assistant/message',
+    seq: 9101,
+    time: Date.now(),
+    data: {
+      turn: 1, step: 2,
+      message: {
+        id: 'msg-tts-limit', role: 'assistant',
+        content: [{ type: 'text', text: longReply }],
+        source: { kind: 'model', provider: 'e2e', model: 'e2e' }
+      },
+      stream: []
+    }
+  })
+  {
+    const deadline2 = Date.now() + 8000
+    while (Date.now() < deadline2 && ttsCalls.length <= callsBefore) {
+      await new Promise(r => setTimeout(r, 50))
+    }
+    assert.ok(ttsCalls.length > callsBefore,
+      `上限改动后应触发一次新的合成调用（基线 ${callsBefore}，实际 ${ttsCalls.length}）`)
+    const limited = ttsCalls[ttsCalls.length - 1]
+    assert.ok(limited.length <= 12,
+      `字数上限改成 12 后送进合成服务的文本应 <= 12 字，实际 ${limited.length} 字：${JSON.stringify(limited)}`)
+  }
+
   await ws.close()
   for (const d of local.__effects) if (typeof d === 'function') assert.doesNotThrow(() => d())
   await new Promise(r => ttsServer.close(r))
@@ -1414,14 +1461,33 @@ await ok('⭐⭐ 装了语音 DSH 插件 → 委派给它（`zfhVoice` 服务，
   assert.equal(calls.configure[calls.configure.length - 1].backend, 'onnx',
     '显式设置的后端应推给插件')
 
-  // 反向：没选具体值时**不能**推空串（那会盖掉插件自己的默认）
+  // ⭐⭐ 「用插件默认」必须**显式推默认值**，不能"不推"。
+  //
+  // 这里原先断言的是 `!('idleAction' in lastPatch)` —— 它把 bug 当成了规格。
+  // 真相：`configure()` 对空串是**忽略**（不覆盖），所以"不推"= "保持上一次的值"：
+  //   用户先选「只卸模型」→ 再改回「用插件默认」→ 插件仍是 unload，
+  //   而界面显示"用插件默认"，**没有任何地方会报错**（线上实测复现过）。
+  // 所以正确行为是：空串 → 推插件的默认 `stop`（界面显示什么，插件就是什么）。
   await fetch(`${base}/api/zhuang-fangyi/pet/settings`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ settings: { ttsIdleAction: '' } })
   })
   const lastPatch = calls.configure[calls.configure.length - 1]
-  assert.ok(!('idleAction' in lastPatch),
-    `空值不该推给插件（会盖掉它的默认），实际推了 ${JSON.stringify(lastPatch.idleAction)}`)
+  assert.equal(lastPatch.idleAction, 'stop',
+    `「用插件默认」应显式推 stop（不推会保留上一次的 unload，界面与行为不一致），实际 ${JSON.stringify(lastPatch.idleAction)}`)
+
+  // 反向：先设 unload，再设回空 → 必须真的回到 stop（这条是 bug 的直接复现路径）
+  await fetch(`${base}/api/zhuang-fangyi/pet/settings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: { ttsIdleAction: 'unload' } })
+  })
+  assert.equal(calls.configure[calls.configure.length - 1].idleAction, 'unload', 'unload 应推过去')
+  await fetch(`${base}/api/zhuang-fangyi/pet/settings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: { ttsIdleAction: '' } })
+  })
+  assert.equal(calls.configure[calls.configure.length - 1].idleAction, 'stop',
+    'unload → 「用插件默认」必须回到 stop（否则用户以为恢复了默认，其实没有）')
   // ② 状态里说明 mode=plugin（排查时要能分清"谁在管"）
   const st = await (await fetch(`${base}/api/zhuang-fangyi/pet/speech`)).json()
   assert.equal(st.service.mode, 'plugin', `状态应报 mode=plugin，实际 ${st.service.mode}`)

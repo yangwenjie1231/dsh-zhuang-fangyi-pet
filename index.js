@@ -954,18 +954,29 @@ export function apply (ctx, config) {
     } catch { return 0 }
   }
 
-  /** 惰性创建 TTS 客户端（设置改了要能换 URL）。 */
+  /**
+   * 惰性创建 TTS 客户端（设置改了要能换 URL / 换字数上限）。
+   *
+   * ⚠️ 缓存键必须**同时**包含 url 与 maxChars。
+   * 原先只比 url：`if (ttsClient === null || ttsClientUrl !== url)` ——
+   * 于是用户改了"每次朗读字数上限"，`maxChars` 传不进去，**要等下次改地址
+   * 或重启才生效**（而且旧 client 已经清洗过的文本也不会变）。
+   * 实测：改 60 → 200 后 `/pet/speech` 的 maxChars 立刻变 200（那是直接读设置），
+   * 但真正决定"念多长"的是 client 里那个值 —— 两者不一致，看起来像"设置没生效"。
+   */
   let ttsClient = null
-  let ttsClientUrl = null
+  let ttsClientKey = null
   const tts = () => {
     const url = String(settings.get().ttsUrl ?? '').trim() || DEFAULT_TTS_URL
-    if (ttsClient === null || ttsClientUrl !== url) {
+    const maxChars = speechMaxChars()
+    const key = `${url}|${maxChars}`
+    if (ttsClient === null || ttsClientKey !== key) {
       ttsClient = createTtsClient({
         baseUrl: url,
-        maxChars: speechMaxChars(),
+        maxChars,
         logger
       })
-      ttsClientUrl = url
+      ttsClientKey = key
     }
     return ttsClient
   }
@@ -1109,6 +1120,22 @@ export function apply (ctx, config) {
   })
 
   /** 把当前设置推给监管器（设置改了立刻生效）。 */
+  /**
+   * "空闲时怎么释放"的**默认动作**（设置里选"用插件默认"时用它）。
+   *
+   * 为什么桌宠要自己写死这个值，而不是"不推、让插件决定"：
+   * `configure()` 对空串是**忽略**（不覆盖），所以"不推"= "保持上一次的值"。
+   * 于是用户把「只卸模型」改回「用插件默认」时，插件仍是 unload，
+   * 而界面显示"用插件默认" —— 界面与行为不一致，且无处报错（实测复现）。
+   *
+   * 选 `stop` 的依据（不是猜）：
+   *   · 语音插件的 `DEFAULT_IDLE_ACTION = 'stop'`；
+   *   · **桌宠自己的**监管器（没装插件时那条路）也只有 `stop`
+   *     —— 它连 unload 概念都没有（见 `src/pet/tts-service.js`）。
+   * 两条路的默认值一致，所以"默认"有唯一确定的含义。
+   */
+  const DEFAULT_IDLE_ACTION = 'stop'
+
   const syncTtsService = () => {
     const cfg = settings.get()
     supervisor.configure({
@@ -1137,9 +1164,22 @@ export function apply (ctx, config) {
           resident: cfg.ttsResident === true,
           idleStopSec: Number(cfg.ttsIdleStopSec) || 0
         }
-        // 释放方式只在用户**明确选了**才推（空串 = 用插件默认）。
+        // 释放方式：**"用插件默认"也要显式推一个值**。
+        //
+        // 这里踩过一个 UX bug：原先空串 = "不推"，本意是"让插件用自己的默认"。
+        // 但 `configure()` 对空串是**忽略**（`IDLE_ACTIONS.includes('')` 为假，
+        // 不覆盖），于是"不推"实际等于"保持上一次的值"：
+        //   用户先选「只卸模型」→ 再改回「用插件默认」→ 插件仍是 unload，
+        //   而界面显示"用插件默认"，**没有任何地方会显示异常**。
+        // 实测复现过（`/pet/speech` 报 idleAction=unload）。
+        //
+        // 修法：空串显式映射成插件的默认值 `stop`。语义从"沉默"改成"明确要求默认"，
+        // 这样界面显示什么、插件就是什么。插件侧的空串忽略行为保持不变
+        //（它保护的是"别的调用方别用空值冲掉配置"，这里我们推的是**有效值**）。
         const idleAction = String(cfg.ttsIdleAction ?? '').trim()
-        if (idleAction === 'stop' || idleAction === 'unload') patch.idleAction = idleAction
+        patch.idleAction = (idleAction === 'stop' || idleAction === 'unload')
+          ? idleAction
+          : DEFAULT_IDLE_ACTION
         // 路径/后端只在设置了非空值时才推。
         const explicit = {
           backend: String(cfg.ttsBackend ?? '').trim(),
