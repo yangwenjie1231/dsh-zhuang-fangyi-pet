@@ -330,6 +330,9 @@ namespace DshZhuangFangyiPet
             _win.DoubleClickInvoked = OnPetDoubleClick; // task-6：双击行为由 settings.doubleClick 决定
             // v9：单击（与拖动区分）→ 记一次互动。判据在 PetWindow.IsClickGesture。
             _win.ClickInvoked = delegate { OnPetClicked(); };
+            // v10：长按摸头（分级）与抛掷（飞完才上报一次）。
+            _win.PatInvoked = OnPetPat;
+            _win.FlingFinished = OnPetFlingFinished;
             _win.SendButtonClicked = OnSendButtonClicked;  // task-7：✎ → 打开输入窗
             // 悬停事实 → 状态文字（`hint` 用）。与 ✎ 同一时机，不另起一套判定。
             _win.HoverChanged = delegate(bool over)
@@ -1279,6 +1282,34 @@ namespace DshZhuangFangyiPet
             if (_http == null) return;
             _http.PostInteract(kind);
             PetLog.Info("右键互动 → " + kind);
+        }
+
+        /// <summary>
+        /// v10：长按摸头到第 <paramref name="level"/> 级。
+        ///
+        /// 级数**只加在请求体里**，本地不做任何"这一级算不算数"的判断 ——
+        /// 冷却、递减、日上限全在 Host（唯一真相）。exe 若也判一次，
+        /// 两边的口径迟早分叉（比如这边按 600ms 一级、那边按 700ms）。
+        /// </summary>
+        private void OnPetPat(int level)
+        {
+            if (_http == null) return;
+            _http.PostInteract("pat", level);
+            PetLog.Info("长按摸头 → 第 " + level + " 级");
+        }
+
+        /// <summary>
+        /// v10：抛掷落地后上报**一次**。
+        ///
+        /// 为什么在落地时上报、而不是松手时：松手到落地之间用户看到的还是
+        /// "她还在飞"，此时弹气泡/播语音会与画面错位（气泡在她飞走之前的位置）。
+        /// 而且落地才可能"撞墙"—— 撞墙要换一句反应。
+        /// </summary>
+        private void OnPetFlingFinished(bool hitEdge)
+        {
+            if (_http == null) return;
+            _http.PostInteract("fling");
+            PetLog.Info("抛掷落地 → 互动 fling" + (hitEdge ? "（撞到边界）" : ""));
         }
 
         /// <summary>

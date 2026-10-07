@@ -807,7 +807,7 @@ namespace DshZhuangFangyiPet
 
         /// <summary>允许的互动动作（**唯一真相**，与 Host 的 `INTERACT_KINDS` 同集合）。</summary>
         internal static readonly string[] InteractKinds =
-            new string[] { "pet-head", "feed", "praise", "click" };
+            new string[] { "pet-head", "feed", "praise", "click", "pat", "fling", "hover" };
 
         /// <summary>动作名是否合法。纯函数（自检直接断言，不必起服务）。</summary>
         internal static bool IsKnownInteractKind(string kind)
@@ -828,8 +828,34 @@ namespace DshZhuangFangyiPet
         /// </summary>
         public void PostInteract(string kind)
         {
+            PostInteract(kind, 0);
+        }
+
+        /// <summary>
+        /// 记一次互动，带**长按级数**（v10）。
+        ///
+        /// `level` 只对 `pat` 有意义（1..3，见 `PetGesture.PatLevel`）：
+        /// 宿主据此把"嗯…"升级成"再摸一下"再升级成"……好吧"。
+        /// 其余动作传 0 = 不带这个字段（**不发明没有语义的字段**：
+        /// 一个恒为 0 的 `level` 会让宿主侧的校验看起来像在防什么，其实什么也没防）。
+        ///
+        /// 级数在这里就夹进 1..3：宿主侧也有一道（两层都要有，跨进程信任边界）。
+        /// </summary>
+        public void PostInteract(string kind, int level)
+        {
             if (!IsKnownInteractKind(kind)) return;
-            PostJson("/api/zhuang-fangyi/pet/interact", "{\"kind\":\"" + kind + "\"}");
+            string body;
+            if (level > 0)
+            {
+                int lv = level;
+                if (lv > PetGesture.PatMaxLevels) lv = PetGesture.PatMaxLevels;
+                body = "{\"kind\":\"" + kind + "\",\"level\":" + lv.ToString(CultureInfo.InvariantCulture) + "}";
+            }
+            else
+            {
+                body = "{\"kind\":\"" + kind + "\"}";
+            }
+            PostJson("/api/zhuang-fangyi/pet/interact", body);
         }
 
         /// <summary>

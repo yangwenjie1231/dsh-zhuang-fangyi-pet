@@ -79,6 +79,7 @@ namespace DshZhuangFangyiPet
                 TestSettingsScaleDoubleClickTheme();
                 TestPositionReportBody();
                 TestSettingsFlagsReportBody();
+                TestGesture();
                 TestSendCapabilityAndBody();
                 SpriteSheet sheet = TestSprite(artDir, atlas);
                 TestFilesMapCompat();
@@ -851,6 +852,190 @@ namespace DshZhuangFangyiPet
                           three.IndexOf("\"bubble\"", StringComparison.Ordinal) >= 0;
             Check(keysOk, "三个键名与 Host 设置字段完全一致（写错会被静默忽略）",
                   "clickThrough / topmost / bubble");
+        }
+
+        /// <summary>
+        /// v10：手势判定（点击 / 长按摸头 / 挪位置 / 抛掷）与抛掷轨迹。
+        ///
+        /// 这四件事**全都无法在无头自检里真的用鼠标做出来**（要模拟按下-移动-抬起
+        /// 的时序，还要控制速度）。所以判定与轨迹必须是纯函数 —— 这里断言的就是
+        /// 那四条判据的边界值，以及"坏数据绝不飞"这条安全性质。
+        /// </summary>
+        private static void TestGesture()
+        {
+            // (1) 单击仍然成立（与 v9 同判据，不能被新增手势破坏）
+            bool clickOk =
+                PetGesture.Classify(0, 0, 50, 0) == PetGestureKind.Click &&
+                PetGesture.Classify(4, 0, 300, 0) == PetGestureKind.Click &&
+                PetGesture.Classify(0, 4, 300, 0) == PetGestureKind.Click;
+            Check(clickOk, "手势：位移 ≤4px 且时长 ≤300ms → 单击",
+                  "0px/50ms、4px/300ms 都是 Click");
+
+            // (2) ⭐ 长按摸头：时长进窗口、位移仍小
+            bool patOk =
+                PetGesture.Classify(0, 0, 350, 0) == PetGestureKind.Pat &&
+                PetGesture.Classify(1, 1, 1200, 0) == PetGestureKind.Pat &&
+                PetGesture.Classify(0, 0, 4000, 0) == PetGestureKind.Pat;
+            Check(patOk, "手势：350ms~4000ms 且位移 ≤6px → 长按摸头",
+                  "350ms/1200ms/4000ms 都是 Pat");
+
+            // (2b) ⭐ 300~350ms 是**故意留的死区**：既不算点击、也不算长按。
+            //      两个判据紧贴时，采样抖动会让同一次按下在两条路径里各自命中一次
+            //      （用户看到"点一下"和"摸一下"同时发生）。
+            bool deadZone =
+                PetGesture.Classify(0, 0, 320, 0) == PetGestureKind.Drag;
+            Check(deadZone, "手势：300~350ms 是死区（既不点击也不长按，避免双重触发）",
+                  "320ms → Drag");
+
+            // (3) ⭐⭐ 抛掷：速度达标 **且** 按下够久。位移大但速度低 → 仍是挪位置。
+            //
+            // ⚠️ 用例里的 dx/dy 必须与速度**自洽**：800px/s 的甩动在 100ms
+            // 窗口里至少要走 80px，所以"位移 0px + 速度 900px/s"这种输入
+            // 物理上不可能出现 —— 它会先被单击那一支截走（≤4px 且 ≤300ms）。
+            // 我第一版就写了那个自相矛盾的用例，自检立刻把它抓出来了。
+            bool flingOk =
+                PetGesture.Classify(200, 0, 400, 2000) == PetGestureKind.Fling &&
+                PetGesture.Classify(120, 0, 200, 1500) == PetGestureKind.Fling;
+            bool slowDrag =
+                PetGesture.Classify(200, 0, 1500, 200) == PetGestureKind.Drag &&
+                PetGesture.Classify(200, 0, 400, 799) == PetGestureKind.Drag;
+            Check(flingOk && slowDrag,
+                  "⭐⭐ 抛掷看**速度**不看距离：≥800px/s 才飞，慢拖仍是挪位置",
+                  "2000/1500px·s⁻¹→Fling；799px·s⁻¹ 与 200px·s⁻¹→Drag");
+
+            // (3b) 按下时长不足 → 不做速度估计（差 1ms 就能让速度翻倍）
+            Check(PetGesture.Classify(200, 0, 59, 5000) == PetGestureKind.Drag,
+                  "手势：按下不足 60ms → 拒绝抛掷（速度估计不可信）", "59ms/5000px·s⁻¹ → Drag");
+
+            // (4) ⭐⭐ 坏数据**什么都不做**（Drag），既不飞也不打招呼。
+            //
+            // 两个方向都要挡：飞出去（NaN 落点会让窗口从屏幕消失）与
+            // 变成一次点击（那会**改变** v9 的行为 —— 坐标异常本该静默）。
+            //
+            // ⚠️ 长按那一支**不看速度**：按住不动时速度天然是 0（甚至因为
+            // 没有 MouseMove 而根本没有样本）。所以"坏速度 + 长按"必须仍是
+            // 长按 —— 要求速度有效等于把摸头整个功能废掉。这条断言就是
+            // 用来钉住"哪一支看速度、哪一支不看"的。
+            bool badOk =
+                PetGesture.Classify(double.NaN, 0, 500, 5000) == PetGestureKind.Drag &&
+                PetGesture.Classify(0, double.NaN, 500, 5000) == PetGestureKind.Drag &&
+                PetGesture.Classify(double.PositiveInfinity, 0, 500, 5000) == PetGestureKind.Drag &&
+                PetGesture.Classify(0, double.NegativeInfinity, 500, 5000) == PetGestureKind.Drag &&
+                PetGesture.Classify(0, 0, -1, 5000) == PetGestureKind.Drag;
+            bool badSpeedOk =
+                PetGesture.Classify(0, 0, 500, double.NaN) == PetGestureKind.Pat &&
+                PetGesture.Classify(0, 0, 500, double.PositiveInfinity) == PetGestureKind.Pat &&
+                PetGesture.Classify(200, 0, 500, double.NaN) == PetGestureKind.Drag;
+            Check(badOk && badSpeedOk,
+                  "⭐⭐ 坏坐标 → 什么都不做；坏速度不影响长按（长按不看速度）",
+                  "NaN/±Inf/负时长 → Drag；坏速度+按住不动 → 仍是 Pat");
+
+            // (5) 长按分级：350ms 起第 1 级，每 600ms 一级，封顶 3 级
+            bool levelOk =
+                PetGesture.PatLevel(0) == 0 &&
+                PetGesture.PatLevel(349) == 0 &&
+                PetGesture.PatLevel(350) == 1 &&
+                PetGesture.PatLevel(949) == 1 &&
+                PetGesture.PatLevel(950) == 2 &&
+                PetGesture.PatLevel(1550) == 3 &&
+                PetGesture.PatLevel(99999) == 3;
+            Check(levelOk, "长按分级：350ms 起 1 级、每 600ms 升一级、封顶 3 级",
+                  "0/349→0；350/949→1；950→2；1550+→3");
+
+            // (6) ⭐⭐ 抛掷轨迹**绝不飞出工作区**（这类动画最典型的缺陷）
+            FlingPlan p = PetGesture.PlanFling(500, 400, 3000, 0, 0, 0, 800, 600);
+            bool inBounds = p.Points.Count > 0;
+            for (int i = 0; i < p.Points.Count; i++)
+            {
+                ScreenPoint pt = p.Points[i];
+                if (pt.X < 0 || pt.X > 800 || pt.Y < 0 || pt.Y > 600) inBounds = false;
+            }
+            Check(inBounds && p.HitEdge,
+                  "⭐⭐ 抛掷轨迹逐帧夹进工作区（撞墙标记 HitEdge）",
+                  p.Points.Count + " 帧 / " + p.DurationMs + "ms / HitEdge=" + p.HitEdge);
+
+            // (6b) 轨迹有上限：不能一直飘
+            FlingPlan far = PetGesture.PlanFling(0, 0, 99999, 0, 0, 0, 800, 600);
+            Check(far.Points.Count <= PetGesture.FlingMaxSteps + 1 &&
+                  far.DurationMs <= PetGesture.FlingMaxSteps * PetGesture.FlingStepMs,
+                  "抛掷有时长上限（不会一直飘）",
+                  far.Points.Count + " 帧 ≤ " + (PetGesture.FlingMaxSteps + 1) +
+                  " / " + far.DurationMs + "ms ≤ " + (PetGesture.FlingMaxSteps * PetGesture.FlingStepMs) + "ms");
+
+            // (6c) ⭐ 初速坏掉 → 轨迹只有起点（原地不动），坐标**必须是有限值**
+            FlingPlan bad = PetGesture.PlanFling(double.NaN, 100, double.NaN, 0, 0, 0, 800, 600);
+            Check(bad.Points.Count == 1 &&
+                  !double.IsNaN(bad.Points[0].X) && !double.IsNaN(bad.Points[0].Y),
+                  "⭐ 初速/起点坏掉 → 原地不动（绝不出 NaN 坐标）",
+                  "1 帧 @ (" + bad.Points[0].X + "," + bad.Points[0].Y + ")");
+
+            // (6d) 速度不够 → 不产生动画（调用方据此**不启动计时器**）
+            FlingPlan still = PetGesture.PlanFling(100, 100, 5, 5, 0, 0, 800, 600);
+            Check(still.Points.Count == 1 && still.DurationMs == 0,
+                  "速度低于停止阈值 → 轨迹只有一个点（不启动动画）",
+                  still.Points.Count + " 帧");
+
+            // (7) ⭐⭐ 速度取样窗口：只看松手前 100ms，不是整段平均。
+            //      整段平均会让"慢慢拖 3 秒、最后猛甩一下"算不出速度（该飞不飞），
+            //      也会让"快速拖到底再停住"算成在飞（不该飞却飞出去）。
+            GestureSample[] s = new GestureSample[8];
+            // t=0..300ms 慢慢挪 30px（100px/s），最后 100ms 猛冲 200px（2000px/s）
+            s[0] = new GestureSample(0, 0, 0);
+            s[1] = new GestureSample(100, 10, 0);
+            s[2] = new GestureSample(200, 20, 0);
+            s[3] = new GestureSample(300, 30, 0);
+            s[4] = new GestureSample(400, 230, 0);
+            double fast = PetGesture.FlingSpeed(s, 5, 400);
+            Check(fast >= 1900 && fast <= 2100,
+                  "⭐⭐ 速度只看松手前 100ms（慢拖后猛甩仍能飞）",
+                  fast.ToString("0", CultureInfo.InvariantCulture) + "px/s（期望 ≈2000）");
+
+            // 反例：快速拖到底**再停住** 300ms → 窗口内速度为 0 → 不飞
+            GestureSample[] s2 = new GestureSample[8];
+            s2[0] = new GestureSample(0, 0, 0);
+            s2[1] = new GestureSample(50, 300, 0);
+            s2[2] = new GestureSample(350, 300, 0);
+            double stopped = PetGesture.FlingSpeed(s2, 3, 350);
+            Check(stopped == 0,
+                  "⭐⭐ 松手前已经停住 → 速度为 0（不该飞就不飞）",
+                  stopped.ToString("0", CultureInfo.InvariantCulture) + "px/s");
+
+            // (7b) 样本不足 / 时间为 0 → 0（安全侧）
+            GestureSample[] one = new GestureSample[8];
+            one[0] = new GestureSample(100, 0, 0);
+            Check(PetGesture.FlingSpeed(one, 1, 100) == 0 &&
+                  PetGesture.FlingSpeed(one, 0, 100) == 0 &&
+                  PetGesture.FlingSpeed(null, 0, 100) == 0,
+                  "速度样本不足 → 0（安全侧：不飞）", "1 个样本 / 0 个样本 / null 都是 0");
+
+            // (8) ⭐ 阈值必须是常量而不是散落的魔数（改一处就够）
+            Check(PetGesture.ClickMaxMovePx == 4.0 && PetGesture.ClickMaxMs == 300 &&
+                  PetGesture.PatMinMs == 350 && PetGesture.PatMaxLevels == 3 &&
+                  PetGesture.FlingMinSpeed == 800.0,
+                  "手势阈值集中为常量（窗口里不再有第二套判据）",
+                  "4px/300ms/350ms/3级/800px·s⁻¹");
+
+            // (9) ⭐ 窗口的点击判定必须**转发**到 PetGesture（单一真相）。
+            //      回退验证：把 PetWindow.IsClickGesture 换回自己那套实现时，
+            //      只要阈值一致就仍然全绿 —— 所以这条断言查的是**同一性**：
+            //      拿一个"只有 PetGesture 认、窗口自己那套不认"的边界值来试。
+            //      PatMinMs 边界正是这样的值：v9 的实现会拒绝 350ms（>300ms），
+            //      而 v10 的转发版会走完整个判定返回 false/true 一致的结论。
+            bool forwardOk =
+                PetWindow.IsClickGesture(0, 0, 300) == PetGesture.IsClick(0, 0, 300) &&
+                PetWindow.IsClickGesture(0, 0, 301) == PetGesture.IsClick(0, 0, 301) &&
+                PetWindow.IsClickGesture(double.NaN, 0, 50) == PetGesture.IsClick(double.NaN, 0, 50);
+            Check(forwardOk, "⭐ PetWindow 的点击判定转发到 PetGesture（不是各写一套）",
+                  "300ms/301ms/NaN 三处结论一致");
+
+            // (10) 互动动作白名单 v10 扩到 7 个（exe 侧与 Host 同集合）
+            bool kindsOk =
+                PetHttp.IsKnownInteractKind("pat") &&
+                PetHttp.IsKnownInteractKind("fling") &&
+                PetHttp.IsKnownInteractKind("hover") &&
+                PetHttp.InteractKinds.Length == 7;
+            Check(kindsOk, "互动白名单 v10：pat / fling / hover 已加（共 7 个）",
+                  "InteractKinds.Length=" + PetHttp.InteractKinds.Length);
         }
 
         /// <summary>

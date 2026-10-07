@@ -325,6 +325,11 @@ namespace DshZhuangFangyiPet
                 return;
             }
             _timer.Stop();
+            // v10：抛掷/长按计时器也要停 —— 它们每 16ms 醒一次并写 Left/Top，
+            // 窗口都关了还在写的话，WPF 会抛 `InvalidOperationException`
+            // （"调用线程无法访问此对象"），而那条异常在计时器回调里**没人接**。
+            CancelFling();
+            StopHoldTimer();
             if (_source != null)
             {
                 _source.RemoveHook(WndProc);
@@ -695,6 +700,16 @@ namespace DshZhuangFangyiPet
 
         private void OnMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
+            // 抛掷动画期间吞掉一切鼠标输入。
+            //
+            // 不吞的话会出两种荒唐情形：① 飞到一半又被"抓住"，`_dragOffsetDip`
+            // 是按下点算的，窗口会瞬移到鼠标位置；② 动画结束后那次抬起被算成
+            // 一次点击 —— 用户明明只是甩了她一下，却收到"打招呼"的互动。
+            if (_flinging)
+            {
+                e.Handled = true;
+                return;
+            }
             if (e.ClickCount == 2)
             {
                 e.Handled = true;
@@ -712,6 +727,14 @@ namespace DshZhuangFangyiPet
             _pressAt = DateTime.UtcNow;
             try { _pressScreen = PointToScreen(p); } catch { _pressScreen = new Point(double.NaN, double.NaN); }
             _movedSincePress = false;
+
+            // v10：手势采样与长按计时从这里开始。
+            _pressClockMs = ClockMs();
+            ResetSamples();
+            PushSample(_pressClockMs, _pressScreen);
+            _patLevelReported = 0;
+            StartHoldTimer();
+
             try { CaptureMouse(); } catch { }
             e.Handled = true;
         }
@@ -727,18 +750,285 @@ namespace DshZhuangFangyiPet
         /// <summary>按下之后是否移动超过阈值（超过就不是点击）。</summary>
         private bool _movedSincePress;
 
+        // ------------------------------------------------------------------
+        // v10：手势采样（抛掷速度）与长按计时（摸头）
+        // ------------------------------------------------------------------
+
+        /// <summary>
+        /// 松手前的位置样本环形缓冲。
+        ///
+        /// 为什么需要它：抛掷的判据是**松手那一刻还在不在动**，而"位移 / 总时长"
+        /// 算出来的是**整段平均速度** —— 慢慢拖了 3 秒、最后猛地一甩，平均速度
+        /// 很低，该飞的时候飞不起来。反过来，快速拖到底再停住，平均速度很高，
+        /// 不该飞的时候反而飞出去。只有"最近 100ms"才符合用户对"甩"的直觉。
+        ///
+        /// 8 个样本 × 约 16ms 一次 MouseMove ≈ 130ms 的覆盖，够装下
+        /// `FlingWindowMs`(100) 那一窗。
+        /// </summary>
+        private readonly GestureSample[] _samples = new GestureSample[8];
+        /// <summary>当前有效样本数（0..8；环形写入，满了就整体前移一位）。</summary>
+        private int _sampleCount;
+
+        /// <summary>按下时刻的**单调时钟**读数（ms）。用它而不是 `DateTime` 是为了不受系统时间调整影响。</summary>
+        private double _pressClockMs;
+
+        /// <summary>长按摸头：每 <see cref="PetGesture.PatStepMs"/> 检查一次是否该升级。</summary>
+        private DispatcherTimer _holdTimer;
+        /// <summary>本次按下**已经报过**的最高级（避免同一级重复上报）。</summary>
+        private int _patLevelReported;
+
+        /// <summary>抛掷动画进行中（期间吞掉鼠标输入，见 OnMouseLeftButtonDown）。</summary>
+        private bool _flinging;
+        /// <summary>抛掷回放用的帧计时器。</summary>
+        private DispatcherTimer _flingTimer;
+        /// <summary>当前回放的轨迹与游标。</summary>
+        private FlingPlan _flingPlan;
+        private int _flingIndex;
+
+        /// <summary>
+        /// 单调时钟（ms）。用 `Environment.TickCount` 而不是 `DateTime.Now`：
+        /// 用户改系统时间 / NTP 校正时，后者会跳变，而速度是**差值** ——
+        /// 跳变一次就能算出 ±10⁶ px/s 的荒唐速度，把一次普通点击判成抛掷。
+        /// </summary>
+        private static double ClockMs()
+        {
+            return (double)Environment.TickCount;
+        }
+
+        /// <summary>清空速度样本（每次按下时调）。</summary>
+        private void ResetSamples()
+        {
+            _sampleCount = 0;
+        }
+
+        /// <summary>追加一个位置样本（满了丢最旧的）。</summary>
+        private void PushSample(double t, Point screen)
+        {
+            if (_sampleCount < _samples.Length)
+            {
+                _samples[_sampleCount] = new GestureSample(t, screen.X, screen.Y);
+                _sampleCount++;
+                return;
+            }
+            // 满了：整体前移一位，末尾放新样本（8 个元素，开销可忽略）。
+            for (int i = 1; i < _samples.Length; i++) _samples[i - 1] = _samples[i];
+            _samples[_samples.Length - 1] = new GestureSample(t, screen.X, screen.Y);
+        }
+
+        /// <summary>当前按下已持续多久（ms）；没在按下时返回 0。</summary>
+        private int HeldMs()
+        {
+            if (_pressClockMs <= 0) return 0;
+            return (int)(ClockMs() - _pressClockMs);
+        }
+
+        /// <summary>起长按计时器（每次按下）。</summary>
+        private void StartHoldTimer()
+        {
+            StopHoldTimer();
+            _holdTimer = new DispatcherTimer(DispatcherPriority.Input);
+            // 检查间隔取 PatStepMs 的一半：间隔等于步长时，抖动会让某一级
+            // 被跳过（用户按住 1.2 秒只看到 1 级）。半速检查让每一级都稳。
+            _holdTimer.Interval = TimeSpan.FromMilliseconds(Math.Max(120, PetGesture.PatStepMs / 2));
+            _holdTimer.Tick += OnHoldTick;
+            _holdTimer.Start();
+        }
+
+        private void StopHoldTimer()
+        {
+            if (_holdTimer == null) return;
+            try { _holdTimer.Stop(); } catch { }
+            _holdTimer = null;
+        }
+
+        /// <summary>
+        /// 长按检查：够 <see cref="PetGesture.PatMinMs"/> 就升一级。
+        ///
+        /// 只在**没移动过**（`_movedSincePress` 为 false）时才升级 —— 否则
+        /// "按住慢慢挪"会一边挪位置一边刷摸头，那是两个手势叠在一起。
+        /// </summary>
+        private void OnHoldTick(object sender, EventArgs e)
+        {
+            if (!_dragging || _flinging || _movedSincePress)
+            {
+                // 已经不算"按住不动"了，计时器没必要继续跑。
+                if (_movedSincePress) StopHoldTimer();
+                return;
+            }
+            int level = PetGesture.PatLevel(HeldMs());
+            if (level <= _patLevelReported) return;
+            _patLevelReported = level;
+            try { PatInvoked(level); } catch { }
+        }
+
+        /// <summary>长按到第 <paramref name="level"/> 级（Program 装配成上报一次互动）。</summary>
+        public Action<int> PatInvoked = delegate { };
+
+        // ------------------------------------------------------------------
+        // v10：抛掷（预先算轨迹 → 回放）
+        // ------------------------------------------------------------------
+
+        /// <summary>
+        /// 松手时的速度（px/s）。**纯计算**，阈值判定在 `PetGesture.Classify`。
+        /// </summary>
+        private double ReleaseSpeed()
+        {
+            return PetGesture.FlingSpeed(_samples, _sampleCount, ClockMs());
+        }
+
+        /// <summary>允许窗口左上角出现的范围（物理像素）。来自工作区，已扣除任务栏。</summary>
+        private void WorkspaceBounds(out int minX, out int minY, out int maxX, out int maxY)
+        {
+            int w = (int)Math.Round(Width);
+            int h = (int)Math.Round(Height);
+            if (w <= 0) w = 1;
+            if (h <= 0) h = 1;
+            PetNative.WorkArea wa = PetNative.NearestScreen((int)Math.Round(Left), (int)Math.Round(Top));
+            if (wa == null)
+            {
+                // 拿不到工作区（显示器拔了/枚举失败）→ 用"原地不动"这一格，
+                // 保证 PlanFling 不会因为荒唐边界算出荒唐落点。
+                int cx = (int)Math.Round(Left);
+                int cy = (int)Math.Round(Top);
+                minX = cx; minY = cy; maxX = cx; maxY = cy;
+                return;
+            }
+            minX = wa.X;
+            minY = wa.Y;
+            maxX = wa.X + wa.W - w;
+            maxY = wa.Y + wa.H - h;
+        }
+
+        /// <summary>
+        /// 开始抛掷回放。
+        ///
+        /// @param vx,vy 初速（px/s，屏幕坐标系，y 向下为正）
+        /// @returns 轨迹；调用方据 `HitEdge` 决定要不要额外给一次"撞墙"反应。
+        /// </summary>
+        private FlingPlan StartFling(double vx, double vy)
+        {
+            int minX, minY, maxX, maxY;
+            WorkspaceBounds(out minX, out minY, out maxX, out maxY);
+
+            FlingPlan plan = PetGesture.PlanFling(Left, Top, vx, vy, minX, minY, maxX, maxY);
+            _flingPlan = plan;
+            _flingIndex = 0;
+            _flingHitEdge = plan.HitEdge;
+
+            if (plan.Points.Count <= 1)
+            {
+                // 轨迹只有一个点（速度不够 / 数据坏）→ 不启动动画。
+                // 这里**必须**返回而不是起一个空计时器：空计时器每 16ms 醒一次、
+                // 什么都不做，是纯粹的耗电。
+                return plan;
+            }
+
+            _flinging = true;
+            StopHoldTimer();       // 飞行期间不该再有摸头计时
+            _flingTimer = new DispatcherTimer(DispatcherPriority.Render);
+            _flingTimer.Interval = TimeSpan.FromMilliseconds(PetGesture.FlingStepMs);
+            _flingTimer.Tick += OnFlingTick;
+            _flingTimer.Start();
+            return plan;
+        }
+
+        private void OnFlingTick(object sender, EventArgs e)
+        {
+            FlingPlan plan = _flingPlan;
+            if (plan == null)
+            {
+                EndFling();
+                return;
+            }
+            _flingIndex++;
+            if (_flingIndex >= plan.Points.Count)
+            {
+                EndFling();
+                return;
+            }
+            // 只改 Left/Top：窗口尺寸 == 精灵帧尺寸是**冻结不变量**，
+            // 动画期间绝不碰 Width/Height/图像，否则会撕帧。
+            ScreenPoint p = plan.Points[_flingIndex];
+            try
+            {
+                Left = p.X;
+                Top = p.Y;
+                try { DragMoved(); } catch { }   // 气泡/输入窗跟着飞（与拖动同一条）
+            }
+            catch { EndFling(); }
+        }
+
+        /// <summary>
+        /// 结束抛掷：停表、解锁、夹回工作区、上报最终位置。
+        ///
+        /// ⚠️ 顺序：先解锁 `_flinging` 再 `ReclampPosition` —— 反过来时
+        /// `ReclampPosition` 内部若有任何"等鼠标"的分支会被闩锁挡住，
+        /// 而那种失败是静默的（窗口停在屏幕外，用户只看到桌宠不见了）。
+        /// </summary>
+        private void EndFling()
+        {
+            _flinging = false;
+            if (_flingTimer != null)
+            {
+                try { _flingTimer.Stop(); } catch { }
+                _flingTimer = null;
+            }
+            _flingPlan = null;
+            _flingIndex = 0;
+            try { ReclampPosition(false); } catch { }
+            try { FlingFinished(_flingHitEdge); } catch { }
+            _flingHitEdge = false;
+        }
+
+        /// <summary>本次抛掷是否撞过边界（EndFling 上报时用）。</summary>
+        private bool _flingHitEdge;
+
+        /// <summary>抛掷结束（Program 装配成上报一次 `fling` 互动）。</summary>
+        public Action<bool> FlingFinished = delegate { };
+
+        /// <summary>取消进行中的抛掷（关闭/重载素材时用，避免计时器打到已释放的窗口）。</summary>
+        private void CancelFling()
+        {
+            _flinging = false;
+            if (_flingTimer != null)
+            {
+                try { _flingTimer.Stop(); } catch { }
+                _flingTimer = null;
+            }
+            _flingPlan = null;
+            _flingIndex = 0;
+        }
+
+        /// <summary>自检诊断：直接跑一次手势判定（与运行时同一实现）。</summary>
+        internal static string DiagClassifyGesture(double dx, double dy, int ms, double speed)
+        {
+            return PetGesture.DiagClassify(dx, dy, ms, speed);
+        }
+
+        /// <summary>自检诊断：长按分级。</summary>
+        internal static int DiagPatLevel(int heldMs)
+        {
+            return PetGesture.DiagPatLevel(heldMs);
+        }
+
         /// <summary>
         /// 单击判定的两个阈值（**单位：物理像素 / 毫秒**）。
         ///
-        /// 为什么是 4px：手在按键时几乎必然有 1~2px 的抖动，
-        /// 阈值太小会把"点一下"判成"拖了一下"（用户会觉得点了没反应）。
-        /// 4px 在 150% DPI 下约 2.7 DIP，足够容纳抖动而不误判真拖动。
+        /// v10 起真正的值在 `PetGesture`（手势判定的唯一真相），这里只留
+        /// **同名别名**：窗口内部与 `SelfTest` 都在用这两个名字，而"两处各写
+        /// 一份常量、靠人工同步"正是这类代码最容易腐烂的地方。
         ///
-        /// 为什么是 300ms：超过这个时长的按住更可能是"想拖但没动"或
-        /// "长按"，不该触发互动（那会让"按住看它反应"变成刷互动的路子）。
+        /// 4px 的来历：手在按键时几乎必然有 1~2px 的抖动，阈值太小会把
+        /// "点一下"判成"拖了一下"（用户会觉得点了没反应）。4px 在 150% DPI
+        /// 下约 2.7 DIP，足够容纳抖动而不误判真拖动。
+        ///
+        /// ⚠️ 300ms 这条 v10 起**语义变了**：以前"按住超过 300ms"什么都不触发，
+        /// 现在它是**长按摸头**的下界（`PetGesture.PatMinMs` = 350）。
+        /// 300 与 350 之间那 50ms 是**故意的死区**：两个判据紧贴在一起时，
+        /// 采样抖动会让同一次按下在两条路径里一会儿算点击、一会儿算长按。
         /// </summary>
-        internal const double ClickMaxMovePx = 4.0;
-        internal const int ClickMaxMs = 300;
+        internal const double ClickMaxMovePx = PetGesture.ClickMaxMovePx;
+        internal const int ClickMaxMs = PetGesture.ClickMaxMs;
 
         /// <summary>
         /// 判定一次按下-抬起是否算"单击"。**纯函数**（自检直接断言，
@@ -756,9 +1046,10 @@ namespace DshZhuangFangyiPet
         /// </summary>
         internal static bool IsClickGesture(double dx, double dy, int elapsedMs)
         {
-            if (elapsedMs < 0 || elapsedMs > ClickMaxMs) return false;
-            if (double.IsNaN(dx) || double.IsNaN(dy)) return false;
-            return Math.Sqrt(dx * dx + dy * dy) <= ClickMaxMovePx;
+            // 单一真相在 `PetGesture.IsClick`（v10 起）—— 这里只转发。
+            // 窗口里**不该**再出现第二套判据：手势从"只有一个"变成"四种"之后，
+            // 抄一份的下场是"点一下"在抬起路径里算点击、在移动路径里算拖动。
+            return PetGesture.IsClick(dx, dy, elapsedMs);
         }
 
         /// <summary>自检诊断用：直接跑一次判定。</summary>
@@ -796,6 +1087,8 @@ namespace DshZhuangFangyiPet
             try
             {
                 Point screen = PointToScreen(e.GetPosition(this));
+                // v10：每个移动都进速度样本（抛掷判据的唯一数据来源）。
+                PushSample(ClockMs(), screen);
                 // v9：记下"有没有真的移动过"（超过阈值就不算点击了）。
                 if (!_movedSincePress &&
                     !double.IsNaN(_pressScreen.X) &&
@@ -823,18 +1116,62 @@ namespace DshZhuangFangyiPet
             // 顺序不能反：`EndDrag` 会清 `_dragging` 并 ReclampPosition，
             // 而点击判定要用按下时的坐标（不受 Reclamp 影响，但逻辑上先判更清楚）。
             bool isClick = false;
+            double dx = double.NaN;
+            double dy = double.NaN;
+            int elapsed = 0;
             try
             {
                 Point now = PointToScreen(e.GetPosition(this));
-                int elapsed = (int)(DateTime.UtcNow - _pressAt).TotalMilliseconds;
-                isClick = !_movedSincePress && IsClickGesture(
-                    now.X - _pressScreen.X, now.Y - _pressScreen.Y, elapsed);
+                dx = now.X - _pressScreen.X;
+                dy = now.Y - _pressScreen.Y;
+                elapsed = (int)(DateTime.UtcNow - _pressAt).TotalMilliseconds;
+                isClick = !_movedSincePress && IsClickGesture(dx, dy, elapsed);
             }
             catch { isClick = false; }
 
+            // v10：手势判定要在**样本还完整**的时候算 —— `EndDrag` 之后
+            // 这些样本会被下一次按下清掉。
+            double speed = ReleaseSpeed();
+            PetGestureKind kind = PetGestureKind.Drag;
+            try
+            {
+                kind = PetGesture.Classify(dx, dy, elapsed, speed);
+            }
+            catch { kind = PetGestureKind.Drag; }
+
+            StopHoldTimer();
+            _pressClockMs = 0;
+
             EndDrag();
             e.Handled = true;
-            if (isClick) { try { ClickInvoked(); } catch { } }
+
+            // 单击保持原有语义（`_movedSincePress` 已经把"拖过"排除了）。
+            if (isClick || kind == PetGestureKind.Click)
+            {
+                try { ClickInvoked(); } catch { }
+                return;
+            }
+
+            // v10：抛掷。**只有**在拖动真的发生过、且速度达标时才飞 ——
+            // `Classify` 已经在坏数据上回落 Click/Drag，这里不再重复判断。
+            if (kind == PetGestureKind.Fling)
+            {
+                // 初速方向取样本算出来的那一段（与判据同一个窗口，不会"判定用
+                // 这一段、飞行用另一段"）。
+                double vx, vy;
+                ReleaseVelocity(out vx, out vy);
+                PetLog.Info("抛掷 v=" + speed.ToString("0", CultureInfo.InvariantCulture) +
+                            "px/s 方向=(" + vx.ToString("0", CultureInfo.InvariantCulture) + "," +
+                            vy.ToString("0", CultureInfo.InvariantCulture) + ")");
+                try { StartFling(vx, vy); } catch (Exception ex) { PetLog.Warn("抛掷失败: " + PetLog.Describe(ex)); }
+            }
+        }
+
+        /// <summary>松手速度的**向量**（px/s）。与 <see cref="ReleaseSpeed"/> 同一个窗口。</summary>
+        private void ReleaseVelocity(out double vx, out double vy)
+        {
+            vx = 0; vy = 0;
+            PetGesture.FlingVelocity(_samples, _sampleCount, ClockMs(), out vx, out vy);
         }
 
         private void EndDrag()
