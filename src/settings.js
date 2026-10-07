@@ -55,6 +55,15 @@ export const SCALE_MAX = 3.0
 export const OPACITY_MIN = 0.3
 export const OPACITY_MAX = 1.0
 
+/**
+ * 状态文字字号倍率范围（用户点名"字太小了，想调大"）。
+ *
+ * 与 `scale` 分开：`scale` 是"桌宠多大"，这个是"字多大"。
+ * 上限 3.0 足够大（基准 11px → 33px），下限 0.5 保证还读得出来。
+ */
+export const STATUS_FONT_MIN = 0.5
+export const STATUS_FONT_MAX = 3.0
+
 /** 气泡一次显示多久（ms）。 */
 export const BUBBLE_MS_MIN = 1000
 export const BUBBLE_MS_MAX = 20000
@@ -146,6 +155,17 @@ export function defaultSettings () {
     hint: true,
     /** 是否在桌宠**下方常显**状态文字（不止悬停才出现）。 */
     statusAlways: false,
+    /**
+     * 状态文字的**字号倍率**（1.0 = 基准 11px）。
+     *
+     * 用户点名："我希望能够调整字的大小，因为有的时候字太小了"。
+     * 为什么必须独立于 `scale`：`scale` 决定"桌宠多大"，用户调小它是为了让桌宠
+     * 不占地方；而状态文字是**给人读的**，跟着一起缩就本末倒置了。
+     * 独立成项后可以"桌宠小、字清楚"。
+     *
+     * 范围与 clamp 见 `normalizeSettings`（0.5 ~ 3.0）。
+     */
+    statusFontScale: 1.0,
     /** AI 完成一回合并时弹一条提醒气泡（force，绕过静默期）。 */
     notifyComplete: true,
     /**
@@ -309,6 +329,10 @@ export function normalizeSettings (input) {
   else if (PET_MODE_ALIASES[input.mode] !== undefined) out.mode = PET_MODE_ALIASES[input.mode]
   out.scale = clamp(input.scale, SCALE_MIN, SCALE_MAX, base.scale)
   out.opacity = clamp(input.opacity, OPACITY_MIN, OPACITY_MAX, base.opacity)
+  // 状态文字字号倍率：0.5~3.0。
+  // 下限 0.5（再小读不了，与 `PetStatusLabel.MinFontSize` 的兜底意图一致）；
+  // 上限 3.0（再大字会把面板/桌面占满，且远超"看得清"的需求）。
+  out.statusFontScale = clamp(input.statusFontScale, STATUS_FONT_MIN, STATUS_FONT_MAX, base.statusFontScale)
 
   for (const key of ['clickThrough', 'topmost', 'bubble', 'bubbleImages',
     'hint', 'statusAlways', 'notifyComplete', 'attentionReminder',

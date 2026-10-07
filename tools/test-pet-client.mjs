@@ -1306,7 +1306,7 @@ ok('⭐ 重排后每个设置控件都还在（防"功能悄悄消失"）', () =
     '显示气泡', '气泡显示表情图', '气泡显示时长', '两条气泡最小间隔',
     'AI 完成时弹提醒', '审批/提问常亮提醒', '双击桌宠',
     '活跃度', '完成后的开心时长', '空闲多久后睡觉', '深浅色主题',
-    '悬停时显示状态', '桌宠下方常显状态',
+    '悬停时显示状态', '桌宠下方常显状态', '状态文字大小',
     '让庄方宜说话', '把 AI 的回答念出来', '合成服务地址', '每次朗读字数上限',
     '让语音模型常驻', '空闲时怎么释放', '空闲多少秒后释放（秒，0 = 不停）',
     '启用番茄钟', '专注时长', '短休息', '长休息', '每几轮长休息',
@@ -1316,6 +1316,41 @@ ok('⭐ 重排后每个设置控件都还在（防"功能悄悄消失"）', () =
   ]
   const missing = expected.filter(s => !joined.includes(s))
   assert.deepEqual(missing, [], `这些控件的文案在重排中丢了：${missing.join('、')}`)
+})
+
+ok('⭐ 状态文字大小：独立滑杆，能改到设置（用户要"调大一点"）', () => {
+  // 用户点名："我希望能够调整字的大小，因为有的时候字太小了"。
+  // 之前字号**只能**跟着"大小"（桌宠本体）走 —— 用户把桌宠调到 0.4 是为了不占地，
+  // 字却被一起缩小（实测被下限夹到 8px，确实看不清）。
+  const l = loadClient()
+  l.exports.apply(l.ctx)
+  const { Section, runtime } = l.exports.__test
+  runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 1 } } }
+  runtime.__state.snapshot = { petState: 'idle', label: '', bubble: null, nativeAvailable: true }
+  runtime.__state.settings = normalizePet({ statusFontScale: 1.8 })
+  l.react.resetHooks()
+  const tree = Section({ close () {} })
+
+  const sliders = []
+  const walk = n => {
+    if (n === null || n === undefined) return
+    if (Array.isArray(n)) { n.forEach(walk); return }
+    if (typeof n !== 'object') return
+    if (typeof n.type === 'function' && n.type.name === 'Slider') sliders.push(n)
+    if (n.props) walk(n.props.children)
+  }
+  walk(tree)
+  const fontSlider = sliders.find(s => s.props.label === '状态文字大小')
+  assert.ok(fontSlider, '应有「状态文字大小」滑杆')
+  assert.equal(fontSlider.props.value, 1.8, '滑杆应反映当前值（不是永远显示 1）')
+  assert.ok(fontSlider.props.min <= 0.5 && fontSlider.props.max >= 3,
+    `范围应覆盖 0.5~3，实际 ${fontSlider.props.min}~${fontSlider.props.max}`)
+  assert.ok(typeof fontSlider.props.hint === 'string' && fontSlider.props.hint !== '',
+    '应带说明（解释它和"大小"不是一回事）')
+
+  // 客户端归一化也要夹取（与 Host 的 0.5~3.0 同口径，否则两端分叉）
+  assert.equal(normalizePet({ statusFontScale: 99 }).statusFontScale, 3, '越界应夹到 3')
+  assert.equal(normalizePet({ statusFontScale: 0.01 }).statusFontScale, 0.5, '越界应夹到 0.5')
 })
 
 ok('⭐ 分组按"用户找东西的心智"排序（不再是开发历史顺序）', () => {

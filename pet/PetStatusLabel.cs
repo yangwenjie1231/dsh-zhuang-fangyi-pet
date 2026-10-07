@@ -104,6 +104,51 @@ namespace DshZhuangFangyiPet
         /// <summary>自检诊断用：当前内边距左值。</summary>
         internal double DiagPaddingLeft { get { return _chrome == null ? 0 : _chrome.Padding.Left; } }
 
+        /// <summary>
+        /// 自检诊断用：**内容**期望的尺寸（DIP）。
+        /// 与窗口实际尺寸对比，就能发现"框比内容大一圈"这类问题
+        ///（用户截图反馈的症状）。
+        /// </summary>
+        internal void DiagChromeSize(out double w, out double h)
+        {
+            if (_chrome == null) { w = 0; h = 0; return; }
+            _chrome.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            w = _chrome.DesiredSize.Width;
+            h = _chrome.DesiredSize.Height;
+        }
+
+        /// <summary>自检诊断用：窗口实际尺寸（DIP）。</summary>
+        internal void DiagActualSize(out double w, out double h)
+        {
+            w = ActualWidth;
+            h = ActualHeight;
+        }
+
+        /// <summary>
+        /// 自检诊断用：尺寸链路每一环的原始值。
+        ///
+        /// "框比文字大"可能出在几处，必须**分别**看才能定位：
+        ///   ① 文字自己的 DesiredSize（内容真实需求）
+        ///   ② `_chrome.DesiredSize`（内容 + 内边距 + 边框）
+        ///   ③ `SizeToContent` 之后窗口的 `ActualWidth/Height`
+        ///   ④ 窗口是否真的可见（不可见时 ActualWidth 是未布局的占位值）
+        /// </summary>
+        internal string DiagSizeChain()
+        {
+            double tw = _text == null ? 0 : _text.DesiredSize.Width;
+            double th = _text == null ? 0 : _text.DesiredSize.Height;
+            double cw = _chrome == null ? 0 : _chrome.DesiredSize.Width;
+            double ch = _chrome == null ? 0 : _chrome.DesiredSize.Height;
+            return "textDesired=" + tw.ToString("0.#") + "x" + th.ToString("0.#") +
+                   " chromeDesired=" + cw.ToString("0.#") + "x" + ch.ToString("0.#") +
+                   " actual=" + ActualWidth.ToString("0.#") + "x" + ActualHeight.ToString("0.#") +
+                   " visible=" + (IsVisible ? "1" : "0") +
+                   " loaded=" + (IsLoaded ? "1" : "0") +
+                   " padding=" + (_chrome == null ? "-" : _chrome.Padding.Left.ToString("0.#") + "/" + _chrome.Padding.Top.ToString("0.#")) +
+                   " border=" + (_chrome == null ? "-" : _chrome.BorderThickness.Left.ToString("0.#")) +
+                   " fontSize=" + (_text == null ? 0 : _text.FontSize).ToString("0.#");
+        }
+
         /// <summary>自检诊断用：当前是否处于可见态（按显隐规则算出来的）。</summary>
         internal bool DiagShouldShow
         {
@@ -142,6 +187,29 @@ namespace DshZhuangFangyiPet
                 PetNative.SetWindowLong(_hwnd, PetNative.GWL_EXSTYLE,
                     ex | PetNative.WS_EX_TOOLWINDOW | PetNative.WS_EX_NOACTIVATE);
             }
+            // ⭐ 首帧**强制重新量一次**，否则窗口停在初始尺寸上。
+            //
+            // 用户反馈："第一次启动的状态栏大小有问题"，并补充"只有在第一次启动
+            // 就是刚启动的时候会这个样子"。自检 `DiagSizeChain` 量到的数据：
+            //
+            //     内容 chromeDesired = 88.7 x 18     ← 内容测量是对的
+            //     窗口 actual        = 134.7 x 37.3  ← 但窗口停在这个**恒定**值上
+            //
+            // 关键证据是**它不随内容变化**：换文字、换字号（8 或 11）、换缩放，
+            // actual 始终是 134.7x37.3。所以不是"尺寸算错"，而是这次布局里
+            // **`SizeToContent` 没生效**，窗口留着初始尺寸。
+            //
+            // 为什么"过一会儿就好"：之后任何一次刷新（悬停/快照/缩放）都会走
+            // `ApplyVisibility` → `UpdateLayout` + 重新定位，那时窗口才跟着缩。
+            //
+            // 修法：Loaded 之后再主动失效一次测量/排列，让 SizeToContent 重解析。
+            try
+            {
+                InvalidateMeasure();
+                InvalidateVisual();
+                UpdateLayout();
+            }
+            catch (Exception ex2) { PetLog.Warn("状态文字首帧重排失败: " + PetLog.Describe(ex2)); }
             PetLog.Info("状态文字窗已创建 hwnd=0x" + _hwnd.ToInt64().ToString("X"));
         }
 
@@ -204,15 +272,53 @@ namespace DshZhuangFangyiPet
         {
             _scale = scale <= 0 ? 1.0 : scale;
             UpdateMetrics();
-            if (IsVisible) PlaceNearPet(_lastPetRect);
+            if (IsVisible)
+            {
+                // 先让布局落地再定位：尺寸变了却用旧尺寸定位会歪（首帧那轮踩过）。
+                try { UpdateLayout(); } catch { }
+                PlaceNearPet(_lastPetRect);
+            }
         }
+
+        /// <summary>
+        /// 状态文字的**独立字号倍率**（用户点名"我希望能够调整字的大小，
+        /// 因为有的时候字太小了"）。
+        ///
+        /// 为什么要独立于 `SetScale`：`scale` 是"桌宠多大"，用户调小它是为了让
+        /// 桌宠不占地方；状态文字是给人读的，跟着一起缩就本末倒置了。
+        /// 两者**相乘**得到最终字号，所以"桌宠小 + 字大"可以共存。
+        /// </summary>
+        public void SetFontScale(double fontScale)
+        {
+            double fs = fontScale <= 0 ? 1.0 : fontScale;
+            if (Math.Abs(fs - _fontScale) < 0.001) return;
+            _fontScale = fs;
+            UpdateMetrics();
+            if (IsVisible)
+            {
+                try { UpdateLayout(); } catch { }
+                PlaceNearPet(_lastPetRect);
+            }
+        }
+
+        /// <summary>独立字号倍率（1.0 = 基准）。与 `_scale` 相乘。</summary>
+        private double _fontScale = 1.0;
 
         private void UpdateMetrics()
         {
             double s = _scale;
-            _text.FontSize = Math.Max(MinFontSize, BaseFontSize * s);
-            double px = Math.Max(2, BasePaddingX * s);
-            double py = Math.Max(0.5, BasePaddingY * s);
+            // 字号 = 基准 × 桌宠缩放 × 独立字号倍率。
+            // `MinFontSize` 是**兜底**（防止极端缩放下变成读不了的 1px），
+            // 不是可调项 —— 所以它夹的是最终值。
+            _text.FontSize = Math.Max(MinFontSize, BaseFontSize * s * _fontScale);
+            // ⚠️ 内边距必须跟**最终字号**成比例，不能用 `s` 单独算。
+            //
+            // 这里踩过：内边距按 `s` 走、字号按 `s × fontScale` 走 —— 用户把字号
+            // 调到 3× 时字变大了、内边距没变，文字会贴边（上下几乎没留白）。
+            // 用"最终字号 / 基准字号"这个比值，两边的比例才恒定。
+            double ratio = _text.FontSize / BaseFontSize;
+            double px = Math.Max(2, BasePaddingX * ratio);
+            double py = Math.Max(0.5, BasePaddingY * ratio);
             _chrome.Padding = new Thickness(px, py, px, py);
             _chrome.CornerRadius = new CornerRadius(Math.Max(2, BaseCornerRadius * s));
         }
@@ -264,6 +370,15 @@ namespace DshZhuangFangyiPet
             if (show)
             {
                 if (!IsVisible) Show();
+                // ⭐ 首帧必须**先强制布局再定位**。
+                //
+                // `Update()` 设完文字就调 `PlaceNearPet()`，而它读 `_chrome.DesiredSize`
+                // 算窗口尺寸 —— **首帧那次布局还没发生**，DesiredSize 还是旧内容
+                //（空文字）的量，于是位置按错尺寸算一次。
+                //
+                // 为什么"过一会儿就好"：之后任何一次刷新（悬停/快照/缩放）都会重算，
+                // 那时布局已完成 → 尺寸正确。所以这个 bug **只在启动瞬间可见**。
+                try { UpdateLayout(); } catch { }
                 PlaceNearPet(_lastPetRect);
             }
             else if (IsVisible)

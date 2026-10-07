@@ -178,6 +178,8 @@ window.__ModuleLoader__.load({
         hint: '悬停时显示状态',
         statusAlways: '桌宠下方常显状态',
         statusAlwaysHint: '开启后状态文字一直挂在桌宠下方，不用悬停',
+        statusFontScale: '状态文字大小',
+        statusFontScaleHint: '只影响状态文字，与上面「大小」（桌宠本体）无关 —— 桌宠可以调小、字照样看清',
         // ── 番茄钟（v3）─────────────────────────────────────────────────────
         groupPomodoro: '番茄钟',
         pomodoro: '启用番茄钟',
@@ -352,6 +354,8 @@ window.__ModuleLoader__.load({
         hint: 'Show status on hover',
         statusAlways: 'Always show status below pet',
         statusAlwaysHint: 'Keeps the status text visible without hovering',
+        statusFontScale: 'Status text size',
+        statusFontScaleHint: 'Affects the status text only, not the pet size above — the pet can be small while the text stays readable',
         // ── Pomodoro (v3) ───────────────────────────────────────────────────
         groupPomodoro: 'Pomodoro',
         pomodoro: 'Enable pomodoro',
@@ -548,6 +552,12 @@ window.__ModuleLoader__.load({
         /** 悬停显示状态文字 / 桌宠下方常显状态。 */
         hint: true,
         statusAlways: false,
+        /**
+         * 状态文字字号倍率（1.0 = 基准）。
+         * 与"桌宠大小"（`scale`）分开：桌宠可以小，字照样看得清。
+         * 与 Host 的 `src/settings.js` 同默认值。
+         */
+        statusFontScale: 1,
         /** AI 完成一回合时弹提醒。 */
         notifyComplete: true,
         /** 授权/提问常亮提醒（Host 用它决定 attention；独立于 bubble 总开关）。 */
@@ -580,6 +590,11 @@ window.__ModuleLoader__.load({
       // 0.3~3.0：与 Host 的 settings.js、exe 的滚轮缩放同一个范围（三处必须一致）。
       if (Number.isFinite(input.scale)) out.scale = Math.min(3, Math.max(0.3, input.scale))
       if (Number.isFinite(input.opacity)) out.opacity = Math.min(1, Math.max(0.3, input.opacity))
+      // 状态文字字号倍率：与 Host 的 `STATUS_FONT_MIN/MAX` **同范围**（0.5~3.0）。
+      // 两处口径必须一致，否则"设置页能选的值"和"宿主接受的值"会分叉。
+      if (Number.isFinite(input.statusFontScale)) {
+        out.statusFontScale = Math.min(3, Math.max(0.5, input.statusFontScale))
+      }
       for (const k of ['clickThrough', 'topmost', 'bubble', 'bubbleImages',
         'hint', 'statusAlways', 'notifyComplete', 'attentionReminder',
         'pomodoro', 'pomodoroAutoNext', 'pomodoroNotify', 'pomodoroCountdown',
@@ -1042,7 +1057,11 @@ window.__ModuleLoader__.load({
           ? null
           : h('div', {
               key: 'hint',
-              className: 'zf-pet__hint' + (settings.statusAlways ? ' zf-pet__hint--always' : '')
+              className: 'zf-pet__hint' + (settings.statusAlways ? ' zf-pet__hint--always' : ''),
+              // 字号倍率：与原生窗同一设置（契约 §2 settings.statusFontScale）。
+              // overlay 是**冻结的兜底**，但这个字段只是把它已有的字号乘以一个系数，
+              // 不引入新交互 —— 不跟着变的话，用户切换显示方式会看到两种大小。
+              style: { fontSize: `${(11 * (Number(settings.statusFontScale) || 1)).toFixed(1)}px` }
             }, snapshot?.label ?? ''),
 
         // ── ✎ 发消息入口（悬停才出现；能力不可用/整体穿透时不渲染）──────────
@@ -1132,9 +1151,15 @@ window.__ModuleLoader__.load({
       ])
     }
 
-    /** 一个受控滑杆。 */
+    /**
+     * 一个受控滑杆。
+     *
+     * `hint` 是可选的说明文字 —— 与 `Toggle` 对齐（那里一直支持 hint）。
+     * 之前 Slider 忽略它：调用方传了 hint 却不显示，**静默丢失**。
+     * 新加的"状态文字字号"就需要解释"它和上面那个大小不是一回事"。
+     */
     function Slider (props) {
-      const { label, value, min, max, step, suffix, onChange } = props
+      const { label, value, min, max, step, suffix, onChange, hint } = props
       return h('label', { className: 'zf-pet-row' }, [
         h('span', { key: 'l', className: 'zf-pet-row__label' }, label),
         h('input', {
@@ -1147,7 +1172,8 @@ window.__ModuleLoader__.load({
           value,
           onChange: e => onChange(Number(e.target.value))
         }),
-        h('span', { key: 'v', className: 'zf-pet-row__value' }, `${value}${suffix ?? ''}`)
+        h('span', { key: 'v', className: 'zf-pet-row__value' }, `${value}${suffix ?? ''}`),
+        hint === undefined ? null : h('span', { key: 'h', className: 'zf-pet-row__hint' }, hint)
       ])
     }
 
@@ -1618,6 +1644,23 @@ window.__ModuleLoader__.load({
               hint: t('statusAlwaysHint'),
               value: settings.statusAlways,
               onChange: v => set({ statusAlways: v })
+            }),
+            // ⭐ 状态文字字号（用户点名"我希望能够调整字的大小，因为有的时候字太小了"）。
+            //
+            // 为什么必须独立于"大小"：那个滑块调的是**桌宠多大**，用户把它调到 0.4
+            // 是为了桌宠不占地方 —— 而状态文字是给人读的，跟着一起缩就本末倒置
+            //（实测 0.4× 时字号被下限夹到 8px，确实小得看不清）。
+            // 独立成项后可以"桌宠小、字清楚"。
+            h(Slider, {
+              key: 'statusFontScale',
+              label: t('statusFontScale'),
+              hint: t('statusFontScaleHint'),
+              value: settings.statusFontScale ?? 1,
+              min: 0.5,
+              max: 3,
+              step: 0.1,
+              suffix: '×',
+              onChange: v => set({ statusFontScale: v })
             })
           ]),
 

@@ -1522,6 +1522,16 @@ export function apply (ctx, config) {
       // 桌面版桌宠因此完全没有状态文字。
       hint: s.hint,
       statusAlways: s.statusAlways,
+      /**
+       * 状态文字的字号倍率（1.0 = 基准）。
+       *
+       * 用户点名："我希望能够调整字的大小，因为有的时候字太小了"。
+       * 原先字号**只能**跟着 `scale` 走（`BaseFontSize × scale`）—— 可 `scale` 是
+       * "桌宠多大"：用户把它调小是为了桌宠不占地方，状态文字却跟着一起变小，
+       * 且没有任何独立补偿（`MinFontSize=8` 只是兜底下限，不是可调项）。
+       * 现在独立成一项：桌宠可以小，字照样看得清。
+       */
+      statusFontScale: s.statusFontScale,
       // 番茄钟倒计时是否常显（独立于 statusAlways：那是"状态文字"，
       // 这是用户主动开的计时器，两者可以各自开关）。
       pomodoroCountdown: s.pomodoroCountdown,

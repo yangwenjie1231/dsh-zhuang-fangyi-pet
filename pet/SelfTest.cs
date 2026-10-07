@@ -771,6 +771,28 @@ namespace DshZhuangFangyiPet
             Check(stParse, "状态显示：hint/statusAlways 解析 + label 取到",
                   stParse ? "hint=1 statusAlways=1 label=正在思考…" : "解析结果不符");
 
+            // ⭐ 契约 §2 v-next：状态文字字号倍率（缺省不动现状 = 1.0）
+            PetSnapshot fsSnap = PetSnapshot.Parse(
+                "{\"rev\":8,\"label\":\"待机中\",\"settings\":{\"statusFontScale\":2.5}}");
+            bool fsParse = fsSnap != null && fsSnap.Settings != null &&
+                fsSnap.Settings.HasStatusFontScale &&
+                Math.Abs(fsSnap.Settings.StatusFontScale - 2.5) < 0.001;
+            Check(fsParse, "状态文字字号倍率：快照字段解析",
+                  fsParse ? "statusFontScale=2.5" : "解析结果不符");
+            // 越界要夹取（Host 也会夹，但 exe 是网络数据的第二道防线）
+            PetSnapshot clampSnap = PetSnapshot.Parse(
+                "{\"rev\":9,\"label\":\"待机中\",\"settings\":{\"statusFontScale\":99}}");
+            bool fsClamp = clampSnap != null && clampSnap.Settings != null &&
+                clampSnap.Settings.StatusFontScale <= 3.0;
+            Check(fsClamp, "状态文字字号倍率：越界值夹取",
+                  "99 → " + (clampSnap?.Settings?.StatusFontScale ?? -1).ToString("0.##"));
+            // 缺字段 → Has=false（exe 对该字段"不动现状"，旧 Host 快照零回归）
+            PetSnapshot missSnap = PetSnapshot.Parse("{\"rev\":10,\"label\":\"待机中\",\"settings\":{}}");
+            bool fsMissing = missSnap != null && missSnap.Settings != null &&
+                !missSnap.Settings.HasStatusFontScale;
+            Check(fsMissing, "状态文字字号倍率：缺字段不动现状（旧快照零回归）",
+                  fsMissing ? "Has=false" : "不该被置为 true");
+
             // ⭐ 显隐矩阵（与 overlay 逐条对齐；这是"两端表现一致"的唯一保证）
             PetStatusLabel lbl = new PetStatusLabel();
             lbl.DiagSetLabel("待机中", 1.0, false);
@@ -801,7 +823,80 @@ namespace DshZhuangFangyiPet
             Check(fontOk, "状态文字字号随缩放（0.5× 变小 / 2× 变大）",
                   f1.ToString("0.#") + " → " + f05.ToString("0.#") + " → " + f2.ToString("0.#"));
 
-            // ⭐ 定位：贴本体下方居中（主次与气泡相反）
+            // ⭐⭐ 框必须**贴合内容**（用户截图反馈："第一次启动的状态栏大小有问题"）。
+            //
+            // ⚠️ 用户补充的关键线索：**只有第一次启动（刚启动那一下）是这样**，之后正常。
+            // 所以这里必须模拟"**首次显示**"的时序，而不是先 Show 再量 ——
+            // 先 Show 会把首帧的问题掩盖掉（第一版就是这么写的，于是绿着、用户照样看到歪框）。
+            //
+            // 机制：`Update()` 先设文字、紧接着 `PlaceNearPet()` 读 `_chrome.DesiredSize`
+            // 来定位。**首帧那次布局还没发生**，DesiredSize 还是旧内容（空文字）的尺寸
+            // → 位置按错尺寸算一次。之后任何一次刷新（悬停/快照/缩放）都会重算，所以"过一会就好"。
+            // ⭐⭐ 框必须**贴合内容**（用户截图反馈："第一次启动的状态栏大小有问题"，
+            // 用户补充："只有在第一次启动就是刚启动的时候会这个样子"）。
+            //
+            // 尺寸链路（`DiagSizeChain`）能把问题定位到具体哪一环：
+            //   textDesired → chromeDesired → actual（SizeToContent 之后）
+            // 实测：内容 61.3x13.3 正确，但 actual 是 134.7x37.3 —— 窗口没跟着缩。
+            //
+            // ⚠️ 这条用**独立实例 + 独立 Pump**，且放在前面那个 `lbl` 关闭**之后**
+            //（两个 Topmost 状态窗同时存在会互相干扰测量）。
+            try { lbl.ForceClose(); } catch { }
+            Pump(150);
+            try
+            {
+                PetStatusLabel fresh = new PetStatusLabel();
+                fresh.Update("正在调用工具…", true, false, false, false, new[] { 100, 100, 200, 200 });
+                Pump(300);
+                double fitW, fitH, winW, winH;
+                fresh.DiagChromeSize(out fitW, out fitH);
+                fresh.DiagActualSize(out winW, out winH);
+                bool firstFit = winW > 0 && winH > 0 &&
+                                Math.Abs(winW - fitW) <= 1.0 && Math.Abs(winH - fitH) <= 1.0;
+                Check(firstFit, "⭐ 首次显示后框贴合内容（启动瞬间不再歪）",
+                      "内容 " + fitW.ToString("0.#") + "x" + fitH.ToString("0.#") +
+                      " vs 窗口 " + winW.ToString("0.#") + "x" + winH.ToString("0.#") +
+                      " ｜ " + fresh.DiagSizeChain());
+                try { fresh.ForceClose(); } catch { }
+            }
+            catch (Exception ex)
+            {
+                Check(false, "首帧状态栏尺寸自检", PetLog.Describe(ex));
+            }
+
+            // ⭐ 状态文字**独立字号倍率**（用户点名"我希望能够调整字的大小，
+            // 因为有的时候字太小了"）。
+            //
+            // 关键性质有两条，缺一不可：
+            //   ① 与 `scale` **相乘**，所以"桌宠小 + 字大"能共存
+            //      （用户就是把 scale 调到 0.4，字才小得看不清）；
+            //   ② 内边距必须跟**最终字号**成比例 —— 否则字调大后文字贴边。
+            //      这条踩过：内边距按 `scale` 单独算，字放 3× 时上下几乎没留白。
+            {
+                PetStatusLabel fsLabel = new PetStatusLabel();
+                fsLabel.DiagSetLabel("正在调用工具…", 0.4, false);   // 用户的实际 scale
+                double baseFont = fsLabel.DiagFontSize;
+                double basePad = fsLabel.DiagPaddingLeft;
+                fsLabel.SetFontScale(3.0);
+                double bigFont = fsLabel.DiagFontSize;
+                double bigPad = fsLabel.DiagPaddingLeft;
+                bool grew = bigFont > baseFont;
+                bool padGrew = bigPad > basePad;
+                // 倍率应真的生效：0.4×3.0 = 1.2 → 11×1.2 = 13.2
+                bool exact = Math.Abs(bigFont - 11 * 0.4 * 3.0) < 0.01;
+                Check(grew && padGrew && exact,
+                      "⭐ 状态文字字号可独立调大（且内边距同比放大，不贴边）",
+                      "0.4× 基准: 字 " + baseFont.ToString("0.#") + "/边距 " + basePad.ToString("0.#") +
+                      " → 字号 3×: 字 " + bigFont.ToString("0.#") + "/边距 " + bigPad.ToString("0.#") +
+                      "（期望字 " + (11 * 0.4 * 3.0).ToString("0.#") + "）");
+                // 下限保护：极端小也不该变成读不了的 1px
+                fsLabel.SetFontScale(0.5);
+                double tiny = fsLabel.DiagFontSize;
+                Check(tiny >= 8, "字号下限保护（再小也不低于 8px）",
+                      "0.4 × 0.5 → " + tiny.ToString("0.#") + "px（MinFontSize=8）");
+                try { fsLabel.ForceClose(); } catch { }
+            }
+
             lbl.DiagSetLabel("待机中", 1.0, false);
             double tx, ty; int tbw, tbh;
             lbl.DiagTargetFor(1000, 1000, 200, 200, out tx, out ty, out tbw, out tbh);

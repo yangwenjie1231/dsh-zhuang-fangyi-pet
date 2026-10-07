@@ -1570,6 +1570,60 @@ await ok('⭐ 快照 settings 块带 hint/statusAlways（原生窗状态显示�
   // label 是状态文字的**唯一来源**（已本地化），必须一并存在
   assert.equal(typeof snap.label, 'string', '快照应带 label（状态文字来源）')
 })
+
+await ok('⭐ 状态文字字号：设置 → 快照 → 边界夹取（用户要"调大一点"）', async () => {
+  // 用户点名："我希望能够调整字的大小，因为有的时候字太小了"。
+  // 关键：它必须**独立于** `scale`（桌宠大小）—— 用户把桌宠调到 0.4 是为了不占地，
+  // 而字是给人读的。所以这条既验"能传下去"，也验"与 scale 互不干扰"。
+  const before = JSON.parse((await get('/api/zhuang-fangyi/pet/settings')).body).settings
+
+  // ① 设一个明确的值 → 快照里必须是同一个数
+  await fetch(`${ROUTE}/settings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: { statusFontScale: 2.4 } })
+  })
+  let snap = JSON.parse((await get('/api/zhuang-fangyi/pet/state')).body)
+  assert.equal(snap.settings.statusFontScale, 2.4,
+    `快照应透传 statusFontScale，实际 ${snap.settings.statusFontScale}`)
+
+  // ② 与 scale 独立：改 scale 不该动它
+  await fetch(`${ROUTE}/settings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: { scale: 0.5 } })
+  })
+  snap = JSON.parse((await get('/api/zhuang-fangyi/pet/state')).body)
+  assert.equal(snap.settings.statusFontScale, 2.4,
+    '改桌宠大小不该影响文字字号（两者独立）')
+
+  // ③ 越界必须夹取（否则字会大到糊住桌面 / 小到读不出）
+  for (const [input, want] of [[99, 3], [0.01, 0.5]]) {
+    await fetch(`${ROUTE}/settings`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ settings: { statusFontScale: input } })
+    })
+    snap = JSON.parse((await get('/api/zhuang-fangyi/pet/state')).body)
+    assert.equal(snap.settings.statusFontScale, want,
+      `statusFontScale=${input} 应夹到 ${want}，实际 ${snap.settings.statusFontScale}`)
+  }
+
+  // ④ 旧设置文件缺这个字段 → 回落 1.0（不能变 NaN/undefined）
+  await fetch(`${ROUTE}/settings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: { statusFontScale: null } })
+  })
+  snap = JSON.parse((await get('/api/zhuang-fangyi/pet/state')).body)
+  assert.ok(Number.isFinite(snap.settings.statusFontScale) && snap.settings.statusFontScale > 0,
+    `缺字段时应回落一个有效倍率，实际 ${snap.settings.statusFontScale}`)
+
+  // 还原用户原值
+  await fetch(`${ROUTE}/settings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: {
+      statusFontScale: before.statusFontScale ?? 1,
+      scale: before.scale ?? 1
+    } })
+  })
+})
 await ok('⭐ GET /pet/gallery 返回全部表情（能主动看全，不再靠随机撒）', async () => {
   const r = await get('/api/zhuang-fangyi/pet/gallery')
   assert.equal(r.status, 200)

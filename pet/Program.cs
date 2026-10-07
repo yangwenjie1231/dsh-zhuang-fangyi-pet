@@ -234,6 +234,8 @@ namespace DshZhuangFangyiPet
         /// <summary>契约 §2 v6：状态文字常显 / 悬停显示（与 overlay 同语义）。</summary>
         private bool _statusAlways;
         private bool _hintOn;
+        /// <summary>状态文字字号倍率（1.0 = 基准）。用户点名"字太小了，想调大"。</summary>
+        private double _statusFontScale = 1.0;
         private string _doubleClick = "focus-dsh";     // 'focus-dsh' | 'emote' | 'none'
 
         // task-7：发消息（悬停 ✎ → 输入窗 → POST /pet/send）
@@ -669,6 +671,9 @@ namespace DshZhuangFangyiPet
             // 状态文字同理由首帧对齐（它同样吃 SetScale）；顺带刷一次显隐 ——
             // hint/statusAlways 也是"首帧就该生效"的设置。
             try { _status.SetScale(_win.Scale); } catch { }
+            // 字号倍率同理由首帧对齐（与 `scale` 同理：`ApplySettings` 的 diff 会把
+            // "启动时就已经等于快照值"的情况跳过，于是字号一直停在默认 1.0）。
+            try { _status.SetFontScale(_statusFontScale); } catch { }
             try { _pomo.SetScale(_win.Scale); } catch { }
             try { RefreshStatusLabel(); } catch { }
             try { RefreshPomodoro(); } catch { }
@@ -790,6 +795,15 @@ namespace DshZhuangFangyiPet
             {
                 PetLog.Info("settings: 状态显示 → hint=" + (_hintOn ? "1" : "0") +
                             " statusAlways=" + (_statusAlways ? "1" : "0"));
+                RefreshStatusLabel();
+            }
+            // 契约 §2 v-next：状态文字字号（用户点名"字太小了，想调大"）。
+            // 与 hint/statusAlways 一样走 diff —— 值没变不动，避免每帧重排。
+            if (st.HasStatusFontScale && Math.Abs(st.StatusFontScale - _statusFontScale) > 0.001)
+            {
+                _statusFontScale = st.StatusFontScale;
+                PetLog.Info("settings: 状态文字字号 → " + _statusFontScale.ToString("0.##") + "×");
+                try { _status.SetFontScale(_statusFontScale); } catch (Exception ex) { PetLog.Warn("状态字号应用失败: " + PetLog.Describe(ex)); }
                 RefreshStatusLabel();
             }
             // 契约 §2 v8：语音开关

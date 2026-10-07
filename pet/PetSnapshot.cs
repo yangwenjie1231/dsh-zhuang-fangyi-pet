@@ -64,6 +64,11 @@ namespace DshZhuangFangyiPet
         public bool HasVoice;        public bool Voice;
         /// <summary>契约 §2 v7：番茄钟倒计时是否常显。旧快照缺省 = false。</summary>
         public bool HasPomodoroCountdown; public bool PomodoroCountdown;
+        /// <summary>
+        /// 契约 §2 v-next：状态文字**字号倍率**（1.0 = 基准）。
+        /// 旧快照缺省 = 1.0（不动现状）。用户点名"字太小了，想调大"。
+        /// </summary>
+        public bool HasStatusFontScale; public double StatusFontScale;
 
         /// <summary>非法/缺省值一律回落 focus-dsh（task-6 验收点）。</summary>
         public static string NormalizeDoubleClick(string v)
@@ -369,6 +374,15 @@ namespace DshZhuangFangyiPet
                 {
                     si.HasPomodoroCountdown = true;
                     si.PomodoroCountdown = st.Bool("pomodoroCountdown", true);
+                }
+                // 契约 §2 v-next：状态文字字号倍率（缺省 1.0 = 不动现状）
+                if (st.Get("statusFontScale") != null && st.Get("statusFontScale").Kind == PetJson.JVal.TNum)
+                {
+                    double fs = st.Num("statusFontScale", 1.0);
+                    if (fs < 0.5) fs = 0.5;
+                    if (fs > 3.0) fs = 3.0;
+                    si.HasStatusFontScale = true;
+                    si.StatusFontScale = fs;
                 }
                 s.Settings = si;
             }
