@@ -585,6 +585,43 @@ window.__ModuleLoader__.load({
         // ── 语音（v3）───────────────────────────────────────────────────────
         // **默认关**：桌宠突然开口是强打扰，用户主动打开才生效。
         voice: false,
+        /**
+         * ⚠️ 以下 12 个字段曾经**整批缺席**，代价是设置页 7 个控件全是死的。
+         *
+         * 为什么缺席：`normalizePet` 是**白名单**（逐字段拷贝），而这份白名单
+         * 是手写的，语音那批字段加进来时只改了 Host 的 `src/settings.js`
+         *（那里有 `defaultSettings()`），忘了这里。于是：
+         *
+         *   ① `load()` 把宿主 JSON 喂进来 → 这些键被丢掉 → 界面显示错值
+         *      （实测：宿主 `speakReplies=true`，界面显示"关"）；
+         *   ② `updateSettings(patch)` 也是 `normalizePet({...state, ...patch})`
+         *      → 发出去的 POST body **根本不含这些键** → 宿主是**合并**语义
+         *      → 点了等于没点，且**不报错**。
+         *
+         * 为什么测试没抓到：`tools/test-pet-e2e.mjs` 直接 POST `/pet/settings`
+         * （绕过客户端归一化），所以宿主侧全绿；而客户端测试只验了
+         * 它自己认识的那些字段。**两个半边各自都"对"，接缝上全错。**
+         *
+         * 现在由 `test-pet-client.mjs` 的"字段集与宿主同口径"一节兜住：
+         * 它把宿主 `defaultSettings()` 的键逐个比对客户端归一化结果，
+         * 以后任何一边加字段而另一边忘了，测试立刻红。
+         */
+        // 长期记忆：自动提炼开关（跨会话共享）。
+        memoryAuto: true,
+        // ── 动态语音（TTS）──────────────────────────────────────────────────
+        speakReplies: false,
+        ttsUrl: 'http://127.0.0.1:8765',
+        speechMaxChars: 60,
+        ttsResident: false,
+        ttsIdleStopSec: 300,
+        /** '' = 用语音插件的默认值。 */
+        ttsIdleAction: '',
+        /** 机器相关路径：由插件 loader 配置管，这里只做透传与只读展示。 */
+        ttsPython: '',
+        ttsRepoDir: '',
+        ttsBackend: '',
+        ttsGsvRoot: '',
+        ttsModelDir: '',
         // ── 聊天与人设（v3）─────────────────────────────────────────────────
         persona: 'default',
         chatWorkspace: '',
@@ -612,7 +649,9 @@ window.__ModuleLoader__.load({
       for (const k of ['clickThrough', 'topmost', 'bubble', 'bubbleImages',
         'hint', 'statusAlways', 'notifyComplete', 'attentionReminder',
         'pomodoro', 'pomodoroAutoNext', 'pomodoroNotify', 'pomodoroCountdown',
-        'voice', 'chatEnabled']) {
+        'voice', 'chatEnabled',
+        // ⚠️ 这三个曾经漏在白名单外 —— 见上面 `memoryAuto` 的说明。
+        'memoryAuto', 'speakReplies', 'ttsResident']) {
         if (typeof input[k] === 'boolean') out[k] = input[k]
       }
       // 番茄钟时长：与 Host 的 settings.js **同范围**（三处口径必须一致：
@@ -630,6 +669,40 @@ window.__ModuleLoader__.load({
         const w = input.chatWorkspace.trim()
         if (w === '') out.chatWorkspace = ''
         else if (w.length <= 260) out.chatWorkspace = w
+      }
+      // ── 动态语音（TTS）的四个值字段 ──────────────────────────────────────
+      //
+      // ⚠️ 与上面那三个布尔同一个洞：它们曾经全部缺席，于是
+      // 「合成服务地址」「每次朗读字数上限」「空闲多少秒后释放」这三个输入框
+      // 改完**发不出去**（POST body 里没有这些键），而界面还显示"我改过了"。
+      //
+      // 校验口径**照抄 Host 的 `src/settings.js`**（同范围、同白名单）：
+      // 客户端归一化的产物会原样 POST 给宿主，若两边夹取范围不同，
+      // 就会出现"界面显示 500，宿主存成 300"这种界面骗人的情况。
+      if (typeof input.ttsUrl === 'string') {
+        const u = input.ttsUrl.trim()
+        // 只接受 http/https：它会被 fetch 直接使用，放开等于给了任意协议入口。
+        if (u === '') out.ttsUrl = ''
+        else if (u.length <= 300 && /^https?:\/\//i.test(u)) out.ttsUrl = u
+      }
+      if (Number.isFinite(input.speechMaxChars)) {
+        out.speechMaxChars = Math.min(300, Math.max(10, Math.round(input.speechMaxChars)))
+      }
+      if (Number.isFinite(input.ttsIdleStopSec)) {
+        out.ttsIdleStopSec = Math.min(86400, Math.max(0, Math.round(input.ttsIdleStopSec)))
+      }
+      // 释放方式：只认两个值 + 空串（= 用插件默认），与 Host 的 `TT_IDLE_ACTIONS` 同集。
+      if (input.ttsIdleAction === '' || input.ttsIdleAction === 'unload' || input.ttsIdleAction === 'stop') {
+        out.ttsIdleAction = input.ttsIdleAction
+      }
+      // 机器相关路径与后端：长度限住，后端只认三个值（与 Host 的 `TT_BACKENDS` 同集）。
+      // 这几个**不提供编辑控件**（归插件 loader 配置管），但必须能透传 ——
+      // 否则设置页 POST 完整对象时会把它们冲掉。
+      for (const key of ['ttsPython', 'ttsRepoDir', 'ttsGsvRoot', 'ttsModelDir']) {
+        if (typeof input[key] === 'string' && input[key].length <= 300) out[key] = input[key].trim()
+      }
+      if (input.ttsBackend === '' || input.ttsBackend === 'torch' || input.ttsBackend === 'onnx') {
+        out.ttsBackend = input.ttsBackend
       }
       if (Number.isFinite(input.x)) out.x = Math.round(input.x)
       if (Number.isFinite(input.y)) out.y = Math.round(input.y)
@@ -1180,17 +1253,27 @@ window.__ModuleLoader__.load({
       const { label, value, min, max, step, suffix, onChange, hint } = props
       return h('label', { className: 'zf-pet-row' }, [
         h('span', { key: 'l', className: 'zf-pet-row__label' }, label),
-        h('input', {
-          key: 'i',
-          type: 'range',
-          className: 'zf-pet-row__input',
-          min,
-          max,
-          step,
-          value,
-          onChange: e => onChange(Number(e.target.value))
-        }),
-        h('span', { key: 'v', className: 'zf-pet-row__value' }, `${value}${suffix ?? ''}`),
+        // ⭐ 滑杆与数值**必须包在同一个 flex 容器里**。
+        //
+        // 原先它们是行网格里两个平级的 `auto` 轨道项，于是被排到**两行**去
+        //（实测：标签 y=18、控件 y=18、数值 y=46 —— 数值掉到下一行，
+        // 行高 68px，而一个正常的行只要 34px）。用 headless Edge 量过
+        // 320/420/520/640/760/900 六种面板宽度，**全都换行** ——
+        // 所以这不是"窗口窄了"，是这个布局本身错了。
+        // 包起来之后数值稳定跟在滑杆右边，行高回到 38px。
+        h('div', { key: 'c', className: 'zf-pet-row__control' }, [
+          h('input', {
+            key: 'i',
+            type: 'range',
+            className: 'zf-pet-row__input',
+            min,
+            max,
+            step,
+            value,
+            onChange: e => onChange(Number(e.target.value))
+          }),
+          h('span', { key: 'v', className: 'zf-pet-row__value' }, `${value}${suffix ?? ''}`)
+        ]),
         hint === undefined ? null : h('span', { key: 'h', className: 'zf-pet-row__hint' }, hint)
       ])
     }
@@ -1272,13 +1355,39 @@ window.__ModuleLoader__.load({
       const [memoryNote, setMemoryNote] = useState(null)
       /** 记忆草稿用 ref：每敲一个字都变，不该触发整页重渲染。 */
       const memoryDraftRef = useRef('')
+      /**
+       * 记忆编辑框的重建计数器（`key` 的一部分）。
+       *
+       * 为什么需要它：那个 textarea 是**非受控**的，`defaultValue` 只在挂载时
+       * 生效一次。首帧 `memory` 还是 null（空串），加载回来之后若 key 不变，
+       * React 不会重建元素 → 用户看到**永远空白的框**，在里面打字再保存
+       * 就会把真实记忆覆盖掉（详见渲染处那段注释）。
+       */
+      const [memoryNonce, setMemoryNonce] = useState(0)
       /** 动态语音（TTS）状态与探测结果。 */
       const [speakStatus, setSpeakStatus] = useState(null)
       const [speakBusy, setSpeakBusy] = useState(false)
       const [speakNote, setSpeakNote] = useState(null)
       /** 草稿用 ref 而不是 state：它每敲一个字都变，不该触发重渲染。 */
       const chatDraftRef = useRef('')
-      const chatDraft = chatDraftRef.current
+      /**
+       * ⚠️ 这里曾经是 `const chatDraft = chatDraftRef.current`，而输入框的
+       * `onInput` 写的是 `chatDraft = e.target.value` —— **给 const 赋值**。
+       *
+       * 后果：用户每敲一个字都抛 `TypeError: Assignment to constant variable.`，
+       * 草稿 ref 永远是空串 → 「发一条」按钮点了直接 `return`（`text === ''`），
+       * **一句话也发不出去**，而且不报错、不给提示。
+       * 实测复现：调用该输入框的 `onInput` 必抛（探针见
+       * `.scratch/probe-chat-input-bug.mjs`）。
+       *
+       * 为什么测试没抓到：测试只检查"输入框在不在、placeholder 对不对"，
+       * 从没**调用过**它的 `onInput`。
+       *
+       * 修法：不再抄一份快照出来，`value` 直接用 ref（非受控 + 初始空串），
+       * 输入时写 ref。发完消息清空 ref 后，用 `draftNonce` 强制重建元素 ——
+       * 否则输入框里会留着已发出的文字。
+       */
+      const [draftNonce, setDraftNonce] = useState(0)
 
       /**
        * 番茄钟动作：POST /pet/pomodoro。
@@ -1418,6 +1527,9 @@ window.__ModuleLoader__.load({
         Promise.resolve(fn(text))
           .then(() => {
             chatDraftRef.current = ''
+            // 清空后必须**重建**输入框（它非受控，光改 ref 不会动 DOM）——
+            // 否则用户看到自己刚发出去的字还留在框里。
+            setDraftNonce(n => n + 1)
             setChatNote(t('chatSent'))
           })
           .catch(e => setChatNote(`发送失败：${e?.message ?? e}`))
@@ -1453,6 +1565,8 @@ window.__ModuleLoader__.load({
               setMemory(v)
               // 草稿只在**首次加载**时同步；之后用户可能正在编辑，别覆盖他的输入。
               if (memoryDraftRef.current === '') memoryDraftRef.current = v.text ?? ''
+              // ⭐ 必须让编辑框重建一次，否则屏幕上还是首帧那个空白框。
+              setMemoryNonce(n => n + 1)
             })
             .catch(() => {})
         }
@@ -1729,7 +1843,7 @@ window.__ModuleLoader__.load({
                 ]),
 
             // ── 动态语音（念出 AI 的回答，v3）────────────────────────────
-            h('h4', { key: 'speakTitle', className: 'zf-pet-settings__sub' }, t('speakTitle')),
+            h('h4', { key: 'speakTitle', className: 'zf-pet-settings__h' }, t('speakTitle')),
             h('p', { key: 'speakHint', className: 'zf-pet-settings__note' }, t('speakHint')),
             h(Toggle, {
               key: 'speakReplies',
@@ -1965,7 +2079,7 @@ window.__ModuleLoader__.load({
             //
             // 用户点名："基于通用的世界观提示词加上不同的语言风格"、"可以在设置中共享"。
             // 所以把"底座"显式列出来 —— 用户才知道世界观写在哪儿、改哪里。
-            h('h4', { key: 'sharedTitle', className: 'zf-pet-settings__sub' }, t('sharedTitle')),
+            h('h4', { key: 'sharedTitle', className: 'zf-pet-settings__h' }, t('sharedTitle')),
             h('p', { key: 'sharedHint', className: 'zf-pet-settings__note' }, t('sharedHint')),
             (personas?.shared?.items?.length ?? 0) === 0
               ? h('p', { key: 'sharedEmpty', className: 'zf-pet-settings__note' }, t('sharedEmpty'))
@@ -1979,7 +2093,7 @@ window.__ModuleLoader__.load({
                   `${t('sharedUsed')} ${personas?.shared?.used ?? 0} ${t('sharedFiles')}`),
 
             // ── 长期记忆（跨会话共享）──────────────────────────────────────
-            h('h4', { key: 'memTitle', className: 'zf-pet-settings__sub' }, t('memoryTitle')),
+            h('h4', { key: 'memTitle', className: 'zf-pet-settings__h' }, t('memoryTitle')),
             h('p', { key: 'memHint', className: 'zf-pet-settings__note' }, t('memoryHint')),
             h(Toggle, {
               key: 'memoryAuto',
@@ -1989,14 +2103,26 @@ window.__ModuleLoader__.load({
               onChange: v => set({ memoryAuto: v })
             }),
             h('textarea', {
-              key: 'memBox',
+              key: `memBox-${memoryNonce}`,
               className: 'zf-pet-memobox',
               placeholder: t('memoryEmpty'),
               spellCheck: false,
               // **非受控**（defaultValue + onInput）：受控 textarea 每敲一个字都会
               // 重渲染整个设置页（人设/语音/聊天都在同一棵树里），打字会卡。
-              // `key` 带上字节数 → 外部改了记忆（比如自动提炼追加）时会重建元素，
-              // 用户能看到新内容；但他正在打字时不会被打断（草稿在 ref 里）。
+              //
+              // ⚠️ `key` 里必须带 `memoryNonce`。原先 `key` 是写死的 `'memBox'`，
+              // 而注释却声称"key 带上字节数" —— 注释与代码不一致，代价是**数据丢失**：
+              //
+              //   ① 首帧渲染时 `memory` 还是 null → `defaultValue` 是空串；
+              //   ② 挂载后 `loadMemory()` 回来，`memory` 有内容了，但 **key 没变**，
+              //      React 不会重建元素 → 屏幕上仍是**空白框**（实测确认）；
+              //   ③ 用户在空白框里敲一个字再点「保存记忆」→ 发出的是
+              //      `{"text":"那一个字"}`，**把真实记忆整个覆盖掉**。
+              //
+              // 现在 `memoryNonce` 只在两个安全时机自增：首次加载完成、保存成功。
+              // 这两处重建都是**对的**（前者让内容可见，后者清掉已保存的草稿），
+              // 且都不会打断用户正在进行的输入 —— 加载只发生一次（挂载时），
+              // 保存则是用户自己按的。
               defaultValue: memory?.text ?? '',
               onInput: e => { memoryDraftRef.current = e.target.value }
             }),
@@ -2026,13 +2152,17 @@ window.__ModuleLoader__.load({
             ]),
             h('div', { key: 'chatRow', className: 'zf-pet-chatrow' }, [
               h('input', {
-                key: 'msg',
+                // ⚠️ `key` 带 `draftNonce`：发完消息后 ref 被清空，但输入框是
+                // **非受控**的，不重建元素的话已发出的文字会留在框里。
+                // 见 `chatDraftRef` 上面那段注释（这里原来还有个给 const
+                // 赋值的 bug，导致一个字都发不出去）。
+                key: `msg-${draftNonce}`,
                 className: 'zf-pet-chatrow__input',
                 type: 'text',
-                value: chatDraft,
+                defaultValue: '',
                 placeholder: t('chatPlaceholder'),
                 disabled: chatBusy,
-                onInput: e => { chatDraft = e.target.value },
+                onInput: e => { chatDraftRef.current = e.target.value },
                 onKeyDown: e => {
                   if (e.key === 'Enter' && !chatBusy) sendChatMessage()
                 }
@@ -2358,24 +2488,58 @@ window.__ModuleLoader__.load({
   .zf-pet__bubble{ animation:none; }
 }
 
-/* ── 设置页 ─────────────────────────────────────────────────────────── */
-.zf-pet-settings{ display:flex;flex-direction:column;gap:9px; }
+/* ── 设置页 ───────────────────────────────────────────────────────────
+ *
+ * 这一块是**为"看得懂"服务的**，不是装饰。改之前的状态（用 headless Edge
+ * 实测真实渲染树得到，见 '.scratch/probe-settings-fullpage.mjs'）：
+ *
+ *   · 总高 **2696px**（面板宽 520）—— 要滚很久才到底；
+ *   · 42 个控件 + 10 个按钮 + 8 条说明**同一列平铺**，没有任何层级；
+ *   · 每个滑杆行高 **68px**（数值被挤到第二行），而正常行只要 34px；
+ *   · 分组标题用 'text-transform:uppercase' + 'letter-spacing:.12em' ——
+ *     那是给西文小标题用的，套在中文上只会把字**拉散**；
+ *   · 控件右边缘不齐（下拉/输入框各自为政），眼睛没法沿一条线扫下来。
+ *
+ * 下面逐条对上。判定标准只有一条：**用户能不能一眼找到"我该动哪个"**。
+ * ──────────────────────────────────────────────────────────────────── */
+.zf-pet-settings{ display:flex;flex-direction:column;gap:4px; }
+/* 页面副标题（唯一一处）：说明这个插件是什么。 */
 .zf-pet-settings__sub{ margin:0 0 4px;color:var(--dsw-alias-label-tertiary);font-size:12px; }
+
+/* 组内小标题（「念出回答（动态语音）」「共享背景」「长期记忆」）。
+ *
+ * ⚠️ 它原先与页面副标题**共用** '.zf-pet-settings__sub'（12px 三级色）——
+ * 于是"这一段换主题了"和"这一页是干嘛的"长得一模一样，层级完全消失。
+ * 一个分组里塞 4 件事（聊天组实测 616px 高）时，用户看不出哪里是分界。
+ * 现在它有自己的类：更黑、更粗、带一点上间距，读起来就是"新的一段开始了"。 */
+.zf-pet-settings__h{
+  margin:14px 0 2px;font-size:12px;font-weight:600;
+  color:var(--dsw-alias-label-secondary);
+}
+
+/* 分组标题。
+ * ⚠️ 去掉 'text-transform:uppercase' 与 '.12em' 字距：中文没有大小写，
+ * uppercase 是空操作，而 0.12em 字距在中文里只是把「作息与外观」拉成
+ * 「作 息 与 外 观」—— 更难读。改成靠**字重 + 分隔线**建立层级。 */
 .zf-pet-settings__group{
-  margin:12px 0 2px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;
-  color:var(--dsw-alias-label-tertiary);font-weight:600;
+  margin:16px 0 2px;font-size:13px;font-weight:600;
+  letter-spacing:0;text-transform:none;
+  color:var(--dsw-alias-label-primary);
+  padding-bottom:5px;
+  border-bottom:1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.1));
 }
 
 /* 分组：把"设置控件"和"状态/诊断"分开。
-   原先所有东西平铺在同一列（8 个 h3 + 24 条同权重说明），视觉上没有层级，
-   用户找不到"我该动哪个"。分组给控件一个容器，折叠组给次要内容一个默认收起。 */
-.zf-pet-group{ display:flex;flex-direction:column;gap:7px; }
-.zf-pet-group__body{ display:flex;flex-direction:column;gap:7px; }
-.zf-pet-group--fold{ gap:5px; }
+   分组给控件一个容器，折叠组给次要内容一个默认收起。 */
+.zf-pet-group{ display:flex;flex-direction:column;gap:0; }
+.zf-pet-group__body{ display:flex;flex-direction:column;gap:0; }
+.zf-pet-group--fold{ gap:0; }
 .zf-pet-group__sum{
-  cursor:pointer;font-size:11px;letter-spacing:.12em;text-transform:uppercase;
-  color:var(--dsw-alias-label-tertiary);font-weight:600;
-  margin:12px 0 2px;list-style:none;
+  cursor:pointer;font-size:13px;letter-spacing:0;text-transform:none;
+  color:var(--dsw-alias-label-primary);font-weight:600;
+  margin:14px 0 2px;list-style:none;
+  padding-bottom:5px;
+  border-bottom:1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.1));
 }
 .zf-pet-group__sum::-webkit-details-marker{ display:none; }
 /* 自绘折叠箭头：不依赖原生 marker（各浏览器样式不一） */
@@ -2391,23 +2555,73 @@ window.__ModuleLoader__.load({
 .zf-pet-diag__v{ word-break:break-all; }
 .zf-pet-diag__v--mono{ font-family:Consolas,"Cascadia Mono",monospace; }
 
+/* ── 一行设置 ─────────────────────────────────────────────────────────
+ *
+ * 两列：标签自适应、**控件列定宽 208px**。定宽是"对齐"的前提 ——
+ * 原先用 'auto'，于是每个控件的右边缘取决于它自己的宽度，
+ * 一眼扫下去是锯齿状的。
+ *
+ * 行之间加发丝分隔线（'.5px'，与外壳 settings-form 同款），
+ * 让"这是一行"在视觉上成立 —— 原先 7 个控件堆在一起没有任何边界。
+ * ──────────────────────────────────────────────────────────────────── */
 .zf-pet-row{
-  display:grid;grid-template-columns:minmax(120px,1fr) auto;align-items:center;gap:10px;
+  display:grid;grid-template-columns:minmax(110px,1fr) 208px;
+  align-items:center;gap:2px 12px;
+  padding:6px 0;
   font-size:13px;color:var(--dsw-alias-label-primary);
 }
+.zf-pet-row + .zf-pet-row{ border-top:.5px solid var(--dsw-alias-border-l1, rgba(0,0,0,.05)); }
 .zf-pet-row__label{ min-width:0; }
-.zf-pet-row__input{ accent-color:var(--dsw-alias-brand-primary); }
-.zf-pet-row__value{
-  font-family:Consolas,"Cascadia Mono",monospace;font-size:12px;
-  color:var(--dsw-alias-brand-primary);min-width:52px;text-align:right;
+
+/* 控件容器：滑杆 + 数值**同一行**（见 'Slider' 的注释：原先数值被挤到第二行）。 */
+.zf-pet-row__control{ display:flex;align-items:center;gap:10px;min-width:0;justify-self:stretch; }
+
+.zf-pet-row__input{ accent-color:var(--dsw-alias-brand-primary);min-width:0; }
+input[type=range].zf-pet-row__input{ flex:1 1 auto; }
+/* 复选框：贴控件列右边缘，与下拉/输入框的右边缘对齐。 */
+input[type=checkbox].zf-pet-row__input{
+  flex:0 0 auto;width:16px;height:16px;margin:0;justify-self:end;
 }
+
+/* 下拉 / 文本框 / 数字框统一成一种外观。
+ *
+ * ⚠️ 这里必须同时收 'zf-pet-settings__input' —— 语音组那 4 个控件用的是
+ * 那个类名，而它**从来没有被定义过**（只有 4 处引用，CSS 里 0 处规则）。
+ * 于是「合成服务地址」等输入框是**浏览器裸样式**：高度、边框、圆角、
+ * 背景全都和旁边的下拉框不一致 —— 这正是"看起来很乱"的一大来源。
+ * 现在两个类名共用同一组规则，不再有两套外观。 */
+select.zf-pet-row__input,
+input[type=text].zf-pet-row__input,
+input[type=number].zf-pet-row__input,
+.zf-pet-settings__input{
+  width:100%;height:30px;box-sizing:border-box;
+  padding:0 8px;border-radius:6px;
+  border:1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.14));
+  background:var(--dsw-alias-bg-layer-1, #fff);
+  color:inherit;font:inherit;font-size:13px;
+}
+select.zf-pet-row__input:focus-visible,
+input[type=text].zf-pet-row__input:focus-visible,
+input[type=number].zf-pet-row__input:focus-visible,
+.zf-pet-settings__input:focus-visible{
+  outline:none;border-color:var(--dsw-alias-brand-primary);
+}
+
+/* 数值：等宽 + 固定最小宽度（右对齐），数字变化时滑杆不会左右抖。 */
+.zf-pet-row__value{
+  flex:0 0 auto;min-width:44px;text-align:right;
+  font-family:Consolas,"Cascadia Mono",monospace;font-size:12px;
+  color:var(--dsw-alias-brand-primary);
+}
+/* 说明文字：整行通栏，跟在控件下面。 */
 .zf-pet-row__hint{
-  grid-column:1/-1;font-size:11px;color:var(--dsw-alias-label-tertiary);
+  grid-column:1/-1;font-size:11px;line-height:1.5;
+  color:var(--dsw-alias-label-tertiary);
 }
 .zf-pet-status{ display:flex;align-items:center;gap:7px;font-size:12px; }
 .zf-pet-status__dot{ width:8px;height:8px;border-radius:50%;flex:0 0 auto;background:#c9a227; }
 .zf-pet-status__dot[data-zf-native="on"]{ background:var(--dsw-alias-state-success-primary,#2ea043); }
-.zf-pet-settings__note{ margin:2px 0 0;font-size:11px;color:var(--dsw-alias-label-tertiary); }
+.zf-pet-settings__note{ margin:2px 0 0;font-size:11px;line-height:1.5;color:var(--dsw-alias-label-tertiary); }
 .zf-pet-settings__btn{
   align-self:flex-start;margin-top:6px;padding:6px 12px;border-radius:8px;
   border:1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.14));

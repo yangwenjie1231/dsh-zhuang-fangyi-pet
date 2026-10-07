@@ -22,6 +22,10 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+// 宿主的设置模型：第 5b 节用它做**字段集与默认值的同口径比对**。
+// 直接 import 真文件（不是抄一份常量）—— 抄一份就又会分叉。
+import { defaultSettings, normalizeSettings } from '../src/settings.js'
+
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const CLIENT = path.join(HERE, '..', 'client.js')
 
@@ -40,6 +44,35 @@ function ok (label, fn) {
   } catch (error) {
     failed += 1
     console.log(`  ✗ ${label}\n      ${error?.message ?? error}`)
+  }
+}
+
+/**
+ * 异步断言（需要 `await` 的用例）。
+ *
+ * ⚠️ 为什么要单独一个函数：`ok()` 是**同步**的，它的 `try/catch` 接不住
+ * 一个 async 函数里抛出的错 —— 那种错误会变成 **unhandled rejection**，
+ * 表现为整个测试进程**直接崩掉**（退出码 1、后面的用例一条都不跑），
+ * 而不是干净地记一条 ✗。实测踩过：回滚验证时它把测试进程整个打断了。
+ *
+ * 用法：注册进来，文件末尾在汇总前统一 `await` 跑完。
+ */
+const asyncCases = []
+function okAsync (label, fn) {
+  asyncCases.push({ label, fn })
+}
+
+/** 跑完所有异步用例（在打印汇总之前调用）。 */
+async function runAsyncCases () {
+  for (const { label, fn } of asyncCases) {
+    try {
+      await fn()
+      passed += 1
+      console.log(`  ✓ ${label}`)
+    } catch (error) {
+      failed += 1
+      console.log(`  ✗ ${label}\n      ${error?.message ?? error}`)
+    }
   }
 }
 
@@ -542,6 +575,335 @@ ok('时长被夹到合理范围', () => {
 ok('非法 locale 回落到 zh', () => {
   assert.equal(normalizePet({ locale: 'fr' }).locale, 'zh')
   assert.equal(normalizePet({ locale: 'en' }).locale, 'en')
+})
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * 5b. 客户端字段集必须与宿主同口径（**接缝测试**）
+ *
+ * 这一节是为了一个**真机上存在了很久、却没有任何测试能发现**的 bug：
+ *
+ *   `normalizePet` 是**白名单**（逐字段拷贝），而这份白名单是手写的。
+ *   语音那批字段（speakReplies/ttsUrl/speechMaxChars/ttsResident/
+ *   ttsIdleStopSec/ttsIdleAction/memoryAuto + 5 个机器路径）加进来时只改了
+ *   Host 的 `src/settings.js`，忘了客户端。后果是**设置页 7 个控件全是死的**：
+ *
+ *     · `load()` 喂进来的 JSON 里这些键被丢掉 → 界面显示错值
+ *       （实测：宿主 `speakReplies=true`，界面显示"关"）；
+ *     · `updateSettings()` 走同一个归一化 → POST body 里**没有这些键**
+ *       → 宿主是**合并**语义 → 点了等于没点，**而且不报错**。
+ *
+ * 为什么原有测试全绿：`test-pet-e2e.mjs` 直接 POST `/pet/settings`，
+ * **绕过了客户端的归一化**，所以宿主侧一切正常；而客户端测试只验了
+ * 它自己认识的那些字段。两个半边各自都"对"，接缝上全错。
+ *
+ * 所以这一节**直接 import 宿主的 `defaultSettings()`** 逐键比对 ——
+ * 以后任何一边加字段而另一边忘了，测试立刻红。
+ * ═════════════════════════════════════════════════════════════════════════ */
+section('5b. 客户端字段集与宿主同口径（防"设置页点了没反应"）')
+
+ok('⭐⭐ 宿主 defaultSettings() 的每个字段，客户端归一化后都必须在', () => {
+  const host = defaultSettings()
+  const client = normalizePet(host)
+  // `version` 是宿主自己维护的结构版本号，客户端**有意**不持有它
+  //（它不参与任何界面逻辑，透传反而会在 POST 时写回一个旧值）。
+  const INTENTIONAL = new Set(['version'])
+  const missing = Object.keys(host).filter(k => !INTENTIONAL.has(k) && !(k in client))
+  assert.deepEqual(missing, [],
+    `这些字段宿主有、客户端没有 → 界面上对应的控件会是死的（读不到值、改了发不出去）：${missing.join(', ')}`)
+})
+
+ok('⭐⭐ 每个字段的默认值与宿主一致（同名字段不许有两套默认值）', () => {
+  const host = defaultSettings()
+  const client = normalizePet(host)
+  const diff = []
+  for (const k of Object.keys(host)) {
+    if (k === 'version') continue
+    if (JSON.stringify(host[k]) !== JSON.stringify(client[k])) {
+      diff.push(`${k}: 宿主 ${JSON.stringify(host[k])} vs 客户端 ${JSON.stringify(client[k])}`)
+    }
+  }
+  assert.deepEqual(diff, [], `默认值分叉会让"没设置过"和"设成默认值"表现不同：\n      ${diff.join('\n      ')}`)
+})
+
+ok('⭐⭐ 往返不丢字段：宿主设置 → 客户端归一化 → 回送宿主', () => {
+  // 造一份"每个字段都不是默认值"的设置 —— 默认值相同的字段发现不了丢失。
+  const host = normalizeSettings({
+    enabled: false, mode: 'overlay', scale: 1.7, opacity: 0.6,
+    clickThrough: true, topmost: false, bubble: false, bubbleImages: false,
+    happyMs: 4321, sleepMs: 123456, bubbleMs: 7777, bubbleGapMs: 1234,
+    doubleClick: 'emote', theme: 'dark', activity: 'playful',
+    hint: false, statusAlways: true, statusFontScale: 2.2, chatFontScale: 1.7,
+    notifyComplete: false, attentionReminder: false,
+    pomodoro: true, pomodoroFocusMs: 90 * 60000, pomodoroBreakMs: 11 * 60000,
+    pomodoroLongBreakMs: 44 * 60000, pomodoroRounds: 7,
+    pomodoroAutoNext: false, pomodoroNotify: false, pomodoroCountdown: false,
+    voice: true, persona: '严谨', chatWorkspace: 'D:\\ws', chatEnabled: false,
+    memoryAuto: false, speakReplies: true, ttsUrl: 'http://127.0.0.1:9999',
+    speechMaxChars: 111, ttsResident: true, ttsIdleStopSec: 77, ttsIdleAction: 'unload',
+    ttsPython: 'D:\\py\\python.exe', ttsRepoDir: 'D:\\repo', ttsBackend: 'torch',
+    ttsGsvRoot: 'D:\\gsv', ttsModelDir: 'D:\\models'
+  })
+  const roundTrip = normalizeSettings(normalizePet(host))
+  const lost = Object.keys(host).filter(k => k !== 'version' &&
+    JSON.stringify(roundTrip[k]) !== JSON.stringify(host[k]))
+  assert.deepEqual(lost, [],
+    `往返后这些字段变了 —— 用户在设置页改完、宿主存下去，值会跟界面显示的**不是一回事**：${lost.join(', ')}`)
+})
+
+ok('⭐⭐ POST 出去的 body 里必须带全字段（合并语义下缺键 = 用户白点）', () => {
+  // 这是上一条的**行为级**版本：不比对字段名，而是真的走一遍
+  // "读进来 → 改一个 → 发出去"，看 POST body 里有没有那个键。
+  // 宿主 `settings.update()` 是**合并**语义，缺键不只"没改"，而是"完全没反应"。
+  const l = loadClient()
+  l.exports.apply(l.ctx)
+  const { Section, runtime } = l.exports.__test
+  // 宿主真实设置（每个字段都不是默认值）
+  runtime.__state.settings = normalizePet({
+    speakReplies: true, ttsResident: false, memoryAuto: true,
+    ttsUrl: 'http://127.0.0.1:8765', speechMaxChars: 60,
+    ttsIdleStopSec: 300, ttsIdleAction: ''
+  })
+  runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 1 } } }
+  runtime.__state.snapshot = { petState: 'idle', label: '', bubble: null, nativeAvailable: true }
+  l.react.resetHooks()
+  const tree = Section({ close () {} })
+
+  const toggles = collectByType(tree, 'Toggle').map(n => n.props)
+  const find = label => toggles.find(x => x.label === label)
+
+  // 每个受影响的控件都真的点一下，检查 POST body。
+  // 注意 `runtime.updateSettings` 是**异步**的（内部 fetch），但 `set()` 会
+  // **同步**先 `emit({settings})` 再发请求 —— 而请求体的构造也在同步段里，
+  // 所以这里同步读完 fetch 记录即可（`loadClient` 的 fetch 桩同步入栈）。
+  const cases = [
+    ['把 AI 的回答念出来', 'speakReplies'],
+    ['让语音模型常驻', 'ttsResident'],
+    ['自动记住值得长期保留的事', 'memoryAuto']
+  ]
+  for (const [label, key] of cases) {
+    const c = find(label)
+    assert.ok(c, `找不到「${label}」开关`)
+    l.calls.fetches.length = 0
+    c.onChange(!c.value)
+    const post = l.calls.fetches.find(f => f.init?.method === 'POST')
+    assert.ok(post, `点「${label}」应发出 POST`)
+    const body = JSON.parse(post.init.body)
+    assert.ok(Object.prototype.hasOwnProperty.call(body.settings, key),
+      `POST body 里没有 ${key} —— 宿主是合并语义，缺键等于这次点击**完全没生效**，` +
+      '而且界面上不会有任何提示（这是"设置页点了没反应"的根因）')
+  }
+})
+
+ok('⭐ 语音的四个值字段也能被客户端归一化（不再静默丢弃）', () => {
+  const n = normalizePet({
+    ttsUrl: 'http://127.0.0.1:9000', speechMaxChars: 120,
+    ttsIdleStopSec: 60, ttsIdleAction: 'unload'
+  })
+  assert.equal(n.ttsUrl, 'http://127.0.0.1:9000')
+  assert.equal(n.speechMaxChars, 120)
+  assert.equal(n.ttsIdleStopSec, 60)
+  assert.equal(n.ttsIdleAction, 'unload')
+  // 校验口径与宿主同集（否则界面显示的值和宿主存的值会分叉）
+  assert.equal(normalizePet({ ttsUrl: 'file:///etc/passwd' }).ttsUrl, 'http://127.0.0.1:8765',
+    '非 http(s) 协议必须回落（这个值会被 fetch 直接用）')
+  assert.equal(normalizePet({ speechMaxChars: 9999 }).speechMaxChars, 300, '上限 300')
+  assert.equal(normalizePet({ speechMaxChars: 1 }).speechMaxChars, 10, '下限 10')
+  assert.equal(normalizePet({ ttsIdleStopSec: -5 }).ttsIdleStopSec, 0, '下限 0')
+  assert.equal(normalizePet({ ttsIdleStopSec: 1e9 }).ttsIdleStopSec, 86400, '上限一天')
+  assert.equal(normalizePet({ ttsIdleAction: 'hack' }).ttsIdleAction, '', '非法值回落空串')
+  assert.equal(normalizePet({ ttsBackend: 'hack' }).ttsBackend, '', '非法后端回落')
+})
+
+ok('⭐ 机器路径字段能透传（否则 POST 完整对象时会被冲掉）', () => {
+  const n = normalizePet({
+    ttsPython: 'D:\\py\\python.exe', ttsRepoDir: 'D:\\repo',
+    ttsBackend: 'torch', ttsGsvRoot: 'D:\\gsv', ttsModelDir: 'D:\\models'
+  })
+  assert.equal(n.ttsPython, 'D:\\py\\python.exe')
+  assert.equal(n.ttsRepoDir, 'D:\\repo')
+  assert.equal(n.ttsBackend, 'torch')
+  assert.equal(n.ttsGsvRoot, 'D:\\gsv')
+  assert.equal(n.ttsModelDir, 'D:\\models')
+})
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * 5c. 输入框的 onInput 必须真的收下内容
+ * ═════════════════════════════════════════════════════════════════════════ */
+
+ok('⭐⭐ 聊天输入框的 onInput 不抛错，且草稿真的存下来（否则一个字都发不出去）', () => {
+  // 真机上这里曾经是 `const chatDraft = chatDraftRef.current` +
+  // `onInput: e => { chatDraft = e.target.value }` —— **给 const 赋值**。
+  // 用户每敲一个字抛 TypeError，草稿永远是空串 →「发一条」直接被
+  // `text === ''` 的守卫 return 掉，一句话也发不出去，还不报错。
+  // 测试从没抓到，因为只验了"输入框在不在"，从没**调用过** onInput。
+  const l = loadClient()
+  l.exports.apply(l.ctx)
+  const { Section, runtime } = l.exports.__test
+  runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 1 } } }
+  runtime.__state.snapshot = { petState: 'idle', label: '', bubble: null, nativeAvailable: true }
+  runtime.__state.settings = normalizePet({})
+  l.react.resetHooks()
+  const tree = Section({ close () {} })
+
+  const inputs = collectByType(tree, 'input').map(n => n.props)
+  const chatInput = inputs.find(p => String(p.className).includes('zf-pet-chatrow__input'))
+  assert.ok(chatInput, '应有聊天输入框')
+  assert.doesNotThrow(() => chatInput.onInput({ target: { value: '你好呀' } }),
+    'onInput 抛错 = 用户打的字被吞掉（真机上这里抛的是 Assignment to constant variable）')
+
+  // 草稿必须真的进了 ref —— 这才是「发一条」能读到的东西。
+  const draft = l.react.hooks.refs.find(r => r && r.current === '你好呀')
+  assert.ok(draft, '输入的内容必须存进草稿 ref（否则发送时 text 是空串，直接 return）')
+})
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * 5d. 记忆编辑框：加载后必须可见，且不许覆盖真实记忆
+ * ═════════════════════════════════════════════════════════════════════════ */
+
+okAsync('⭐⭐⭐ 记忆加载完成后编辑框会重建（否则是空白框，保存会覆盖掉真实记忆）', async () => {
+  // 真机行为：textarea 是**非受控**的（defaultValue 只在挂载时生效）。
+  // 首帧 `memory` 还是 null → defaultValue 是空串；加载回来后若 `key` 不变，
+  // React 不重建元素 → 屏幕上**永远是空白框**。
+  // 用户在空白框里敲一个字再点「保存记忆」，就会把真实记忆整个覆盖成那个字。
+  // 实测过（`.scratch/probe-memory-box.mjs`）。
+  const l = loadClient({
+    fetchImpl: async url => {
+      if (String(url).endsWith('/memory')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ text: '用户叫 A，在做仿通行证项目。', file: 'm.md', bytes: 24, capBytes: 4096 }),
+          text: async () => ''
+        }
+      }
+      return { ok: true, status: 200, json: async () => ({}), text: async () => '' }
+    }
+  })
+  l.exports.apply(l.ctx)
+  const { Section, runtime } = l.exports.__test
+  runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 1 } } }
+  runtime.__state.snapshot = { petState: 'idle', label: '', bubble: null, nativeAvailable: true }
+  l.react.resetHooks()
+
+  // ① 首帧：memory 还是 null
+  const first = Section({ close () {} })
+  const box1 = collectByType(first, 'textarea')[0]
+  assert.ok(box1, '应有记忆编辑框')
+  assert.equal(box1.props.defaultValue, '', '首帧还没有记忆，空串是对的')
+
+  // ② 跑挂载 effect（拉 /memory），然后重渲染 —— 模拟外壳的行为
+  for (const fn of l.react.hooks.effects) {
+    if (typeof fn === 'function') { try { fn() } catch { /* 忽略 */ } }
+  }
+  await new Promise(r => setTimeout(r, 30))
+
+  // ③ 重渲染：key 必须变了（React 靠它重建元素）
+  l.react.resetHooks()
+  const second = Section({ close () {} })
+  const box2 = collectByType(second, 'textarea')[0]
+  assert.notEqual(box2.props.key, box1.props.key,
+    '加载完记忆后 key 必须变 —— 否则 React 不重建这个非受控 textarea，' +
+    '用户看到的是一个空白框，在里面打字保存就会把真实记忆覆盖掉')
+  assert.equal(box2.props.defaultValue, '用户叫 A，在做仿通行证项目。',
+    '重建后编辑框里应该能看到真实记忆')
+
+  // ④ 再渲染一次（普通重渲染，比如改别的设置）：key 不该再变，
+  //    否则会打断用户正在进行的输入。
+  l.react.resetHooks()
+  const third = Section({ close () {} })
+  const box3 = collectByType(third, 'textarea')[0]
+  assert.equal(box3.props.key, box2.props.key,
+    '普通重渲染不能重建编辑框（会清掉用户正在打的字）')
+})
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * 5e. 设置页的结构与样式（"界面很混乱"的可回归化部分）
+ * ═════════════════════════════════════════════════════════════════════════ */
+
+ok('⭐⭐ 每个用到的 zf-* 类名都必须在 CSS 里有规则（防"裸样式"控件）', () => {
+  // 真机上真实存在的问题：语音组那 4 个控件用的是
+  // `zf-pet-settings__input`，而这个类名**只有引用、没有任何 CSS 规则** ——
+  // 于是「合成服务地址」等输入框是浏览器裸样式：高度/边框/圆角/背景
+  // 与旁边的下拉框完全不一致，这是"看起来很乱"的一大来源。
+  // 这类问题没有任何断言会红（样式缺失不报错，只是难看）。
+  const src = fs.readFileSync(CLIENT, 'utf8')
+  const css = loaded.exports.__test.styleText()
+  // ① 渲染代码里用到的类名。**只认 `className:` 那一行** ——
+  //    早先我用"所有 'zf-xxx' 字符串字面量"来收集，结果把
+  //    `el.id = 'zf-pet-style'` 这类 **DOM id** 也算了进来
+  //    （id 不需要 CSS 规则，`#zf-pet-style` 本来就不存在）。
+  //    检查器本身错了会报假红，比不检查更糟。
+  const used = new Set()
+  for (const m of src.matchAll(/className:\s*'([^']+)'/g)) {
+    for (const cls of m[1].split(/\s+/)) if (cls.startsWith('zf-')) used.add(cls)
+  }
+  // ② 三元/拼接写出来的修饰类（`className: 'a' + (x ? ' b' : '')`）。
+  //    只取**明确以修饰符形态出现**的：以 `--` 开头的类名。
+  for (const m of src.matchAll(/'(\s+zf-[a-zA-Z0-9_-]+)'/g)) {
+    for (const cls of m[1].trim().split(/\s+/)) used.add(cls)
+  }
+  // ③ CSS 里定义了的类名
+  const defined = new Set([...css.matchAll(/\.(zf-[a-zA-Z0-9_-]+)/g)].map(m => m[1]))
+
+  const missing = [...used].filter(c => !defined.has(c)).sort()
+  assert.deepEqual(missing, [],
+    `这些类名被用在渲染里、但 CSS 里没有规则 → 控件会是浏览器裸样式（难看且不一致）：${missing.join(', ')}`)
+})
+
+ok('⭐ 滑杆的数值与滑杆必须在同一个容器里（否则数值被挤到第二行）', () => {
+  // 真机实测（headless Edge 量 getBoundingClientRect，见
+  // `.scratch/probe-slider-wrap.mjs`）：原先 Slider 的 range 与 __value
+  // 是行网格里两个平级的 auto 轨道项，**在 320~900px 六种宽度下全部换行** ——
+  // 数值掉到第二行，行高从 34px 涨到 68px（整整一倍）。
+  const tree = renderSectionTree({})
+  const sliders = collectByType(tree, 'Slider')
+  assert.ok(sliders.length > 0, '应有滑杆')
+
+  // 直接验 Slider 的产物结构：它应当渲染出 __control 容器，
+  // 且 range 与 __value 都是它的**后代**（而不是行的直接子节点）。
+  const probe = sliders[0].type({ ...sliders[0].props, hint: 'x' })
+  const kids = probe.props.children
+  const ctrl = kids.find(c => c && c.props?.className === 'zf-pet-row__control')
+  assert.ok(ctrl, '滑杆应把 range 与数值包进 .zf-pet-row__control（否则数值会换行）')
+  const flat = []
+  const walk = n => {
+    if (n === null || n === undefined) return
+    if (Array.isArray(n)) { n.forEach(walk); return }
+    if (typeof n !== 'object') return
+    if (typeof n.type === 'string') flat.push(n.type)
+    if (n.props) walk(n.props.children)
+  }
+  walk(ctrl)
+  assert.ok(flat.includes('input'), '控件容器里应有滑杆本体')
+  assert.ok(flat.includes('span'), '控件容器里应有数值')
+  // 数值不能同时挂在行上（否则会渲染两次）
+  const directValue = kids.filter(c => c && c.props?.className === 'zf-pet-row__value')
+  assert.equal(directValue.length, 0, '数值不该再作为行的直接子节点（会与容器里的重复）')
+})
+
+ok('⭐ 设置页可滚动内容不该比必要的高（行高回归兜底）', () => {
+  // 这条不量真实像素（无头测试没有布局引擎），只锁住"行的垂直内边距"
+  // 这个唯一由我们控制的高度来源 —— 实测把它从 9px 调到 6px，
+  // 整页从 2870px 降到 2608px（40 行 × 6px）。
+  const css = loaded.exports.__test.styleText()
+  const row = css.match(/\.zf-pet-row\{[^}]*\}/)
+  assert.ok(row, '应有 .zf-pet-row 规则')
+  const m = row[0].match(/padding:\s*(\d+)px\s+0/)
+  assert.ok(m, `.zf-pet-row 应有垂直内边距，实际：${row[0]}`)
+  assert.ok(Number(m[1]) <= 8,
+    `行的垂直内边距应 ≤ 8px（过高会让设置页长到 2800px+），实际 ${m[1]}px`)
+})
+
+ok('⭐ 分组标题不能用西文那套 uppercase/字距（套在中文上只会更难读）', () => {
+  const css = loaded.exports.__test.styleText()
+  for (const sel of ['.zf-pet-settings__group', '.zf-pet-group__sum']) {
+    const rule = css.match(new RegExp(`\\${sel}\\{[^}]*\\}`))
+    assert.ok(rule, `应有 ${sel} 规则`)
+    assert.ok(!/text-transform:\s*uppercase/.test(rule[0]),
+      `${sel} 不该用 text-transform:uppercase（中文没有大小写，是空操作）`)
+    assert.ok(!/letter-spacing:\s*\.?0?\.12em/.test(rule[0]),
+      `${sel} 不该用 0.12em 字距（中文会被拉成「作 息 与 外 观」）`)
+  }
 })
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -1563,6 +1925,9 @@ ok('设置页文案 zh/en key 集一致', () => {
 })
 
 /* ═════════════════════════════════════════════════════════════════════════ */
+// ⚠️ 异步用例必须在汇总**之前**跑完（见 `okAsync` 的注释）。
+await runAsyncCases()
+
 console.log(`\n${'═'.repeat(60)}`)
 console.log(`通过 ${passed} 项，失败 ${failed} 项`)
 if (failed > 0) {
