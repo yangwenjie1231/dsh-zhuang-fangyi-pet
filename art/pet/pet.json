@@ -330,6 +330,11 @@
       "frameWidth": 256,
       "frames": 25
     },
+    "error-3.png": {
+      "frameMs": 40,
+      "frameWidth": 256,
+      "frames": 25
+    },
     "error.png": {
       "frameMs": 30,
       "frameWidth": 256,
@@ -436,11 +441,6 @@
       "frames": 25
     },
     "thinking-4.png": {
-      "frameMs": 40,
-      "frameWidth": 256,
-      "frames": 25
-    },
-    "thinking-5.png": {
       "frameMs": 40,
       "frameWidth": 256,
       "frames": 25
@@ -591,7 +591,8 @@
   "variants": {
     "error": [
       "error.png",
-      "error-2.png"
+      "error-2.png",
+      "error-3.png"
     ],
     "happy": [
       "happy.png",
@@ -623,8 +624,7 @@
       "thinking.png",
       "thinking-2.png",
       "thinking-3.png",
-      "thinking-4.png",
-      "thinking-5.png"
+      "thinking-4.png"
     ],
     "waiting": [
       "waiting.png",

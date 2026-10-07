@@ -160,11 +160,19 @@ STATE_PLAN = (
     ('waking',    ('cheer', 'gif:07', 'cheerful')),
     ('idle',      ('gif:07', 'shy', 'wink', 'content', 'smile-soft')),
     ('listening', ('wink', 'gif:01', 'excited', 'cat-paws')),
-    ('thinking',  ('gif:04', 'starry', 'dizzy', 'stunned', 'listless')),
+    # ⚠️ 用户 2026-10-07："思考用这张图不合适，这张图出错的时候放"。
+    # 那张是 **`listless`**（源文件 `表情包_35_双眼半睁无精打采嘴巴.gif`）——
+    # 半睁的眼睛 + 吐彩虹，表达"顶不住了/被搞懵"，属于**出错**，不是思考。
+    #
+    # 踩过一次：我先按文件名"圆睁大眼嘴巴张成小小"猜成 `stunned`，把**错的**那张
+    # 搬了过去（`stunned` 其实是圆眼张嘴的正常表情，跟彩虹无关）。
+    # 教训：这批素材的**文件名描述的是静态印象**，而 GIF 的**中后段**才是用户
+    # 实际看到的画面 —— 认图必须看**中间帧**，不能读文件名。
+    ('thinking',  ('gif:04', 'starry', 'dizzy', 'stunned')),
     ('working',   ('writing', 'gif:03', 'megaphone', 'road-rage')),
     ('waiting',   ('gif:01', 'shy', 'follow-me', 'hungry', 'please')),
     ('happy',     ('gif:06', 'joy', 'cheer', 'gif:07', 'star-eyes', 'all-ok', 'watermelon')),
-    ('error',     ('gif:02', 'knife')),
+    ('error',     ('gif:02', 'knife', 'listless')),
     ('sleeping',  ('sleepy', 'sleepy-zzz')),
 )
 

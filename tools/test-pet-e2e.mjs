@@ -1862,6 +1862,40 @@ await ok('⭐ F5 那批已改为**桌宠主体**（用户点名"不要做气泡�
   }
 })
 
+await ok('⭐ "吐彩虹"那张归属**出错**，不在思考（用户点名）', async () => {
+  // 用户 2026-10-07："思考用这张图不合适，这张图出错的时候放"。
+  //
+  // 那张是 **`listless`**（源文件 `表情包_35_双眼半睁无精打采嘴巴.gif`）——
+  // 半睁的眼睛 + 吐彩虹，表达"顶不住了/被搞懵"，属于**出错**，不是思考。
+  // 改法：`STATE_PLAN` 里把它从 thinking 挪到 error。
+  //
+  // ── 判据为什么是"张数"而不是"认图" ─────────────────────────────────────
+  //
+  // 试过两条更"聪明"的路，都不可靠，记下来免得后人重走：
+  //   · **几何指纹**（25帧/40ms）：`error-2`（持刀）**也是** 25帧/40ms ——
+  //     `some()` 于是恒真，回滚后照样绿，是**假断言**（实测确认）。
+  //   · **文件名**：产物按状态编号（`error-3.png`），语义名不进文件名，认不出。
+  //     而且**我正是被文件名骗过一次**：按"圆睁大眼嘴巴张成小小"猜成 `stunned`，
+  //     把错的那张搬了过去 —— 这批素材的文件名描述的是**静态印象**，
+  //     而 GIF 的**中后段**才是用户看到的画面。认图必须看中间帧。
+  //   · **像素比对**：要解 GIF/PNG，Node 侧代价太高（不值得为一条断言引依赖）。
+  //
+  // 张数虽然朴素，但**精确对应这次的决定**：挪走前 thinking=5/error=2，
+  // 挪走后 thinking=4/error=3。谁把它挪回去，这两个数立刻变 —— 回滚验证过。
+  // 副作用是有意的：将来素材变动导致张数变化时这条会红，需要人重新确认归属，
+  // 而不是让它悄悄漂回去。
+  const atlas = JSON.parse((await get('/api/zhuang-fangyi/pet/atlas')).body)
+  const thinking = atlas.variants?.thinking ?? []
+  const error = atlas.variants?.error ?? []
+
+  assert.deepEqual(thinking.filter(f => error.includes(f)), [],
+    `thinking 与 error 不该共用变体：${thinking.filter(f => error.includes(f)).join(', ')}`)
+  assert.equal(thinking.length, 4,
+    `thinking 应为 4 张（"吐彩虹"已挪走），实际 ${thinking.length}：${thinking.join(', ')}`)
+  assert.equal(error.length, 3,
+    `error 应为 3 张（原有 2 张 + 挪过来的"吐彩虹"），实际 ${error.length}：${error.join(', ')}`)
+})
+
 await ok('9 个状态全部有专属素材（覆盖率 9/9）', async () => {
   const r = await get('/api/zhuang-fangyi/pet/atlas')
   const body = JSON.parse(r.body)
