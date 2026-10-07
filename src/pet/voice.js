@@ -203,7 +203,14 @@ export function pickVoiceForEvent (manifest, event, seed = 0) {
 }
 
 /**
- * 诊断报告（`/pet/diag` 用）：让"语音包到底装上没有"一眼可见。
+ * 诊断报告（`/pet/diag` 与 `GET /pet/voices` 共用）。
+ *
+ * ⚠️ **必须带 `lines`**。这个函数一开始是纯诊断用的（只给统计），
+ * 后来 `/pet/voices` 也改用它当唯一产出形状 —— 而那个端点的消费方是
+ * **原生 exe**：它按 `lines[].event` 建事件索引、再挑一条播（`PetVoice.cs`）。
+ * 少了 `lines` 就是**所有固定语音静默失效**，而且不会有任何报错。
+ *
+ * `byName` 故意不带：那是 `Map`，`JSON.stringify` 会变成 `{}`，既没用又会误导。
  *
  * @param {object} manifest
  * @returns {object}
@@ -229,6 +236,20 @@ export function voiceReport (manifest) {
     realCount: lines.filter(l => l.source === 'real').length,
     synthCount: lines.filter(l => l.source === 'synth').length,
     byEvent,
-    names: lines.map(l => l.name)
+    names: lines.map(l => l.name),
+    /**
+     * 清单本体 —— exe 靠它按事件挑台词。
+     *
+     * 只带渲染/播放需要的字段（与 `PetVoice.cs` 的解析一一对应）；
+     * 不带 `byName`（Map，不可序列化）。
+     */
+    lines: lines.map(l => ({
+      name: l.name,
+      file: l.file,
+      event: l.event,
+      source: l.source,
+      durationMs: l.durationMs,
+      bytes: l.bytes
+    }))
   }
 }

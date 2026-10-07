@@ -294,7 +294,22 @@ window.__ModuleLoader__.load({
         activity: '活跃度',
         activityQuiet: '安静（只提醒要紧的事）',
         activityNormal: '正常',
-        activityPlayful: '调皮（爱说话、会主动冒头）'
+        activityPlayful: '调皮（爱说话、会主动冒头）',
+        // ── 分组标题（v-next：按用户心智重排，不再按开发历史）────────────────
+        groupPet: '桌宠',
+        groupRoutine: '作息与外观',
+        groupAdvanced: '高级与诊断',
+        advancedHint: '出问题时才需要看：服务状态、启动命令、素材与会话信息',
+        // ── 诊断区键名 ──────────────────────────────────────────────────────
+        diagAssets: '素材',
+        diagStates: '个状态已覆盖',
+        diagBubbles: '张气泡',
+        diagMissing: '张待抠图',
+        sharedDir: '共享背景目录',
+        chatWsLabel: '工作区',
+        chatSentCount: '已发',
+        chatReplyCount: '已回',
+        ttsIdleActionHint: '只卸模型：显存还了、但进程仍占约 2.7GB 内存；杀进程：全部释放',
       },
       en: {
         nav: 'Zhuang Fangyi Pet',
@@ -453,7 +468,20 @@ window.__ModuleLoader__.load({
         activity: 'Liveliness',
         activityQuiet: 'Quiet (only important notices)',
         activityNormal: 'Normal',
-        activityPlayful: 'Playful (chatty, pops up on its own)'
+        activityPlayful: 'Playful (chatty, pops up on its own)',
+        groupPet: 'Pet',
+        groupRoutine: 'Schedule & appearance',
+        groupAdvanced: 'Advanced & diagnostics',
+        advancedHint: 'Only needed when something is wrong: service state, launch command, assets and session info',
+        diagAssets: 'Assets',
+        diagStates: 'states covered',
+        diagBubbles: 'bubbles',
+        diagMissing: 'awaiting cutout',
+        sharedDir: 'Shared background dir',
+        chatWsLabel: 'Workspace',
+        chatSentCount: 'sent',
+        chatReplyCount: 'replied',
+        ttsIdleActionHint: 'Unload keeps the process (~2.7GB RAM still held); stop releases everything'
       }
     }
 
@@ -1123,6 +1151,51 @@ window.__ModuleLoader__.load({
       ])
     }
 
+    /**
+     * 设置分组。
+     *
+     * 为什么要它：原先每个分组都是裸 `h('h3')` + 一串控件平铺，于是
+     * **三种性质完全不同的东西挤在同一列** —— ①设置控件 ②状态/诊断文字
+     * ③操作按钮。视觉上没有任何层级，用户找不到"我该动哪个"。
+     *
+     * `collapsible` + `open` 用**声明式**属性（不读 DOM）：外壳的 React 桩
+     * 没有真实 DOM，读 `open` 属性会让测试与真机行为分叉。
+     * 注意 `open` 只在挂载时生效（非受控 `<details>`）—— 这是有意的：
+     * 用户手动展开后不该被下一次重渲染合上。
+     */
+    function Group (props) {
+      const { title, hint, children, collapsible, open } = props
+      const body = (children ?? []).filter(c => c !== null && c !== undefined)
+      if (collapsible !== true) {
+        return h('div', { className: 'zf-pet-group' }, [
+          h('h3', { key: 't', className: 'zf-pet-settings__group' }, title),
+          hint === undefined ? null : h('p', { key: 'h', className: 'zf-pet-settings__note' }, hint),
+          h('div', { key: 'b', className: 'zf-pet-group__body' }, body)
+        ])
+      }
+      return h('details', { className: 'zf-pet-group zf-pet-group--fold', open: open === true }, [
+        h('summary', { key: 's', className: 'zf-pet-group__sum' }, title),
+        hint === undefined ? null : h('p', { key: 'h', className: 'zf-pet-settings__note' }, hint),
+        h('div', { key: 'b', className: 'zf-pet-group__body' }, body)
+      ])
+    }
+
+    /**
+     * 诊断键值行（`高级与诊断` 折叠区专用）。
+     *
+     * `mono` 给路径/命令行用：等宽 + 允许断行，长路径不会把面板撑破。
+     */
+    function Diag (props) {
+      const { k, v, mono } = props
+      return h('div', { className: 'zf-pet-diag' }, [
+        h('span', { key: 'k', className: 'zf-pet-diag__k' }, k),
+        h('span', {
+          key: 'v',
+          className: 'zf-pet-diag__v' + (mono === true ? ' zf-pet-diag__v--mono' : '')
+        }, String(v ?? '—'))
+      ])
+    }
+
     function Section (props) {
       // 同上：`settings.section` 的 ownerProps 只有 `{ close }`，没有 runtime。
       const runtime = requireRuntime()
@@ -1348,595 +1421,666 @@ window.__ModuleLoader__.load({
       return h('div', { className: 'zf-pet-settings' }, [
         h('p', { key: 'sub', className: 'zf-pet-settings__sub' }, t('subtitle')),
 
-        h('h3', { key: 'g1', className: 'zf-pet-settings__group' }, t('groupGeneral')),
-        h(Toggle, {
-          key: 'enabled',
-          label: t('enabled'),
-          value: settings.enabled,
-          onChange: v => set({ enabled: v })
-        }),
-        h('label', { key: 'mode', className: 'zf-pet-row' }, [
-          h('span', { key: 'l', className: 'zf-pet-row__label' }, t('mode')),
-          h('select', {
-            key: 's',
-            className: 'zf-pet-row__input',
-            value: settings.mode,
-            onChange: e => set({ mode: e.target.value })
-          }, [
-            h('option', { key: 'native', value: 'native' }, t('modeNative')),
-            h('option', { key: 'overlay', value: 'overlay' }, t('modeOverlay'))
-          ]),
-          // 选中项的解释随选择变化 —— 用户不该靠猜"这两种有什么区别"。
-          h('span', { key: 'h', className: 'zf-pet-row__hint' },
-            settings.mode === 'overlay' ? t('modeOverlayHint') : t('modeNativeHint'))
-        ]),
-        h(Slider, {
-          key: 'scale',
-          label: t('scale'),
-          value: settings.scale,
-          min: 0.5,
-          max: 2,
-          step: 0.1,
-          suffix: '×',
-          onChange: v => set({ scale: v })
-        }),
-        h(Slider, {
-          key: 'opacity',
-          label: t('opacity'),
-          value: settings.opacity,
-          min: 0.3,
-          max: 1,
-          step: 0.05,
-          suffix: '',
-          onChange: v => set({ opacity: v })
-        }),
-
-        h('h3', { key: 'g2', className: 'zf-pet-settings__group' }, t('groupWindow')),
-        h(Toggle, {
-          key: 'topmost',
-          label: t('topmost'),
-          value: settings.topmost,
-          onChange: v => set({ topmost: v })
-        }),
-        h(Toggle, {
-          key: 'clickThrough',
-          label: t('clickThrough'),
-          value: settings.clickThrough,
-          hint: t('clickThroughHint'),
-          onChange: v => set({ clickThrough: v })
-        }),
-
-        h('h3', { key: 'g3', className: 'zf-pet-settings__group' }, t('groupBubble')),
-        h(Toggle, {
-          key: 'bubble',
-          label: t('bubble'),
-          value: settings.bubble,
-          onChange: v => set({ bubble: v })
-        }),
-        h(Toggle, {
-          key: 'bubbleImages',
-          label: t('bubbleImages'),
-          value: settings.bubbleImages,
-          onChange: v => set({ bubbleImages: v })
-        }),
-        h(Slider, {
-          key: 'bubbleMs',
-          label: t('bubbleMs'),
-          value: Math.round(settings.bubbleMs / 1000),
-          min: 1,
-          max: 20,
-          step: 1,
-          suffix: 's',
-          onChange: v => set({ bubbleMs: v * 1000 })
-        }),
-        h(Slider, {
-          key: 'bubbleGapMs',
-          label: t('bubbleGapMs'),
-          value: Math.round(settings.bubbleGapMs / 1000),
-          min: 0,
-          max: 60,
-          step: 1,
-          suffix: 's',
-          hint: t('bubbleGapHint'),
-          onChange: v => set({ bubbleGapMs: v * 1000 })
-        }),
-        h(Toggle, {
-          key: 'notifyComplete',
-          label: t('notifyComplete'),
-          hint: t('notifyCompleteHint'),
-          value: settings.notifyComplete,
-          onChange: v => set({ notifyComplete: v })
-        }),
-        h(Toggle, {
-          key: 'attentionReminder',
-          label: t('attentionReminder'),
-          hint: t('attentionReminderHint'),
-          value: settings.attentionReminder,
-          onChange: v => set({ attentionReminder: v })
-        }),
-
-        h('h3', { key: 'g4', className: 'zf-pet-settings__group' }, t('groupBehavior')),
-        h('label', { key: 'activity', className: 'zf-pet-row' }, [
-          h('span', { key: 'l', className: 'zf-pet-row__label' }, t('activity')),
-          h('select', {
-            key: 's',
-            className: 'zf-pet-row__input',
-            value: settings.activity,
-            onChange: e => set({ activity: e.target.value })
-          }, [
-            h('option', { key: 'quiet', value: 'quiet' }, t('activityQuiet')),
-            h('option', { key: 'normal', value: 'normal' }, t('activityNormal')),
-            h('option', { key: 'playful', value: 'playful' }, t('activityPlayful'))
-          ])
-        ]),
-        h(Slider, {
-          key: 'happyMs',
-          label: t('happyMs'),
-          value: Math.round(settings.happyMs / 1000),
-          min: 1,
-          max: 30,
-          step: 1,
-          suffix: 's',
-          onChange: v => set({ happyMs: v * 1000 })
-        }),
-        h(Slider, {
-          key: 'sleepMs',
-          label: t('sleepMs'),
-          value: Math.round(settings.sleepMs / 60000),
-          min: 1,
-          max: 60,
-          step: 1,
-          suffix: 'min',
-          onChange: v => set({ sleepMs: v * 60000 })
-        }),
-        h('label', { key: 'doubleClick', className: 'zf-pet-row' }, [
-          h('span', { key: 'l', className: 'zf-pet-row__label' }, t('doubleClick')),
-          h('select', {
-            key: 's',
-            className: 'zf-pet-row__input',
-            value: settings.doubleClick,
-            onChange: e => set({ doubleClick: e.target.value })
-          }, [
-            h('option', { key: 'focus-dsh', value: 'focus-dsh' }, t('doubleClickFocus')),
-            h('option', { key: 'emote', value: 'emote' }, t('doubleClickEmote')),
-            h('option', { key: 'none', value: 'none' }, t('doubleClickNone'))
-          ])
-        ]),
-        h('label', { key: 'theme', className: 'zf-pet-row' }, [
-          h('span', { key: 'l', className: 'zf-pet-row__label' }, t('theme')),
-          h('select', {
-            key: 's',
-            className: 'zf-pet-row__input',
-            value: settings.theme,
-            onChange: e => set({ theme: e.target.value })
-          }, [
-            h('option', { key: 'auto', value: 'auto' }, t('themeAuto')),
-            h('option', { key: 'light', value: 'light' }, t('themeLight')),
-            h('option', { key: 'dark', value: 'dark' }, t('themeDark'))
-          ])
-        ]),
-        h(Toggle, {
-          key: 'hint',
-          label: t('hint'),
-          value: settings.hint,
-          onChange: v => set({ hint: v })
-        }),
-        h(Toggle, {
-          key: 'statusAlways',
-          label: t('statusAlways'),
-          hint: t('statusAlwaysHint'),
-          value: settings.statusAlways,
-          onChange: v => set({ statusAlways: v })
-        }),
-
-        h('h3', { key: 'g6', className: 'zf-pet-settings__group' }, t('groupPomodoro')),
-        h(Toggle, {
-          key: 'pomodoro',
-          label: t('pomodoro'),
-          hint: t('pomodoroHint'),
-          value: settings.pomodoro,
-          onChange: v => set({ pomodoro: v })
-        }),
-        // 时长只在启用后显示：默认关着的时候摆一堆滑块是噪音。
-        settings.pomodoro
-          ? h('div', { key: 'pomoControls' }, [
-              h(Slider, {
-                key: 'pomodoroFocusMs',
-                label: t('pomodoroFocusMs'),
-                value: Math.round(settings.pomodoroFocusMs / 60000),
-                min: 1,
-                max: 240,
-                step: 1,
-                suffix: t('minutes'),
-                onChange: v => set({ pomodoroFocusMs: v * 60000 })
-              }),
-              h(Slider, {
-                key: 'pomodoroBreakMs',
-                label: t('pomodoroBreakMs'),
-                value: Math.round(settings.pomodoroBreakMs / 60000),
-                min: 1,
-                max: 60,
-                step: 1,
-                suffix: t('minutes'),
-                onChange: v => set({ pomodoroBreakMs: v * 60000 })
-              }),
-              h(Slider, {
-                key: 'pomodoroLongBreakMs',
-                label: t('pomodoroLongBreakMs'),
-                value: Math.round(settings.pomodoroLongBreakMs / 60000),
-                min: 1,
-                max: 120,
-                step: 1,
-                suffix: t('minutes'),
-                onChange: v => set({ pomodoroLongBreakMs: v * 60000 })
-              }),
-              h(Slider, {
-                key: 'pomodoroRounds',
-                label: t('pomodoroRounds'),
-                value: settings.pomodoroRounds,
-                min: 2,
-                max: 12,
-                step: 1,
-                suffix: t('rounds'),
-                hint: t('pomodoroRoundsHint'),
-                onChange: v => set({ pomodoroRounds: v })
-              }),
-              h(Toggle, {
-                key: 'pomodoroAutoNext',
-                label: t('pomodoroAutoNext'),
-                hint: t('pomodoroAutoNextHint'),
-                value: settings.pomodoroAutoNext,
-                onChange: v => set({ pomodoroAutoNext: v })
-              }),
-              h(Toggle, {
-                key: 'pomodoroNotify',
-                label: t('pomodoroNotify'),
-                hint: t('pomodoroNotifyHint'),
-                value: settings.pomodoroNotify,
-                onChange: v => set({ pomodoroNotify: v })
-              }),
-              h(Toggle, {
-                key: 'pomodoroCountdown',
-                label: t('pomodoroCountdown'),
-                value: settings.pomodoroCountdown,
-                onChange: v => set({ pomodoroCountdown: v })
-              }),
-              // 开始/暂停按钮：设置页也能控制（桌宠不在手边时用得上）。
-              h('div', { key: 'pomoBtns', className: 'zf-pet-settings__btns' }, [
-                h('button', {
-                  key: 'toggle',
-                  className: 'zf-pet-settings__btn',
-                  onClick: () => pomodoroAction(snapshot?.pomodoro?.running === true ? 'pause' : 'start')
-                }, snapshot?.pomodoro?.running === true ? t('pomodoroPause') : t('pomodoroStart')),
-                h('button', {
-                  key: 'skip',
-                  className: 'zf-pet-settings__btn',
-                  onClick: () => pomodoroAction('skip')
-                }, t('pomodoroSkip')),
-                h('button', {
-                  key: 'reset',
-                  className: 'zf-pet-settings__btn',
-                  onClick: () => pomodoroAction('reset')
-                }, t('pomodoroReset'))
-              ]),
-              snapshot?.pomodoro?.show === true
-                ? h('p', { key: 'pomoNow', className: 'zf-pet-settings__note' },
-                    `${snapshot.pomodoro.text ?? ''} · 第 ${snapshot.pomodoro.round ?? 1}/${snapshot.pomodoro.roundsPerLongBreak ?? 4} 轮`)
-                : null
-            ])
-          : null,
-
-        h('h3', { key: 'g7', className: 'zf-pet-settings__group' }, t('groupVoice')),
-        h(Toggle, {
-          key: 'voice',
-          label: t('voice'),
-          hint: t('voiceHint'),
-          value: settings.voice,
-          onChange: v => set({ voice: v })
-        }),
-        h('p', { key: 'voiceInfo', className: 'zf-pet-settings__note' },
-          `${t('voiceCount')}：${voiceInfo === null
-            ? t('voiceCountHint')
-            : `${voiceInfo.count ?? 0} 条 / ${Math.round((voiceInfo.totalMs ?? 0) / 1000)}s`}`),
-        // 台词一览：用户有权知道"她都会说什么" —— 不看清单就只能靠撞。
-        (voiceInfo?.lines?.length ?? 0) === 0
-          ? null
-          : h('details', { key: 'voiceLines', className: 'zf-pet-details' }, [
-              h('summary', { key: 's' }, `${t('voiceLines')}（${voiceInfo.lines.length}）`),
-              h('ul', { key: 'ul', className: 'zf-pet-list' },
-                voiceInfo.lines.map(l => h('li', { key: l.name },
-                  `${l.event ?? '—'} · ${l.text ?? l.name}` +
-                  (l.source === 'synth' ? `（${t('voiceSynth')}）` : ''))))
-            ]),
-
-        h('h3', { key: 'g8', className: 'zf-pet-settings__group' }, t('groupChat')),
-
-        // ── 动态语音（念出 AI 的回答，v3）──────────────────────────────────
-        h('h4', { key: 'speakTitle', className: 'zf-pet-settings__sub' }, t('speakTitle')),
-        h('p', { key: 'speakHint', className: 'zf-pet-settings__note' }, t('speakHint')),
-        h(Toggle, {
-          key: 'speakReplies',
-          label: t('speakReplies'),
-          hint: t('speakRepliesHint'),
-          value: settings.speakReplies,
-          onChange: v => set({ speakReplies: v })
-        }),
-        h('label', { key: 'ttsUrl', className: 'zf-pet-row' }, [
-          h('span', { key: 'l', className: 'zf-pet-row__label' }, t('ttsUrl')),
-          h('input', {
-            key: 'i',
-            className: 'zf-pet-settings__input',
-            type: 'text',
-            defaultValue: settings.ttsUrl ?? '',
-            spellCheck: false,
-            placeholder: 'http://127.0.0.1:8765',
-            onBlur: e => set({ ttsUrl: e.target.value.trim() })
-          })
-        ]),
-        h('label', { key: 'speechMax', className: 'zf-pet-row' }, [
-          h('span', { key: 'l', className: 'zf-pet-row__label' }, t('speechMaxChars')),
-          h('input', {
-            key: 'i',
-            className: 'zf-pet-settings__input',
-            type: 'number',
-            min: 10,
-            max: 300,
-            defaultValue: String(settings.speechMaxChars ?? 60),
-            onBlur: e => set({ speechMaxChars: Number(e.target.value) })
-          })
-        ]),
-        h('div', { key: 'speakBtns', className: 'zf-pet-settings__btns' }, [
-          h('button', {
-            key: 'probe',
-            className: 'zf-pet-settings__btn',
-            disabled: speakBusy,
-            onClick: () => probeTts()
-          }, speakBusy ? t('speakProbing') : t('speakProbe')),
-          h('button', {
-            key: 'svcUp',
-            className: 'zf-pet-settings__btn',
-            disabled: speakBusy,
-            onClick: () => controlService('start')
-          }, t('svcStart')),
-          h('button', {
-            key: 'svcDown',
-            className: 'zf-pet-settings__btn',
-            disabled: speakBusy,
-            onClick: () => controlService('stop')
-          }, t('svcStop'))
-        ]),
-        // ── 常驻开关（用户点名要的）──────────────────────────────────────
-        //
-        // 背景：合成服务启动要加载模型，CUDA 下更慢（要把模型搬进显存），
-        // 而且加载完长期占着显存。所以"常驻 vs 用完释放"必须让用户选。
-        h(Toggle, {
-          key: 'ttsResident',
-          label: t('ttsResident'),
-          hint: t('ttsResidentHint'),
-          value: settings.ttsResident,
-          onChange: v => set({ ttsResident: v })
-        }),
-        // 非常驻时：多久释放 + **怎么**释放（杀进程省内存 / 只卸模型恢复快）
-        settings.ttsResident
-          ? null
-          : h('label', { key: 'idleAction', className: 'zf-pet-row' }, [
-              h('span', { key: 'l', className: 'zf-pet-row__label' }, t('ttsIdleAction')),
+        /* ── ① 桌宠：它是谁、长多大、在哪儿 ────────────────────────────────
+         *
+         * 分组顺序按**用户找东西的心智**排，不按开发历史排。原先的顺序是
+         * 常规→窗口→气泡→行为→番茄钟→语音→聊天→运行状态，其中"常规/窗口"
+         * 是同一件事（桌宠怎么显示）却分成两组，而"运行状态"（排障第一入口）
+         * 被压在最后。 */
+        h(Group, { key: 'gPet', title: t('groupPet') },
+          [
+            h(Toggle, {
+              key: 'enabled',
+              label: t('enabled'),
+              value: settings.enabled,
+              onChange: v => set({ enabled: v })
+            }),
+            h('label', { key: 'mode', className: 'zf-pet-row' }, [
+              h('span', { key: 'l', className: 'zf-pet-row__label' }, t('mode')),
               h('select', {
                 key: 's',
-                className: 'zf-pet-settings__input',
-                value: settings.ttsIdleAction ?? '',
-                onChange: e => set({ ttsIdleAction: e.target.value })
+                className: 'zf-pet-row__input',
+                value: settings.mode,
+                onChange: e => set({ mode: e.target.value })
               }, [
-                h('option', { key: 'd', value: '' }, t('ttsIdleActionDefault')),
-                h('option', { key: 'u', value: 'unload' }, t('ttsIdleActionUnload')),
-                h('option', { key: 'k', value: 'stop' }, t('ttsIdleActionStop'))
+                h('option', { key: 'native', value: 'native' }, t('modeNative')),
+                h('option', { key: 'overlay', value: 'overlay' }, t('modeOverlay'))
+              ]),
+              // 选中项的解释随选择变化 —— 用户不该靠猜"这两种有什么区别"。
+              h('span', { key: 'h', className: 'zf-pet-row__hint' },
+                settings.mode === 'overlay' ? t('modeOverlayHint') : t('modeNativeHint'))
+            ]),
+            h(Slider, {
+              key: 'scale',
+              label: t('scale'),
+              value: settings.scale,
+              min: 0.5,
+              max: 2,
+              step: 0.1,
+              suffix: '×',
+              onChange: v => set({ scale: v })
+            }),
+            h(Slider, {
+              key: 'opacity',
+              label: t('opacity'),
+              value: settings.opacity,
+              min: 0.3,
+              max: 1,
+              step: 0.05,
+              suffix: '',
+              onChange: v => set({ opacity: v })
+            }),
+            h(Toggle, {
+              key: 'topmost',
+              label: t('topmost'),
+              value: settings.topmost,
+              onChange: v => set({ topmost: v })
+            }),
+            h(Toggle, {
+              key: 'clickThrough',
+              label: t('clickThrough'),
+              hint: t('clickThroughHint'),
+              value: settings.clickThrough,
+              onChange: v => set({ clickThrough: v })
+            }),
+            h('div', { key: 'posBtns', className: 'zf-pet-settings__btns' }, [
+              h('button', {
+                key: 'reset',
+                className: 'zf-pet-settings__btn',
+                onClick: () => runtime.requestResetPosition?.()
+              }, t('reset'))
+            ])
+          ]),
+
+        /* ── ② 气泡与表情：她怎么"说话"（不说话的部分）────────────────── */
+        h(Group, { key: 'gBubble', title: t('groupBubble') },
+          [
+            h(Toggle, {
+              key: 'bubble',
+              label: t('bubble'),
+              value: settings.bubble,
+              onChange: v => set({ bubble: v })
+            }),
+            h(Toggle, {
+              key: 'bubbleImages',
+              label: t('bubbleImages'),
+              value: settings.bubbleImages,
+              onChange: v => set({ bubbleImages: v })
+            }),
+            h(Slider, {
+              key: 'bubbleMs',
+              label: t('bubbleMs'),
+              value: Math.round(settings.bubbleMs / 1000),
+              min: 1,
+              max: 20,
+              step: 1,
+              suffix: 's',
+              onChange: v => set({ bubbleMs: v * 1000 })
+            }),
+            h(Slider, {
+              key: 'bubbleGapMs',
+              label: t('bubbleGapMs'),
+              value: Math.round(settings.bubbleGapMs / 1000),
+              min: 0,
+              max: 60,
+              step: 1,
+              suffix: 's',
+              hint: t('bubbleGapHint'),
+              onChange: v => set({ bubbleGapMs: v * 1000 })
+            }),
+            h(Toggle, {
+              key: 'notifyComplete',
+              label: t('notifyComplete'),
+              hint: t('notifyCompleteHint'),
+              value: settings.notifyComplete,
+              onChange: v => set({ notifyComplete: v })
+            }),
+            h(Toggle, {
+              key: 'attentionReminder',
+              label: t('attentionReminder'),
+              hint: t('attentionReminderHint'),
+              value: settings.attentionReminder,
+              onChange: v => set({ attentionReminder: v })
+            }),
+            h('label', { key: 'doubleClick', className: 'zf-pet-row' }, [
+              h('span', { key: 'l', className: 'zf-pet-row__label' }, t('doubleClick')),
+              h('select', {
+                key: 's',
+                className: 'zf-pet-row__input',
+                value: settings.doubleClick,
+                onChange: e => set({ doubleClick: e.target.value })
+              }, [
+                h('option', { key: 'focus-dsh', value: 'focus-dsh' }, t('doubleClickFocus')),
+                h('option', { key: 'emote', value: 'emote' }, t('doubleClickEmote')),
+                h('option', { key: 'none', value: 'none' }, t('doubleClickNone'))
+              ])
+            ])
+          ]),
+
+        /* ── ③ 作息与外观：她什么时候活跃、长什么样 ────────────────────── */
+        h(Group, { key: 'gRoutine', title: t('groupRoutine') },
+          [
+            h('label', { key: 'activity', className: 'zf-pet-row' }, [
+              h('span', { key: 'l', className: 'zf-pet-row__label' }, t('activity')),
+              h('select', {
+                key: 's',
+                className: 'zf-pet-row__input',
+                value: settings.activity,
+                onChange: e => set({ activity: e.target.value })
+              }, [
+                h('option', { key: 'quiet', value: 'quiet' }, t('activityQuiet')),
+                h('option', { key: 'normal', value: 'normal' }, t('activityNormal')),
+                h('option', { key: 'playful', value: 'playful' }, t('activityPlayful'))
               ])
             ]),
-        settings.ttsResident
-          ? null
-          : h('label', { key: 'idleStop', className: 'zf-pet-row' }, [
-              h('span', { key: 'l', className: 'zf-pet-row__label' }, t('ttsIdleStopSec')),
+            h(Slider, {
+              key: 'happyMs',
+              label: t('happyMs'),
+              value: Math.round(settings.happyMs / 1000),
+              min: 1,
+              max: 30,
+              step: 1,
+              suffix: 's',
+              onChange: v => set({ happyMs: v * 1000 })
+            }),
+            h(Slider, {
+              key: 'sleepMs',
+              label: t('sleepMs'),
+              value: Math.round(settings.sleepMs / 60000),
+              min: 1,
+              max: 60,
+              step: 1,
+              suffix: 'min',
+              onChange: v => set({ sleepMs: v * 60000 })
+            }),
+            h('label', { key: 'theme', className: 'zf-pet-row' }, [
+              h('span', { key: 'l', className: 'zf-pet-row__label' }, t('theme')),
+              h('select', {
+                key: 's',
+                className: 'zf-pet-row__input',
+                value: settings.theme,
+                onChange: e => set({ theme: e.target.value })
+              }, [
+                h('option', { key: 'auto', value: 'auto' }, t('themeAuto')),
+                h('option', { key: 'light', value: 'light' }, t('themeLight')),
+                h('option', { key: 'dark', value: 'dark' }, t('themeDark'))
+              ])
+            ]),
+            h(Toggle, {
+              key: 'hint',
+              label: t('hint'),
+              value: settings.hint,
+              onChange: v => set({ hint: v })
+            }),
+            h(Toggle, {
+              key: 'statusAlways',
+              label: t('statusAlways'),
+              hint: t('statusAlwaysHint'),
+              value: settings.statusAlways,
+              onChange: v => set({ statusAlways: v })
+            })
+          ]),
+
+        /* ── ④ 语音：固定台词包 + 念出回答，**合并成一组** ────────────────
+         *
+         * 原先"语音"组只有 1 个开关 + 台词清单，而真正的语音设置
+         *（合成地址/字数上限/常驻/空闲释放）埋在"聊天"组里 —— 因为历史上
+         * 先有固定语音包、后有动态语音，功能长在了不同组里。
+         * 对用户来说这就是"语音"，两件事该在同一处。 */
+        h(Group, { key: 'gVoice', title: t('groupVoice') },
+          [
+            h(Toggle, {
+              key: 'voice',
+              label: t('voice'),
+              hint: t('voiceHint'),
+              value: settings.voice,
+              onChange: v => set({ voice: v })
+            }),
+            h('p', { key: 'voiceInfo', className: 'zf-pet-settings__note' },
+              `${t('voiceCount')}：${voiceInfo === null
+                ? t('voiceCountHint')
+                : `${voiceInfo.count ?? 0} 条 / ${Math.round((voiceInfo.totalMs ?? 0) / 1000)}s`}`),
+            // 台词一览：用户有权知道"她都会说什么" —— 不看清单就只能靠撞。
+            (voiceInfo?.lines?.length ?? 0) === 0
+              ? null
+              : h('details', { key: 'voiceLines', className: 'zf-pet-details' }, [
+                  h('summary', { key: 's' }, `${t('voiceLines')}（${voiceInfo.lines.length}）`),
+                  h('ul', { key: 'ul', className: 'zf-pet-list' },
+                    voiceInfo.lines.map(l => h('li', { key: l.name },
+                      `${l.event ?? '—'} · ${l.text ?? l.name}` +
+                      (l.source === 'synth' ? `（${t('voiceSynth')}）` : ''))))
+                ]),
+
+            // ── 动态语音（念出 AI 的回答，v3）────────────────────────────
+            h('h4', { key: 'speakTitle', className: 'zf-pet-settings__sub' }, t('speakTitle')),
+            h('p', { key: 'speakHint', className: 'zf-pet-settings__note' }, t('speakHint')),
+            h(Toggle, {
+              key: 'speakReplies',
+              label: t('speakReplies'),
+              hint: t('speakRepliesHint'),
+              value: settings.speakReplies,
+              onChange: v => set({ speakReplies: v })
+            }),
+            h('label', { key: 'ttsUrl', className: 'zf-pet-row' }, [
+              h('span', { key: 'l', className: 'zf-pet-row__label' }, t('ttsUrl')),
+              h('input', {
+                key: 'i',
+                className: 'zf-pet-settings__input',
+                type: 'text',
+                defaultValue: settings.ttsUrl ?? '',
+                spellCheck: false,
+                placeholder: 'http://127.0.0.1:8765',
+                onBlur: e => set({ ttsUrl: e.target.value.trim() })
+              })
+            ]),
+            h('label', { key: 'speechMax', className: 'zf-pet-row' }, [
+              h('span', { key: 'l', className: 'zf-pet-row__label' }, t('speechMaxChars')),
               h('input', {
                 key: 'i',
                 className: 'zf-pet-settings__input',
                 type: 'number',
-                min: 0,
-                max: 86400,
-                defaultValue: String(settings.ttsIdleStopSec ?? 300),
-                onBlur: e => set({ ttsIdleStopSec: Number(e.target.value) })
+                min: 10,
+                max: 300,
+                defaultValue: String(settings.speechMaxChars ?? 60),
+                onBlur: e => set({ speechMaxChars: Number(e.target.value) })
               })
             ]),
-        h('p', { key: 'svcState', className: 'zf-pet-settings__note' },
+            h('div', { key: 'speakBtns', className: 'zf-pet-settings__btns' }, [
+              h('button', {
+                key: 'probe',
+                className: 'zf-pet-settings__btn',
+                disabled: speakBusy,
+                onClick: () => probeTts()
+              }, speakBusy ? t('speakProbing') : t('speakProbe')),
+              h('button', {
+                key: 'svcUp',
+                className: 'zf-pet-settings__btn',
+                disabled: speakBusy,
+                onClick: () => controlService('start')
+              }, t('svcStart')),
+              h('button', {
+                key: 'svcDown',
+                className: 'zf-pet-settings__btn',
+                disabled: speakBusy,
+                onClick: () => controlService('stop')
+              }, t('svcStop'))
+            ]),
+            // 常驻开关：合成要加载模型（CUDA 下更慢），加载完长期占显存。
+            // 所以"常驻 vs 用完释放"必须让用户选 —— 代价实测写在 hint 里。
+            h(Toggle, {
+              key: 'ttsResident',
+              label: t('ttsResident'),
+              hint: t('ttsResidentHint'),
+              value: settings.ttsResident,
+              onChange: v => set({ ttsResident: v })
+            }),
+            // 非常驻时：多久释放 + **怎么**释放（杀进程全释放 / 只卸模型）
+            settings.ttsResident
+              ? null
+              : h('label', { key: 'idleAction', className: 'zf-pet-row' }, [
+                  h('span', { key: 'l', className: 'zf-pet-row__label' }, t('ttsIdleAction')),
+                  h('select', {
+                    key: 's',
+                    className: 'zf-pet-settings__input',
+                    value: settings.ttsIdleAction ?? '',
+                    onChange: e => set({ ttsIdleAction: e.target.value })
+                  }, [
+                    h('option', { key: 'd', value: '' }, t('ttsIdleActionDefault')),
+                    h('option', { key: 'u', value: 'unload' }, t('ttsIdleActionUnload')),
+                    h('option', { key: 'k', value: 'stop' }, t('ttsIdleActionStop'))
+                  ]),
+                  h('span', { key: 'h', className: 'zf-pet-row__hint' }, t('ttsIdleActionHint'))
+                ]),
+            settings.ttsResident
+              ? null
+              : h('label', { key: 'idleStop', className: 'zf-pet-row' }, [
+                  h('span', { key: 'l', className: 'zf-pet-row__label' }, t('ttsIdleStopSec')),
+                  h('input', {
+                    key: 'i',
+                    className: 'zf-pet-settings__input',
+                    type: 'number',
+                    min: 0,
+                    max: 86400,
+                    defaultValue: String(settings.ttsIdleStopSec ?? 300),
+                    onBlur: e => set({ ttsIdleStopSec: Number(e.target.value) })
+                  })
+                ]),
+            speakNote === null
+              ? null
+              : h('p', { key: 'speakNote', className: 'zf-pet-settings__note' }, speakNote)
+          ]),
+
+        /* ── ⑤ 番茄钟：默认关 → 只留一个开关（8 个控件收进折叠）───────── */
+        h(Group, {
+          key: 'gPomodoro',
+          title: t('groupPomodoro'),
+          collapsible: true,
+          open: settings.pomodoro === true
+        },
+        [
+          h(Toggle, {
+            key: 'pomodoro',
+            label: t('pomodoro'),
+            hint: t('pomodoroHint'),
+            value: settings.pomodoro,
+            onChange: v => set({ pomodoro: v })
+          }),
+          // 时长只在启用后显示：默认关着的时候摆一堆滑块是噪音。
+          settings.pomodoro
+            ? h('div', { key: 'pomoControls' }, [
+                h(Slider, {
+                  key: 'pomodoroFocusMs',
+                  label: t('pomodoroFocusMs'),
+                  value: Math.round(settings.pomodoroFocusMs / 60000),
+                  min: 1,
+                  max: 240,
+                  step: 1,
+                  suffix: t('minutes'),
+                  onChange: v => set({ pomodoroFocusMs: v * 60000 })
+                }),
+                h(Slider, {
+                  key: 'pomodoroBreakMs',
+                  label: t('pomodoroBreakMs'),
+                  value: Math.round(settings.pomodoroBreakMs / 60000),
+                  min: 1,
+                  max: 60,
+                  step: 1,
+                  suffix: t('minutes'),
+                  onChange: v => set({ pomodoroBreakMs: v * 60000 })
+                }),
+                h(Slider, {
+                  key: 'pomodoroLongBreakMs',
+                  label: t('pomodoroLongBreakMs'),
+                  value: Math.round(settings.pomodoroLongBreakMs / 60000),
+                  min: 1,
+                  max: 120,
+                  step: 1,
+                  suffix: t('minutes'),
+                  onChange: v => set({ pomodoroLongBreakMs: v * 60000 })
+                }),
+                h(Slider, {
+                  key: 'pomodoroRounds',
+                  label: t('pomodoroRounds'),
+                  value: settings.pomodoroRounds,
+                  min: 2,
+                  max: 12,
+                  step: 1,
+                  suffix: t('rounds'),
+                  hint: t('pomodoroRoundsHint'),
+                  onChange: v => set({ pomodoroRounds: v })
+                }),
+                h(Toggle, {
+                  key: 'pomodoroAutoNext',
+                  label: t('pomodoroAutoNext'),
+                  hint: t('pomodoroAutoNextHint'),
+                  value: settings.pomodoroAutoNext,
+                  onChange: v => set({ pomodoroAutoNext: v })
+                }),
+                h(Toggle, {
+                  key: 'pomodoroNotify',
+                  label: t('pomodoroNotify'),
+                  hint: t('pomodoroNotifyHint'),
+                  value: settings.pomodoroNotify,
+                  onChange: v => set({ pomodoroNotify: v })
+                }),
+                h(Toggle, {
+                  key: 'pomodoroCountdown',
+                  label: t('pomodoroCountdown'),
+                  value: settings.pomodoroCountdown,
+                  onChange: v => set({ pomodoroCountdown: v })
+                }),
+                // 开始/暂停按钮：设置页也能控制（桌宠不在手边时用得上）。
+                h('div', { key: 'pomoBtns', className: 'zf-pet-settings__btns' }, [
+                  h('button', {
+                    key: 'toggle',
+                    className: 'zf-pet-settings__btn',
+                    onClick: () => pomodoroAction(snapshot?.pomodoro?.running === true ? 'pause' : 'start')
+                  }, snapshot?.pomodoro?.running === true ? t('pomodoroPause') : t('pomodoroStart')),
+                  h('button', {
+                    key: 'skip',
+                    className: 'zf-pet-settings__btn',
+                    onClick: () => pomodoroAction('skip')
+                  }, t('pomodoroSkip')),
+                  h('button', {
+                    key: 'reset',
+                    className: 'zf-pet-settings__btn',
+                    onClick: () => pomodoroAction('reset')
+                  }, t('pomodoroReset'))
+                ]),
+                snapshot?.pomodoro?.show === true
+                  ? h('p', { key: 'pomoNow', className: 'zf-pet-settings__note' },
+                      `${snapshot.pomodoro.text ?? ''} · 第 ${snapshot.pomodoro.round ?? 1}/${snapshot.pomodoro.roundsPerLongBreak ?? 4} 轮`)
+                  : null
+              ])
+            : null
+        ]),
+
+        /* ── ⑥ 聊天与记忆：人设、共享背景、长期记忆、发消息 ─────────────── */
+        h(Group, { key: 'gChat', title: t('groupChat') },
+          [
+            h(Toggle, {
+              key: 'chatEnabled',
+              label: t('chatEnabled'),
+              hint: t('chatEnabledHint'),
+              value: settings.chatEnabled,
+              onChange: v => set({ chatEnabled: v })
+            }),
+            h('label', { key: 'persona', className: 'zf-pet-row' }, [
+              h('span', { key: 'l', className: 'zf-pet-row__label' }, t('persona')),
+              h('select', {
+                key: 's',
+                className: 'zf-pet-row__input',
+                value: settings.persona,
+                onChange: e => selectPersona(e.target.value)
+              }, (personas?.items ?? [{ name: 'default', title: '默认（内置）' }]).map(p =>
+                h('option', { key: p.name, value: p.name }, p.title ?? p.name)))
+            ]),
+            h('p', { key: 'personaHint', className: 'zf-pet-settings__note' }, t('personaHint')),
+            h('div', { key: 'personaBtns', className: 'zf-pet-settings__btns' }, [
+              h('button', {
+                key: 'reload',
+                className: 'zf-pet-settings__btn',
+                onClick: () => reloadPersonas()
+              }, t('personaReload'))
+            ]),
+
+            // ── 共享背景（人设的"底座"）────────────────────────────────────
+            //
+            // 用户点名："基于通用的世界观提示词加上不同的语言风格"、"可以在设置中共享"。
+            // 所以把"底座"显式列出来 —— 用户才知道世界观写在哪儿、改哪里。
+            h('h4', { key: 'sharedTitle', className: 'zf-pet-settings__sub' }, t('sharedTitle')),
+            h('p', { key: 'sharedHint', className: 'zf-pet-settings__note' }, t('sharedHint')),
+            (personas?.shared?.items?.length ?? 0) === 0
+              ? h('p', { key: 'sharedEmpty', className: 'zf-pet-settings__note' }, t('sharedEmpty'))
+              : h('ul', { key: 'sharedList', className: 'zf-pet-list' },
+                  (personas?.shared?.items ?? []).map(it => h('li', { key: it.name },
+                    `${it.name}.md · ${it.bytes} ${t('memoryBytes')}` +
+                    (it.preview ? ` — ${it.preview}` : '')))),
+            (personas?.shared?.items?.length ?? 0) === 0
+              ? null
+              : h('p', { key: 'sharedUsed', className: 'zf-pet-settings__note' },
+                  `${t('sharedUsed')} ${personas?.shared?.used ?? 0} ${t('sharedFiles')}`),
+
+            // ── 长期记忆（跨会话共享）──────────────────────────────────────
+            h('h4', { key: 'memTitle', className: 'zf-pet-settings__sub' }, t('memoryTitle')),
+            h('p', { key: 'memHint', className: 'zf-pet-settings__note' }, t('memoryHint')),
+            h(Toggle, {
+              key: 'memoryAuto',
+              label: t('memoryAuto'),
+              hint: t('memoryAutoHint'),
+              value: settings.memoryAuto,
+              onChange: v => set({ memoryAuto: v })
+            }),
+            h('textarea', {
+              key: 'memBox',
+              className: 'zf-pet-memobox',
+              placeholder: t('memoryEmpty'),
+              spellCheck: false,
+              // **非受控**（defaultValue + onInput）：受控 textarea 每敲一个字都会
+              // 重渲染整个设置页（人设/语音/聊天都在同一棵树里），打字会卡。
+              // `key` 带上字节数 → 外部改了记忆（比如自动提炼追加）时会重建元素，
+              // 用户能看到新内容；但他正在打字时不会被打断（草稿在 ref 里）。
+              defaultValue: memory?.text ?? '',
+              onInput: e => { memoryDraftRef.current = e.target.value }
+            }),
+            h('div', { key: 'memBtns', className: 'zf-pet-settings__btns' }, [
+              h('button', {
+                key: 'save',
+                className: 'zf-pet-settings__btn',
+                disabled: memoryBusy,
+                onClick: () => saveMemory()
+              }, memoryBusy ? t('memorySaving') : t('memorySave'))
+            ]),
+            memoryNote === null
+              ? null
+              : h('p', { key: 'memNote', className: 'zf-pet-settings__note' }, memoryNote),
+
+            // ── 发消息 ─────────────────────────────────────────────────────
+            h('label', { key: 'chatWs', className: 'zf-pet-row' }, [
+              h('span', { key: 'l', className: 'zf-pet-row__label' }, t('chatWorkspace')),
+              h('input', {
+                key: 'i',
+                className: 'zf-pet-row__input',
+                type: 'text',
+                value: settings.chatWorkspace,
+                placeholder: t('chatWorkspaceHint'),
+                onChange: e => set({ chatWorkspace: e.target.value })
+              })
+            ]),
+            h('div', { key: 'chatRow', className: 'zf-pet-chatrow' }, [
+              h('input', {
+                key: 'msg',
+                className: 'zf-pet-chatrow__input',
+                type: 'text',
+                value: chatDraft,
+                placeholder: t('chatPlaceholder'),
+                disabled: chatBusy,
+                onInput: e => { chatDraft = e.target.value },
+                onKeyDown: e => {
+                  if (e.key === 'Enter' && !chatBusy) sendChatMessage()
+                }
+              }),
+              h('button', {
+                key: 'send',
+                className: 'zf-pet-settings__btn',
+                disabled: chatBusy,
+                onClick: () => sendChatMessage()
+              }, chatBusy ? t('chatSending') : t('chatSend'))
+            ]),
+            chatNote === null
+              ? null
+              : h('p', { key: 'chatNote', className: 'zf-pet-settings__note' }, chatNote),
+            h('p', { key: 'chatReplyNote', className: 'zf-pet-settings__note' }, t('chatReplyNote'))
+          ]),
+
+        /* ── ⑦ 高级与诊断：**默认折叠** ───────────────────────────────────
+         *
+         * 这里放的全是"出问题时才需要看"的东西：服务状态、**启动命令（机器路径）**、
+         * 素材覆盖、会话 id、目录路径。原先它们以 24 条同权重的说明段落散在正文里，
+         * 其中一整行是绝对路径 —— 把真正要调的东西淹了。
+         * 折叠而不是删除：排障时它们是关键信息，藏起来但别丢掉。 */
+        h(Group, {
+          key: 'gAdvanced',
+          title: t('groupAdvanced'),
+          hint: t('advancedHint'),
+          collapsible: true,
+          open: false
+        },
+        [
+          // 桌宠是否真的浮在桌面上（第一眼要能判断）
+          h('div', { key: 'status', className: 'zf-pet-status' }, [
+            h('span', {
+              key: 'dot',
+              className: 'zf-pet-status__dot',
+              'data-zf-native': snapshot?.nativeAvailable === true ? 'on' : 'off'
+            }),
+            h('span', { key: 'txt' }, snapshot?.nativeAvailable === true ? t('nativeOn') : t('nativeOff'))
+          ]),
+          snapshot?.nativeAvailable === true
+            ? null
+            : h('p', { key: 'fallback', className: 'zf-pet-settings__note' }, t('fallbackNote')),
+          snapshot?.nativeError === null || snapshot?.nativeError === undefined
+            ? null
+            : h(Diag, { key: 'reason', k: t('reason'), v: snapshot.nativeError }),
+
+          // 素材覆盖
+          coverage === null
+            ? null
+            : h(Diag, {
+                key: 'cov',
+                k: t('diagAssets'),
+                v: `${coverage.coveredStates?.length ?? 0}/${(coverage.coveredStates?.length ?? 0) + (coverage.uncoveredStates?.length ?? 0)} ` +
+                  `${t('diagStates')} · ${coverage.bubbleCount ?? 0} ${t('diagBubbles')}` +
+                  (missingCount > 0 ? ` · ${missingCount} ${t('diagMissing')}` : '')
+              }),
+
+          // 合成服务（谁在管、pid、后端、最近一次错误）
           speakStatus?.service === undefined || speakStatus.service === null
-            ? t('svcUnknown')
-            : `${t('svcState')}：${speakStatus.service.ready
-                ? (speakStatus.service.ours ? t('svcOurs') : t('svcExternal'))
-                : t('svcDown')}` +
-              // 谁在管进程（装了语音 DSH 插件 vs 桌宠自己起）—— 排查时要能分清
-              (speakStatus.service.mode === 'plugin' ? ` · ${t('svcByPlugin')}` : '') +
-              (speakStatus.service.backend ? ` · ${speakStatus.service.backend}` : '') +
-              (speakStatus.service.pid ? ` · pid ${speakStatus.service.pid}` : '') +
-              (speakStatus.service.resident ? ` · ${t('svcResidentOn')}` : '') +
-              (speakStatus.service.lastError ? ` · ⚠ ${speakStatus.service.lastError}` : '')),
-        // 启动命令解析结果：用户能看到桌宠**到底会执行什么**
-        //（自动探测猜错时，一眼就能看出该改哪个设置）。
-        speakStatus?.launch === undefined || speakStatus.launch === null
-          ? null
-          : h('p', { key: 'svcLaunch', className: 'zf-pet-settings__note' },
-              `${t('svcLaunch')}：${(speakStatus.launch.argv ?? []).join(' ')}`),
-        speakNote === null
-          ? null
-          : h('p', { key: 'speakNote', className: 'zf-pet-settings__note' }, speakNote),
-        speakStatus === null
-          ? null
-          : h('p', { key: 'speakStatus', className: 'zf-pet-settings__note' },
-              `${t('speakStatus')}：${speakStatus.enabled ? t('on') : t('off')}` +
-              ` · ${speakStatus.url ?? '—'}` +
-              ` · ${t('speakCached')} ${speakStatus.cached ?? 0}`),
+            ? h(Diag, { key: 'svc', k: t('svcState'), v: t('svcUnknown') })
+            : h(Diag, {
+                key: 'svc',
+                k: t('svcState'),
+                v: (speakStatus.service.ready
+                  ? (speakStatus.service.ours ? t('svcOurs') : t('svcExternal'))
+                  : t('svcDown')) +
+                  // 谁在管进程（装了语音 DSH 插件 vs 桌宠自己起）—— 排查时要能分清
+                  (speakStatus.service.mode === 'plugin' ? ` · ${t('svcByPlugin')}` : '') +
+                  (speakStatus.service.backend ? ` · ${speakStatus.service.backend}` : '') +
+                  (speakStatus.service.pid ? ` · pid ${speakStatus.service.pid}` : '') +
+                  (speakStatus.service.resident ? ` · ${t('svcResidentOn')}` : '') +
+                  (speakStatus.service.lastError ? ` · ⚠ ${speakStatus.service.lastError}` : '')
+              }),
+          // 启动命令解析结果：用户能看到桌宠**到底会执行什么**
+          //（自动探测猜错时，一眼就能看出该改哪个配置）。机器路径归插件 loader 配置管，
+          // 面板只**只读展示**，不提供编辑控件。
+          speakStatus?.launch === undefined || speakStatus.launch === null
+            ? null
+            : h(Diag, {
+                key: 'svcLaunch',
+                k: t('svcLaunch'),
+                mono: true,
+                v: (speakStatus.launch.argv ?? []).join(' ')
+              }),
+          speakStatus === null
+            ? null
+            : h(Diag, {
+                key: 'speakStatus',
+                k: t('speakStatus'),
+                v: `${speakStatus.enabled ? t('on') : t('off')} · ${speakStatus.url ?? '—'} · ` +
+                  `${t('speakCached')} ${speakStatus.cached ?? 0}`
+              }),
 
-        h(Toggle, {
-          key: 'chatEnabled',
-          label: t('chatEnabled'),
-          hint: t('chatEnabledHint'),
-          value: settings.chatEnabled,
-          onChange: v => set({ chatEnabled: v })
-        }),
-        h('label', { key: 'persona', className: 'zf-pet-row' }, [
-          h('span', { key: 'l', className: 'zf-pet-row__label' }, t('persona')),
-          h('select', {
-            key: 's',
-            className: 'zf-pet-row__input',
-            value: settings.persona,
-            onChange: e => selectPersona(e.target.value)
-          }, (personas?.items ?? [{ name: 'default', title: '默认（内置）' }]).map(p =>
-            h('option', { key: p.name, value: p.name }, p.title ?? p.name)))
-        ]),
-        h('p', { key: 'personaHint', className: 'zf-pet-settings__note' }, t('personaHint')),
-        h('div', { key: 'personaBtns', className: 'zf-pet-settings__btns' }, [
-          h('button', {
-            key: 'reload',
-            className: 'zf-pet-settings__btn',
-            onClick: () => reloadPersonas()
-          }, t('personaReload'))
-        ]),
-        h('p', { key: 'personaDir', className: 'zf-pet-settings__note' },
-          `${t('personaDir')}：${personas?.dir ?? t('personaDirHint')}`),
-
-        // ── 共享背景（加法人设的"底座"）────────────────────────────────────
-        //
-        // 用户点名："基于通用的世界观提示词加上不同的语言风格"、"可以在设置中共享"。
-        // 所以这里把"底座"显式列出来 —— 用户才知道世界观写在哪儿、改哪里。
-        h('h4', { key: 'sharedTitle', className: 'zf-pet-settings__sub' }, t('sharedTitle')),
-        h('p', { key: 'sharedHint', className: 'zf-pet-settings__note' }, t('sharedHint')),
-        (personas?.shared?.items?.length ?? 0) === 0
-          ? h('p', { key: 'sharedEmpty', className: 'zf-pet-settings__note' }, t('sharedEmpty'))
-          : h('ul', { key: 'sharedList', className: 'zf-pet-list' },
-              (personas?.shared?.items ?? []).map(it => h('li', { key: it.name },
-                `${it.name}.md · ${it.bytes} ${t('memoryBytes')}` +
-                (it.preview ? ` — ${it.preview}` : '')))),
-        (personas?.shared?.items?.length ?? 0) === 0
-          ? null
-          : h('p', { key: 'sharedUsed', className: 'zf-pet-settings__note' },
-              `${t('sharedUsed')} ${personas?.shared?.used ?? 0} ${t('sharedFiles')}`),
-        h('p', { key: 'sharedDir', className: 'zf-pet-settings__note' },
-          `${t('personaDir')}：${personas?.shared?.dir ?? '—'}`),
-
-        // ── 长期记忆（跨会话共享）──────────────────────────────────────────
-        h('h4', { key: 'memTitle', className: 'zf-pet-settings__sub' }, t('memoryTitle')),
-        h('p', { key: 'memHint', className: 'zf-pet-settings__note' }, t('memoryHint')),
-        h(Toggle, {
-          key: 'memoryAuto',
-          label: t('memoryAuto'),
-          hint: t('memoryAutoHint'),
-          value: settings.memoryAuto,
-          onChange: v => set({ memoryAuto: v })
-        }),
-        h('textarea', {
-          key: 'memBox',
-          className: 'zf-pet-memobox',
-          placeholder: t('memoryEmpty'),
-          spellCheck: false,
-          // **非受控**（defaultValue + onInput）：受控 textarea 每敲一个字都会
-          // 重渲染整个设置页（人设/语音/聊天都在同一棵树里），打字会卡。
-          // `key` 带上字节数 → 外部改了记忆（比如自动提炼追加）时会重建元素，
-          // 用户能看到新内容；但他正在打字时不会被打断（草稿在 ref 里）。
-          defaultValue: memory?.text ?? '',
-          onInput: e => { memoryDraftRef.current = e.target.value }
-        }),
-        h('div', { key: 'memBtns', className: 'zf-pet-settings__btns' }, [
-          h('button', {
-            key: 'save',
-            className: 'zf-pet-settings__btn',
-            disabled: memoryBusy,
-            onClick: () => saveMemory()
-          }, memoryBusy ? t('memorySaving') : t('memorySave'))
-        ]),
-        memoryNote === null
-          ? null
-          : h('p', { key: 'memNote', className: 'zf-pet-settings__note' }, memoryNote),
-        h('p', { key: 'memFile', className: 'zf-pet-settings__note' },
-          `${t('memoryFile')}：${memory?.file ?? '—'}` +
-          (memory === null ? '' : ` · ${memory.bytes ?? 0} / ${memory.capBytes ?? 0} ${t('memoryBytes')}`)),
-        h('label', { key: 'chatWs', className: 'zf-pet-row' }, [
-          h('span', { key: 'l', className: 'zf-pet-row__label' }, t('chatWorkspace')),
-          h('input', {
-            key: 'i',
-            className: 'zf-pet-row__input',
-            type: 'text',
-            value: settings.chatWorkspace,
-            placeholder: t('chatWorkspaceHint'),
-            onChange: e => set({ chatWorkspace: e.target.value })
-          })
-        ]),
-        h('div', { key: 'chatRow', className: 'zf-pet-chatrow' }, [
-          h('input', {
-            key: 'msg',
-            className: 'zf-pet-chatrow__input',
-            type: 'text',
-            value: chatDraft,
-            placeholder: t('chatPlaceholder'),
-            disabled: chatBusy,
-            onInput: e => { chatDraft = e.target.value },
-            onKeyDown: e => {
-              if (e.key === 'Enter' && !chatBusy) sendChatMessage()
-            }
+          // 人设 / 共享背景 / 记忆 / 会话 —— 路径与 id
+          h(Diag, { key: 'personaDir', k: t('personaDir'), mono: true, v: personas?.dir ?? '—' }),
+          h(Diag, { key: 'sharedDir', k: t('sharedDir'), mono: true, v: personas?.shared?.dir ?? '—' }),
+          h(Diag, {
+            key: 'memFile',
+            k: t('memoryFile'),
+            mono: true,
+            v: `${memory?.file ?? '—'}` +
+              (memory === null ? '' : ` · ${memory.bytes ?? 0} / ${memory.capBytes ?? 0} ${t('memoryBytes')}`)
           }),
-          h('button', {
-            key: 'send',
-            className: 'zf-pet-settings__btn',
-            disabled: chatBusy,
-            onClick: () => sendChatMessage()
-          }, chatBusy ? t('chatSending') : t('chatSend'))
-        ]),
-        chatNote === null
-          ? null
-          : h('p', { key: 'chatNote', className: 'zf-pet-settings__note' }, chatNote),
-        h('p', { key: 'chatReplyNote', className: 'zf-pet-settings__note' }, t('chatReplyNote')),
-        h('p', { key: 'chatState', className: 'zf-pet-settings__note' },
+          h(Diag, {
+            key: 'chatState',
+            k: t('chatStatus'),
+            mono: true,
+            v: chatStatus === null
+              ? t('chatNoSession')
+              : `${chatStatus.sessionId ?? t('chatNoSession')} · ` +
+                `${t('chatSentCount')} ${chatStatus.sentCount ?? 0} / ${t('chatReplyCount')} ${chatStatus.replyCount ?? 0}`
+          }),
+          // ⭐ 工作区归属：用户反馈过"归类在未分类"，所以把归属**显示出来** ——
+          // 修没修好他自己一眼能看到，不用去翻工作区列表。
           chatStatus === null
-            ? t('chatNoSession')
-            : `${t('chatStatus')}：${chatStatus.sessionId ?? t('chatNoSession')} · ` +
-              `已发 ${chatStatus.sentCount ?? 0} / 已回 ${chatStatus.replyCount ?? 0}`),
-        // ⭐ 工作区归属：用户反馈过"归类在未分类"，所以把归属**显示出来** ——
-        // 修没修好他自己一眼能看到，不用去翻工作区列表。
-        chatStatus === null
-          ? null
-          : h('p', {
-              key: 'chatWsInfo',
-              className: 'zf-pet-settings__note',
-              'data-zf-ws': chatStatus.workspaceId ? 'ok' : 'none'
-            },
-            chatStatus.workspaceId
-              ? `${t('chatWsOk')}：${chatStatus.workspaceTitle ?? chatStatus.workspaceId}`
-              : t('chatWsNone')),
-
-        h('h3', { key: 'g5', className: 'zf-pet-settings__group' }, t('groupStatus')),
-        h('div', { key: 'status', className: 'zf-pet-status' }, [
-          h('span', {
-            key: 'dot',
-            className: 'zf-pet-status__dot',
-            'data-zf-native': snapshot?.nativeAvailable === true ? 'on' : 'off'
-          }),
-          h('span', { key: 'txt' }, snapshot?.nativeAvailable === true ? t('nativeOn') : t('nativeOff'))
-        ]),
-        snapshot?.nativeAvailable === true
-          ? null
-          : h('p', { key: 'fallback', className: 'zf-pet-settings__note' }, t('fallbackNote')),
-        snapshot?.nativeError === null || snapshot?.nativeError === undefined
-          ? null
-          : h('p', { key: 'reason', className: 'zf-pet-settings__note' },
-              `${t('reason')}：${snapshot.nativeError}`),
-        coverage === null
-          ? null
-          : h('p', { key: 'cov', className: 'zf-pet-settings__note' },
-              `素材：${coverage.coveredStates?.length ?? 0}/${(coverage.coveredStates?.length ?? 0) + (coverage.uncoveredStates?.length ?? 0)} 个状态已覆盖，` +
-              `气泡池 ${coverage.bubbleCount ?? 0} 张` +
-              (missingCount > 0 ? `，${missingCount} 张待抠图` : '')),
-        h('button', {
-          key: 'reset',
-          className: 'zf-pet-settings__btn',
-          onClick: () => runtime.requestResetPosition?.()
-        }, t('reset'))
+            ? null
+            : h(Diag, {
+                key: 'chatWsInfo',
+                k: t('chatWsLabel'),
+                v: chatStatus.workspaceId
+                  ? `${t('chatWsOk')}：${chatStatus.workspaceTitle ?? chatStatus.workspaceId}`
+                  : t('chatWsNone')
+              })
+        ])
       ])
     }
 
@@ -2144,6 +2288,32 @@ window.__ModuleLoader__.load({
   margin:12px 0 2px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;
   color:var(--dsw-alias-label-tertiary);font-weight:600;
 }
+
+/* 分组：把"设置控件"和"状态/诊断"分开。
+   原先所有东西平铺在同一列（8 个 h3 + 24 条同权重说明），视觉上没有层级，
+   用户找不到"我该动哪个"。分组给控件一个容器，折叠组给次要内容一个默认收起。 */
+.zf-pet-group{ display:flex;flex-direction:column;gap:7px; }
+.zf-pet-group__body{ display:flex;flex-direction:column;gap:7px; }
+.zf-pet-group--fold{ gap:5px; }
+.zf-pet-group__sum{
+  cursor:pointer;font-size:11px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--dsw-alias-label-tertiary);font-weight:600;
+  margin:12px 0 2px;list-style:none;
+}
+.zf-pet-group__sum::-webkit-details-marker{ display:none; }
+/* 自绘折叠箭头：不依赖原生 marker（各浏览器样式不一） */
+.zf-pet-group__sum::before{ content:'▸ '; }
+.zf-pet-group--fold[open] > .zf-pet-group__sum::before{ content:'▾ '; }
+
+/* 诊断键值行：路径/命令行用等宽并允许断行，长路径不会把面板撑破 */
+.zf-pet-diag{
+  display:grid;grid-template-columns:minmax(84px,auto) 1fr;gap:8px;
+  font-size:11px;color:var(--dsw-alias-label-tertiary);align-items:baseline;
+}
+.zf-pet-diag__k{ color:var(--dsw-alias-label-secondary);white-space:nowrap; }
+.zf-pet-diag__v{ word-break:break-all; }
+.zf-pet-diag__v--mono{ font-family:Consolas,"Cascadia Mono",monospace; }
+
 .zf-pet-row{
   display:grid;grid-template-columns:minmax(120px,1fr) auto;align-items:center;gap:10px;
   font-size:13px;color:var(--dsw-alias-label-primary);

@@ -33,7 +33,7 @@ import {
 } from '../src/pet/routes.js'
 import { createHub } from '../src/pet/hub.js'
 import { createPomodoro } from '../src/pet/pomodoro.js'
-import { loadVoice, resolveVoice } from '../src/pet/voice.js'
+import { loadVoice, resolveVoice, voiceReport } from '../src/pet/voice.js'
 import {
   createAffection, INTERACT_KINDS, interactLabel, interactText
 } from '../src/pet/interactions.js'
@@ -985,12 +985,13 @@ const voiceHandler = createHandler({
   getSettings: () => settingsValue,
   setSettings: next => next,
   resolveVoice: name => resolveVoice(realVoiceDir, name, realVoice),
-  voiceManifest: () => ({
-    version: realVoice.version,
-    generatedAt: realVoice.generatedAt,
-    count: realVoice.count,
-    lines: realVoice.lines
-  })
+  // ⚠️ 必须用**真的** `voiceReport()`，不能手拼一份。
+  //
+  // 这里原先手拼 `{version, generatedAt, count, lines}` —— 而生产代码里
+  // `/pet/voices` 也是手拼同一组字段，两边**一起漏掉了 `totalMs`**，
+  // 于是面板永远显示"40 条 / 0s"而这个测试全绿（假绿：桩和实现错得一模一样）。
+  // 现在两边共用 `voiceReport()`，桩再手拼就会立刻对不上。
+  voiceManifest: () => voiceReport(realVoice)
 })
 const voiceServer = http.createServer((req, res) => {
   voiceHandler(req, res).catch(() => { if (!res.headersSent) res.writeHead(500); res.end() })
@@ -1009,6 +1010,22 @@ await okAsync('GET /voices 返回清单（条数/时长/事件）', async () => 
     assert.equal(typeof l.durationMs, 'number')
     assert.ok(l.durationMs > 0, `${l.name} 时长应 > 0`)
   }
+  // ⭐⭐ 面板要显示"40 条 / 127s" —— 秒数来自 `totalMs`。
+  //
+  // 这条是被真 bug 逼出来的：`/pet/voices` 当时只返回 `{version, generatedAt,
+  // count, lines}`，**没有 `totalMs`**，而面板渲染 `voiceInfo.totalMs`
+  // → 永远显示 "0s"。桩和实现当时手拼了同一组字段，所以测试全绿。
+  // 现在断言"这个端点必须自带时长统计"，并顺带把聚合值核对一遍。
+  assert.equal(typeof body.totalMs, 'number',
+    '`/pet/voices` 必须带 totalMs（否则面板的秒数恒为 0）')
+  const sum = body.lines.reduce((a, l) => a + l.durationMs, 0)
+  assert.equal(body.totalMs, sum, `totalMs 应等于各条时长之和：${body.totalMs} vs ${sum}`)
+  assert.ok(body.totalMs > 0, '总时长应 > 0')
+  // exe 靠 lines 按事件挑台词 —— 这条字段不能在"统一形状"时被顺手删掉
+  assert.ok(body.lines.every(l => typeof l.event === 'string' || l.event === null),
+    'lines[].event 必须保留（exe 按事件索引）')
+  // `byName` 是 Map，序列化会变 {}，不该出现在应答里
+  assert.equal(body.byName, undefined, 'byName 是 Map，不应出现在 JSON 应答里')
 })
 
 await okAsync('⭐⭐ 白名单内的语音能取到真 mp3 字节', async () => {

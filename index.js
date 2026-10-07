@@ -2152,12 +2152,23 @@ export function apply (ctx, config) {
     },
     /** 语音（契约 §3 新增）：白名单查表，**运行时绝不合成**。 */
     resolveVoice: name => resolveVoice(VOICE_DIR, name, voice),
-    voiceManifest: () => ({
-      version: voice.version,
-      generatedAt: voice.generatedAt,
-      count: voice.count,
-      lines: voice.lines
-    }),
+    /**
+     * `GET /pet/voices` 的应答 —— 语音清单。
+     *
+     * ⚠️ **必须走 `voiceReport()`，不能只挑几个字段手拼**。
+     *
+     * 这里踩过一个 bug：面板要显示"40 条 / 127s"，秒数取的是 `totalMs`，
+     * 而本函数原先手拼的是 `{version, generatedAt, count, lines}` —— **没有 `totalMs`**。
+     * 于是面板永远显示 `40 条 / 0s`（`Math.round(undefined ?? 0)`），
+     * 而 host 侧其实早就算好了（`voiceReport().totalMs`，线上实测 127281ms）。
+     *
+     * 教训：同一份数据**只该有一个产出形状**。手挑字段 = 两条路各算一份，
+     * 迟早形状不一致，而且不一致时**不报错**、只是数字静默变成 0。
+     *
+     * `voiceReport()` 里没有 `byName`（那是个 `Map`，`JSON.stringify` 会变成 `{}`，
+     * 既没用又会误导），所以这里可以整份丢出去。
+     */
+    voiceManifest: () => voiceReport(voice),
     /**
      * 互动（契约 §3 新增）。
      *

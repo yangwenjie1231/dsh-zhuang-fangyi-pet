@@ -1247,6 +1247,135 @@ ok('运行时未装配时给出可读错误，而不是 undefined.t', () => {
   assert.throws(() => Pet({}), /运行时尚未装配/, '错误信息应指出运行时没装配')
 })
 
+/* ══════════════════════════════════════════════════════════════════════════
+ * 7c. ⭐ 设置面板的**信息架构**（重排后必须保住的东西）
+ *
+ * 面板原先是一列平铺：8 个分组 + 38 个控件 + 24 条同权重的说明段落 + 8 个按钮，
+ * 三种性质完全不同的东西（设置 / 状态 / 操作）挤在一起。重排的风险是
+ * **悄悄弄丢控件**（用户报"功能不见了"比"排列难看"严重得多），所以这里
+ * 逐项核对，而不是只断言"能渲染"。
+ *
+ * ⚠️ 桩 React **不会展开函数组件**（`Group`/`Toggle`/`Slider`/`Diag` 都停在
+ * `{type: fn, props}`），所以文案要从 `props.label/hint/title` 里取，
+ * 不能只扫 children —— 第一版就是这么写的，于是三条断言全假红。
+ * ──────────────────────────────────────────────────────────────────────── */
+
+/** 收集树里所有**用户可见文案**（含函数组件的 label/hint/title props）。 */
+function collectStrings (node, out = []) {
+  if (node === null || node === undefined) return out
+  if (typeof node === 'string') { out.push(node); return out }
+  if (typeof node === 'number' || typeof node === 'boolean') return out
+  if (Array.isArray(node)) { node.forEach(n => collectStrings(n, out)); return out }
+  if (typeof node !== 'object') return out
+  const p = node.props ?? {}
+  for (const k of ['label', 'hint', 'title', 'placeholder']) {
+    if (typeof p[k] === 'string') out.push(p[k])
+  }
+  collectStrings(p.children, out)
+  return out
+}
+
+/** 按组件名收集节点（桩里函数组件不会展开，只能按 `type.name` 找）。 */
+function collectByType (node, name, out = []) {
+  if (node === null || node === undefined) return out
+  if (Array.isArray(node)) { node.forEach(n => collectByType(n, name, out)); return out }
+  if (typeof node !== 'object') return out
+  if (typeof node.type === 'function' && node.type.name === name) out.push(node)
+  if (typeof node.type === 'string' && node.type === name) out.push(node)
+  if (node.props) collectByType(node.props.children, name, out)
+  return out
+}
+
+function renderSectionTree (settingsPatch = {}) {
+  const l = loadClient()
+  l.exports.apply(l.ctx)
+  const { Section, runtime } = l.exports.__test
+  runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 1 } } }
+  runtime.__state.snapshot = { petState: 'idle', label: '', bubble: null, nativeAvailable: true }
+  runtime.__state.settings = normalizePet(settingsPatch)
+  l.react.resetHooks()
+  return Section({ close () {} })
+}
+
+ok('⭐ 重排后每个设置控件都还在（防"功能悄悄消失"）', () => {
+  // 用**用户看得见的文案**核对，而不是内部键名：文案没了 = 控件没了。
+  const texts = collectStrings(renderSectionTree({ pomodoro: true, ttsResident: false }))
+  const joined = texts.join('|')
+  const expected = [
+    '启用桌宠', '显示方式', '大小', '不透明度', '总在最前', '点击穿透',
+    '显示气泡', '气泡显示表情图', '气泡显示时长', '两条气泡最小间隔',
+    'AI 完成时弹提醒', '审批/提问常亮提醒', '双击桌宠',
+    '活跃度', '完成后的开心时长', '空闲多久后睡觉', '深浅色主题',
+    '悬停时显示状态', '桌宠下方常显状态',
+    '让庄方宜说话', '把 AI 的回答念出来', '合成服务地址', '每次朗读字数上限',
+    '让语音模型常驻', '空闲时怎么释放', '空闲多少秒后释放（秒，0 = 不停）',
+    '启用番茄钟', '专注时长', '短休息', '长休息', '每几轮长休息',
+    '自动进入下一段', '阶段结束时提醒我', '桌宠下方显示倒计时',
+    '允许在气泡里聊天', '人设风格', '自动记住值得长期保留的事', '聊天工作区',
+    '重置位置', '试一句', '启动服务', '停止并释放', '保存记忆', '发一条'
+  ]
+  const missing = expected.filter(s => !joined.includes(s))
+  assert.deepEqual(missing, [], `这些控件的文案在重排中丢了：${missing.join('、')}`)
+})
+
+ok('⭐ 分组按"用户找东西的心智"排序（不再是开发历史顺序）', () => {
+  const groups = collectByType(renderSectionTree({}), 'Group')
+  const titles = groups.map(g => g.props.title)
+  // 标题复用既有 i18n 键（`groupBubble`='气泡'、`groupChat`='聊天'），
+  // 只有新增的分组才有新键 —— 这里断言的是**顺序与构成**，不是措辞。
+  assert.deepEqual(titles,
+    ['桌宠', '气泡', '作息与外观', '语音', '番茄钟', '聊天', '高级与诊断'],
+    `分组顺序不对，实际：${titles.join(' → ')}`)
+  // 关键性质：原先把"常规/窗口"拆成两组、把"运行状态"压在最后；
+  // 现在前两组是桌宠本体，诊断在最后且可折叠。
+  assert.equal(titles[0], '桌宠', '第一组应是桌宠本体')
+  assert.equal(titles[titles.length - 1], '高级与诊断', '诊断应在最后（不再夹在中间）')
+})
+
+ok('⭐ 诊断区默认**收起**（机器路径不该糊在脸上）', () => {
+  const groups = collectByType(renderSectionTree({}), 'Group')
+  const adv = groups.find(g => g.props.title === '高级与诊断')
+  assert.ok(adv, '应有"高级与诊断"分组')
+  assert.equal(adv.props.collapsible, true, '"高级与诊断"必须是可折叠的')
+  assert.notEqual(adv.props.open, true, '"高级与诊断"必须默认收起')
+  // 番茄钟默认关 → 也收起（8 个控件不该占着主面板）
+  const pomo = groups.find(g => g.props.title === '番茄钟')
+  assert.equal(pomo.props.collapsible, true, '番茄钟应可折叠')
+  assert.notEqual(pomo.props.open, true, '番茄钟默认关时应收起')
+})
+
+ok('⭐ 启动命令（机器路径）只出现在折叠的诊断区里', () => {
+  // 这条是"降噪"的核心：绝对路径原先以正文段落的形式糊在面板中间。
+  const tree = renderSectionTree({})
+  const groups = collectByType(tree, 'Group')
+  const adv = groups.find(g => g.props.title === '高级与诊断')
+  const advText = collectStrings(adv).join('|')
+  const allText = collectStrings(tree).join('|')
+  // 诊断区里**有**路径位（launch 由运行时数据填，静态渲染时是键名）
+  assert.ok(advText.includes('启动命令'), '诊断区应包含"启动命令"')
+  // 而正文（诊断区之外）不该出现机器路径的痕迹
+  const outside = collectStrings(tree).filter(s => !advText.includes(s)).join('|')
+  assert.ok(!/[A-Z]:\\/.test(outside), `正文里不该出现盘符路径：${outside.slice(0, 160)}`)
+  assert.ok(allText.length > 0, '面板应有可见文案')
+})
+
+ok('⭐ i18n 中英键集必须一致（漏翻会直接显示键名）', () => {
+  // 面板重排时新增了十几个键，最容易出的错是**只加一份** ——
+  // 那样英文界面会直接显示 `groupAdvanced` 这种裸键名。
+  //
+  // 用 `__test.DICT` 这个**真对象**核对，不去正则解析源码：
+  // 第一版就是正则切 `const DICT = {`，结果被嵌套结构撑爆（切出 5 份）。
+  // 数据已经在手里，就别去猜源码长什么样。
+  const l = loadClient()
+  const DICT = l.exports.__test.DICT
+  assert.ok(DICT && DICT.zh && DICT.en, '应导出 zh/en 两份文案')
+  const zh = Object.keys(DICT.zh)
+  const en = Object.keys(DICT.en)
+  assert.ok(zh.length > 100, `中文键数应 > 100，实际 ${zh.length}`)
+  assert.deepEqual(zh.filter(k => !en.includes(k)), [], '这些键只有中文')
+  assert.deepEqual(en.filter(k => !zh.includes(k)), [], '这些键只有英文')
+})
+
 /* ── 让位：原生窗口在跑时 overlay 必须完全不渲染 ──────────────────────────
  *
  * 契约 §2 对 `nativeAvailable` 的注释就是"供 overlay 判断是否让位"，
