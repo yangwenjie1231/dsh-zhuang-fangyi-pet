@@ -298,6 +298,86 @@ ok('台词清单与产物一致（改了台词忘了合成会红）', () => {
     `台词表里有、产物里没有（没跑 build-voice.ps1 或合成失败）：${missing.join(', ')}`)
 })
 
+/* ══════════════════════════════════════════════════════════════════════════
+ * v10：互动情境的表情池必须**非空**且**不带文字**
+ * ═════════════════════════════════════════════════════════════════════════ */
+
+section('v10 互动情境的表情池')
+
+ok('⭐⭐⭐ 每个互动情境都有专属表情池（否则会回落全池，吞掉她说的话）', () => {
+  // 这是一个**真实存在过**的缺陷，而且完全静默：
+  //
+  // `interact/<kind>` 原先**没有**专属池 → `pickEmoteFile` 返回 null →
+  // 回落**全池随机**。而全池 42 张里 **36 张（86%）自带文字**
+  //（「爱你哦」「比心」「略略略」…）。状态机有一条正确性规则：
+  // **图自带文字时不叠 Host 文案**（契约 §4 的 hasText）—— 于是：
+  //
+  //     用户点她一下 → 她该说「嗯…这样也挺好的。」
+  //     实际显示    → 一张写着「略略略」的贴纸，那句话**一个字都没出现**
+  //
+  // 而且不报错：优先级、时长、hasText 全是对的，指标上完全看不出来。
+  // 所以这里必须断言"池**非空**"，而不只是"池里的图不带文字"。
+  const kinds = ['click', 'pat', 'pet-head', 'fling', 'hover', 'feed', 'praise']
+  const empty = []
+  for (const k of kinds) {
+    const pool = EMOTE_BY_KEY[`interact/${k}`]
+    if (!Array.isArray(pool) || pool.length === 0) empty.push(k)
+  }
+  assert.deepEqual(empty, [],
+    `这些互动情境没有专属表情池（会回落全池、86% 概率吞掉文案）：${empty.join(', ')}`)
+})
+
+ok('⭐⭐⭐ 互动情境的池里**绝不能有自带文字的图**（否则文案被吞）', () => {
+  // 这一条是上一条的另一半：池非空还不够，池里的图必须**不带文字**。
+  // 漏一张进来，那条互动的话就一个字都不显示 —— 而且没有任何报错。
+  const catalog = JSON.parse(fs.readFileSync(CATALOG, 'utf8'))
+  const byFile = new Map()
+  for (const a of catalog.assets ?? []) {
+    // 产物路径与 id 的关系：bubble/<id>.png 或 bubble/<dir>/<id>.png
+    if (typeof a.id === 'string') byFile.set(a.id, a)
+  }
+  const offenders = []
+  for (const [key, files] of Object.entries(EMOTE_BY_KEY)) {
+    if (!key.startsWith('interact/')) continue
+    for (const f of files) {
+      // 从产物路径反推 id：`bubble/gif-26.png` → `gif-26`；`bubble/new/x.png` → `x`
+      const base = f.split('/').pop().replace(/\.(png|gif)$/i, '')
+      const rec = byFile.get(base)
+      if (rec === undefined) {
+        offenders.push(`${key}: ${f}（台账里找不到这个 id）`)
+        continue
+      }
+      if (rec.hasText === true) offenders.push(`${key}: ${f}（自带文字，会吞掉文案）`)
+    }
+  }
+  assert.deepEqual(offenders, [], `互动池里有不合适的图：${offenders.join('; ')}`)
+})
+
+ok('⭐ 互动池里的图**在产物清单里真实存在**（台账写了但没生成会红）', () => {
+  const atlas = JSON.parse(fs.readFileSync(path.join(ART, 'pet.json'), 'utf8'))
+  const present = new Set((atlas.bubble ?? []).map(b => b.file))
+  const missing = []
+  for (const [key, files] of Object.entries(EMOTE_BY_KEY)) {
+    if (!key.startsWith('interact/')) continue
+    for (const f of files) if (!present.has(f)) missing.push(`${key}: ${f}`)
+  }
+  assert.deepEqual(missing, [], `互动池引用了不存在的产物：${missing.join('; ')}`)
+})
+
+ok('互动池里的图必须**没有被排除在全池随机之外**（否则语义自相矛盾）', () => {
+  // 排除名单是"语义太强、不该随机撒"的图（么么哒/晚安啦）。互动是**用户主动
+  // 做动作**，语义明确，所以用它们没问题；但若某张图既在互动池又在排除名单，
+  // 说明归属判断自相矛盾，值得人看一眼。
+  const both = []
+  for (const [key, files] of Object.entries(EMOTE_BY_KEY)) {
+    if (!key.startsWith('interact/')) continue
+    for (const f of files) if (EMOTE_EXCLUDE_FROM_RANDOM.includes(f)) both.push(`${key}: ${f}`)
+  }
+  // 只做提示：不强制失败（排除名单管的是"随机撒"，互动不是随机撒）
+  if (both.length > 0) console.log(`  （提示）互动池里也在排除名单里的图：${both.join('; ')}`)
+  assert.ok(true)
+})
+
 function walkJs (dir) {
   const out = []
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {

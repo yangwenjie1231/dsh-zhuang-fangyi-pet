@@ -116,8 +116,18 @@ BUBBLE_MAX = 256            # 气泡最长边上限（1:1 缩放，不裁切）
 SOLID_EPS = 0.005           # 透明占比低于 0.5% 即视为「实心帧」（**只报告，不拦截**）
 OPAQUE_MIN = 0.95           # `opaque`（要不要套气泡底）判据：多数帧满幅才算满幅
 # 气泡情境分组顺序（台账按此顺序生成 `emotes.data.js`，让清单顺序稳定可 diff）。
+#
+# ⚠️ v10 加了 `interact/*`（互动情境）。**必须写进这个元组** ——
+# 台账文档（`docs/素材台账.md`）是按这个顺序遍历生成的，不在表里的 key
+# 会被**静默跳过**：产物 `emotes.data.js` 里有、台账文档里却查不到，
+# 于是"这张图到底归哪些情境"又变成只能靠读代码回答（台账存在的意义就是消除这个）。
+# 生成 `emotes.data.js` 的那条路径不受影响（它用 `by_key`，见下方注释），
+# 所以漏掉的症状**只在文档里**，更不容易被发现。
 BUBBLE_KEY_ORDER = ('happy', 'notify-complete', 'working', 'thinking', 'waiting',
-                    'error', 'tool/failed', 'inbox/inserted', 'idle', 'sleeping', 'waking')
+                    'error', 'tool/failed', 'inbox/inserted', 'idle', 'sleeping', 'waking',
+                    # v10：互动（用户："通过右键就点个按钮，很奇怪"）
+                    'interact/click', 'interact/pat', 'interact/pet-head',
+                    'interact/fling', 'interact/hover', 'interact/feed', 'interact/praise')
 
 
 # ── 台账 ────────────────────────────────────────────────────────────────────

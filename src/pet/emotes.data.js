@@ -93,6 +93,29 @@ export const EMOTE_BY_KEY = {
     "bubble/new/02-good-morning.png",
     "bubble/new/12-wake-up.png",
   ],
+  "interact/click": [
+    "bubble/gif-26.png",
+  ],
+  "interact/pat": [
+    "bubble/gif-28.png",
+    "bubble/gif-29.png",
+  ],
+  "interact/pet-head": [
+    "bubble/gif-28.png",
+    "bubble/gif-29.png",
+  ],
+  "interact/fling": [
+    "bubble/angry-charge.gif",
+  ],
+  "interact/hover": [
+    "bubble/gif-26.png",
+  ],
+  "interact/feed": [
+    "bubble/gif-29.png",
+  ],
+  "interact/praise": [
+    "bubble/gif-28.png",
+  ],
 }
 
 /** 全池回落时排除掉这些 —— 它们语义太强，随机撒容易莫名其妙。 */

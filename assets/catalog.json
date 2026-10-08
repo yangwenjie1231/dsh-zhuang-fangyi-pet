@@ -635,7 +635,9 @@
       "caption": "趴面",
       "mood": "idle",
       "keys": [
-        "idle"
+        "idle",
+        "interact/hover",
+        "interact/click"
       ],
       "random": true,
       "hasText": false
@@ -648,7 +650,10 @@
       "caption": "挂件吊坠",
       "mood": "idle",
       "keys": [
-        "idle"
+        "idle",
+        "interact/pat",
+        "interact/pet-head",
+        "interact/praise"
       ],
       "random": true,
       "hasText": false
@@ -661,7 +666,10 @@
       "caption": "抱小宠",
       "mood": "idle",
       "keys": [
-        "idle"
+        "idle",
+        "interact/pat",
+        "interact/pet-head",
+        "interact/feed"
       ],
       "random": true,
       "hasText": false
@@ -690,7 +698,8 @@
       "mood": "rage",
       "keys": [
         "error",
-        "tool/failed"
+        "tool/failed",
+        "interact/fling"
       ],
       "random": true
     },

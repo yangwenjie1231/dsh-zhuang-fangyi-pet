@@ -235,7 +235,8 @@
       "id": "angry-charge",
       "keys": [
         "error",
-        "tool/failed"
+        "tool/failed",
+        "interact/fling"
       ],
       "mood": "rage",
       "opaque": true,
@@ -262,7 +263,9 @@
       "hasText": false,
       "id": "gif-26",
       "keys": [
-        "idle"
+        "idle",
+        "interact/hover",
+        "interact/click"
       ],
       "mood": "idle",
       "opaque": false,
@@ -275,7 +278,10 @@
       "hasText": false,
       "id": "gif-28",
       "keys": [
-        "idle"
+        "idle",
+        "interact/pat",
+        "interact/pet-head",
+        "interact/praise"
       ],
       "mood": "idle",
       "opaque": false,
@@ -288,7 +294,10 @@
       "hasText": false,
       "id": "gif-29",
       "keys": [
-        "idle"
+        "idle",
+        "interact/pat",
+        "interact/pet-head",
+        "interact/feed"
       ],
       "mood": "idle",
       "opaque": false,
