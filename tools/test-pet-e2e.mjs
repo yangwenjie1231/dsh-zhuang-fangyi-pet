@@ -2362,6 +2362,205 @@ await ok('⭐⭐ POST /pet/settings 的改动必须出现在随后的 SSE 快照
     { doubleClick: before.doubleClick, statusFontScale: before.statusFontScale })
 })
 
+/* ══════════════════════════════════════════════════════════════════════════
+ * 3b. v10：手势 / 情境 / 摸鱼计数 / 今日统计（整条链路）
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+await ok('⭐⭐ 快照每帧都带 growth 与 today 两块（缺块 = 旧宿主，客户端会静默忽略）', async () => {
+  // 这两块是 v10 新增的**下行数据**：设置页「今天」页签与右键菜单「今天」
+  // 一行都读它们。缺了不会报错 —— 只会让那两个地方永远显示"没有记录"。
+  const framesBefore = sse.snapshots().length
+  // 触发一次广播（改个无关设置再改回来，避免动画面）
+  await post2('/api/zhuang-fangyi/pet/settings', { hint: true })
+  const deadline = Date.now() + 4000
+  let hit = null
+  while (Date.now() < deadline) {
+    hit = sse.snapshots().slice(framesBefore).find(s => s.growth !== undefined && s.today !== undefined)
+    if (hit) break
+    await new Promise(r => setTimeout(r, 25))
+  }
+  assert.ok(hit, `快照里缺 growth/today 块。最近帧的键：${JSON.stringify(Object.keys(sse.snapshots().slice(-1)[0] ?? {}))}`)
+  // growth 的必要字段
+  for (const k of ['firstMetAt', 'daysMet', 'streakDays', 'todayInteracts', 'todayByKind']) {
+    assert.ok(k in hit.growth, `growth 缺 ${k}`)
+  }
+  assert.ok('milestone' in hit.growth, 'growth 必须**总是**带 milestone 键（null 也要有）')
+  assert.equal(typeof hit.growth.daysMet, 'number')
+  assert.ok(hit.growth.daysMet >= 1, 'daysMet 至少是 1（初次见面当天算第 1 天）')
+  // today 的必要字段
+  for (const k of ['dayKey', 'pomodoroCount', 'focusMs', 'interrupts', 'streakDays', 'goalCount']) {
+    assert.ok(k in hit.today, `today 缺 ${k}`)
+  }
+  assert.ok(Array.isArray(hit.today.byTask), 'today.byTask 应是数组')
+  assert.ok(Array.isArray(hit.today.recent), 'today.recent 应是数组')
+  assert.equal(hit.today.recent.length, 7, 'recent 应给 7 天')
+})
+
+await ok('⭐ GET /pet/growth 与快照里的两块**同一份真相**', async () => {
+  const g = JSON.parse((await get('/api/zhuang-fangyi/pet/growth')).body)
+  const snap = sse.snapshots().slice(-1)[0]
+  assert.ok(g.growth, '缺 growth 块')
+  assert.ok(g.today, '缺 today 块')
+  assert.ok(g.affection, '缺 affection 块')
+  // 与最近一帧快照对比：daysMet / streakDays 这类"慢变量"必须一致
+  //（两处各算一份的话，菜单显示 3 天、面板显示 2 天，谁也说不清哪个对）
+  if (snap && snap.growth) {
+    assert.equal(g.growth.daysMet, snap.growth.daysMet, 'daysMet 与快照不一致')
+    assert.equal(g.today.streakDays, snap.today.streakDays, 'streakDays 与快照不一致')
+    assert.equal(g.today.dayKey, snap.today.dayKey, 'dayKey 与快照不一致')
+  }
+})
+
+await ok('⭐⭐ 专注期间的互动被记成"摸鱼"，并出现在快照的 pomodoro.interrupts 里', async () => {
+  // 这是把"互动"与"番茄钟"真正连起来的那一条链路：
+  //   POST /pet/interact → mood 判定 context==='focus' → stats.interrupt()
+  //   → 快照 pomodoro.interrupts 变大 → 阶段结束时她点评
+  //
+  // 用**真实时钟**把番茄钟跑起来（不注入假时钟：e2e 跑的就是线上配置）。
+  const before = JSON.parse((await get('/api/zhuang-fangyi/pet/pomodoro')).body).pomodoro
+  const iBefore = before.interrupts ?? 0
+
+  // 先开番茄钟（时长取设置里的，默认 25 分钟 —— 我们只跑开头几秒）
+  await post2('/api/zhuang-fangyi/pet/settings', { pomodoro: true })
+  await post2('/api/zhuang-fangyi/pet/pomodoro', { action: 'start' })
+  await new Promise(r => setTimeout(r, 150))
+  const running = JSON.parse((await get('/api/zhuang-fangyi/pet/pomodoro')).body).pomodoro
+  assert.equal(running.running, true, `番茄钟没跑起来：${JSON.stringify(running)}`)
+  assert.equal(running.phase, 'focus', '应该处于专注段')
+
+  // 专注期间摸她一下 → 应被记成摸鱼
+  const r = await post2('/api/zhuang-fangyi/pet/interact', { kind: 'click' })
+  assert.equal(r.status, 200, `互动应成功，实际 ${r.status}`)
+  const body = JSON.parse(r.body)
+  assert.equal(body.context, 'focus', `情境应是 focus，实际 ${body.context}`)
+  assert.ok(typeof body.interrupts === 'number' && body.interrupts > 0,
+    `专注期间的互动应返回摸鱼计数，实际 ${JSON.stringify(body.interrupts)}`)
+
+  const after = JSON.parse((await get('/api/zhuang-fangyi/pet/pomodoro')).body).pomodoro
+  assert.ok((after.interrupts ?? 0) > iBefore,
+    `pomodoro.interrupts 应该变大（${iBefore} → ${after.interrupts}）`)
+
+  // 悬停**不算**摸鱼（鼠标路过不该算你分心）
+  const iNow = after.interrupts
+  const r2 = await post2('/api/zhuang-fangyi/pet/interact', { kind: 'hover' })
+  assert.equal(r2.status, 200)
+  const after2 = JSON.parse((await get('/api/zhuang-fangyi/pet/pomodoro')).body).pomodoro
+  assert.equal(after2.interrupts, iNow, 'hover 不该增加摸鱼计数')
+
+  // 收尾：停表（别让它继续跑）
+  await post2('/api/zhuang-fangyi/pet/pomodoro', { action: 'pause' })
+  await post2('/api/zhuang-fangyi/pet/settings', { pomodoro: false })
+})
+
+await ok('⭐⭐ 情境感应真的生效：同一动作在不同状态下给出不同 context', async () => {
+  // 用户："互动当前方式，通过右键就点个按钮，很奇怪"。
+  // 情境感应就是那一维：同一个动作，结果随"她当时在干什么"变化。
+  // 这里用**真实状态机**驱动 —— 派发事件让 petState 变，再互动看 context。
+  const post = async kind => {
+    const r = await post2('/api/zhuang-fangyi/pet/interact', { kind })
+    assert.equal(r.status, 200, `互动失败：${r.status}`)
+    return JSON.parse(r.body)
+  }
+
+  // ① 默认（idle）→ context 是 default 或 close（取决于好感度档位）
+  const idle = await post('click')
+  assert.ok(['default', 'close'].includes(idle.context),
+    `idle 下应是 default/close，实际 ${idle.context}`)
+
+  // ② 派发一个工具调用 → working（等最短驻留）→ busy
+  ctx.emit('session/event', { id: 'e2e-mood' }, {
+    type: 'tool/call',
+    data: { turn: 1, step: 1, callId: 'c-mood', name: 'bash', arguments: '{}' }
+  })
+  const deadline = Date.now() + 6000
+  while (Date.now() < deadline) {
+    if (sse.snapshots().slice(-1)[0]?.petState === 'working') break
+    await new Promise(r => setTimeout(r, 50))
+  }
+  const busy = await post('click')
+  assert.equal(busy.context, 'busy', `working 下应是 busy，实际 ${busy.context}`)
+  // 而且文案与默认**不同**（否则"情境感应"是假的）
+  assert.notEqual(busy.text, idle.text, 'busy 下的文案应与 idle 不同')
+
+  // ③ 派发 turn/end（失败）→ error → trouble
+  ctx.emit('session/event', { id: 'e2e-mood' }, {
+    type: 'turn/end',
+    data: { turn: 1, reason: { kind: 'error' } }
+  })
+  const deadline2 = Date.now() + 4000
+  while (Date.now() < deadline2) {
+    if (sse.snapshots().slice(-1)[0]?.petState === 'error') break
+    await new Promise(r => setTimeout(r, 50))
+  }
+  const trouble = await post('click')
+  assert.ok(['trouble', 'busy'].includes(trouble.context),
+    `出错后应是 trouble（或仍在 busy），实际 ${trouble.context}`)
+
+  // ⚠️ **收尾：把这个会话的 error 闩锁清掉**。
+  //
+  // 不清理的话，`e2e-mood` 会以 error(60) 一直压住后面的 happy(50) ——
+  // 于是**后面那条完全无关的用例**（"turn/end completed → 推 happy"）会红，
+  // 而失败信息看起来与本节毫无关系。我第一版就是这样：新加的用例全绿，
+  // 却让下游一条老用例红了。
+  //
+  // 清法走**正常路径**（设计里就是这么定的：`running` 清掉该会话的 error 闩锁）：
+  // 先 running（清闩锁）再 idle（让它回到不参与聚合的状态）。
+  ctx.emit('agent/status', { agent: { id: 'e2e-mood' }, status: 'running' })
+  await new Promise(r => setTimeout(r, 120))
+  ctx.emit('agent/status', { agent: { id: 'e2e-mood' }, status: 'idle' })
+  // 等到聚合状态不再被这个会话的 error 压住为止
+  const deadline3 = Date.now() + 4000
+  while (Date.now() < deadline3) {
+    const sess = sse.snapshots().slice(-1)[0]?.sessions?.find(s => s.sessionId === 'e2e-mood')
+    if (sess === undefined || sess.state !== 'error') break
+    await new Promise(r => setTimeout(r, 50))
+  }
+  const finalSess = sse.snapshots().slice(-1)[0]?.sessions?.find(s => s.sessionId === 'e2e-mood')
+  assert.ok(finalSess === undefined || finalSess.state !== 'error',
+    `e2e-mood 的 error 闩锁没清掉（会污染下游用例）：${JSON.stringify(finalSess)}`)
+})
+
+await ok('⭐ 手势动作走真实路由（pat 带 level / fling / hover）', async () => {
+  const r1 = await post2('/api/zhuang-fangyi/pet/interact', { kind: 'pat', level: 2 })
+  assert.equal(r1.status, 200, `pat 应成功，实际 ${r1.status}`)
+  const b1 = JSON.parse(r1.body)
+  assert.equal(b1.kind, 'pat')
+  // 第 2 级有它自己的文案（与第 1 级不同）
+  const r2 = await post2('/api/zhuang-fangyi/pet/interact', { kind: 'pat', level: 1 })
+  const b2 = JSON.parse(r2.body)
+  assert.equal(r2.status, 200)
+  // 两个动作都必须**有反应**（哪怕在冷却里）
+  assert.ok(b1.text !== null || b2.text !== null, 'pat 至少给一次文案')
+
+  const r3 = await post2('/api/zhuang-fangyi/pet/interact', { kind: 'fling' })
+  assert.equal(r3.status, 200, 'fling 应成功')
+  const b3 = JSON.parse(r3.body)
+  assert.equal(b3.gain, 0, 'fling 不该涨好感（甩她不是亲昵）')
+
+  const r4 = await post2('/api/zhuang-fangyi/pet/interact', { kind: 'hover' })
+  assert.equal(r4.status, 200, 'hover 应成功')
+  assert.equal(JSON.parse(r4.body).gain, 0, 'hover 不该涨好感')
+})
+
+await ok('⭐ 计时节奏预设能改到设置（并立刻生效）', async () => {
+  const before = JSON.parse((await get('/api/zhuang-fangyi/pet/settings')).body).settings
+  const target = before.pomodoroPreset === 'deep' ? 'classic' : 'deep'
+  await post2('/api/zhuang-fangyi/pet/settings', { pomodoroPreset: target })
+  const after = JSON.parse((await get('/api/zhuang-fangyi/pet/settings')).body).settings
+  assert.equal(after.pomodoroPreset, target, `预设没改到：${after.pomodoroPreset}`)
+  // 还原
+  await post2('/api/zhuang-fangyi/pet/settings', { pomodoroPreset: before.pomodoroPreset })
+})
+
+await ok('⭐ set-task 真的写进快照（任务绑定）', async () => {
+  const r = await post2('/api/zhuang-fangyi/pet/pomodoro', { action: 'set-task', task: 'e2e 任务' })
+  assert.equal(r.status, 200, `set-task 应成功，实际 ${r.status}`)
+  const p = JSON.parse((await get('/api/zhuang-fangyi/pet/pomodoro')).body).pomodoro
+  assert.equal(p.task, 'e2e 任务', `快照里的 task 不对：${p.task}`)
+  // 还原（清空）
+  await post2('/api/zhuang-fangyi/pet/pomodoro', { action: 'set-task', task: '' })
+})
+
 await ok('派发 agent/status running → SSE 推 thinking', async () => {
   const before = sse.snapshots().length
   ctx.emit('agent/status', { agent: { id: 'e2e-1' }, status: 'running' })
