@@ -2206,13 +2206,44 @@ export function apply (ctx, config) {
     return stats.snapshot(Date.now(), { goalCount: s.pomodoroGoalCount })
   }
 
+  /**
+   * 番茄钟块（**唯一产出点**）。
+   *
+   * ⚠️ 抽出来的理由是一个**真实发生过的缺陷**：v10 我加 `task` / `interrupts`
+   * 时，只改了 `/pet/pomodoro` 路由那一份，**忘了快照那一份** ——
+   * 于是两个消费者看到的形状不一样：
+   *
+   *   · `/pet/pomodoro`（GET）：有 task / interrupts
+   *   · 快照（SSE 每帧）：**没有**
+   *
+   * 而设置页「今天」页签的任务输入框读的是 `snapshot.pomodoro.task`
+   *（它的数据源是快照，不是那个路由）→ **任务名永远显示空**，
+   * 即使宿主明明存着它。而且不报错。
+   *
+   * 教训与"同一份数据只该有一个产出形状"是同一条 —— 本项目在
+   * `voiceManifest` 那次已经吃过一遍（手挑字段 → 数字静默变成 0）。
+   * 所以这里收成一个函数，两处都调它。
+   */
+  const pomodoroBlock = (at = Date.now()) => ({
+    ...pomodoro.snapshot(at),
+    /**
+     * v10：当前任务名（"这一轮我在做什么"）。
+     *
+     * 为什么加在这里而不是 `settings`：它是**番茄钟的会话状态**，
+     * 不是用户偏好 —— 放进设置会让它被"重置设置"清掉，而且它每轮都可能变。
+     */
+    task: stats.task(),
+    /** v10：本阶段累计的摸鱼次数（专注中才有意义，阶段结束后归零）。 */
+    interrupts: stats.phaseInterrupts()
+  })
+
   /** 快照 + 设置 = 广播帧（exe 与 overlay 共用同一帧）。 */
   const withSettings = snap => ({
     ...snap,
     settings: exeSettings(),
     // 番茄钟块：**每帧都带上**（exe 用它显示倒计时，overlay 忽略）。
     // 与 `settings` 同一条通道，exe 断线降级轮询时拿到的也是同一份。
-    pomodoro: pomodoro.snapshot(Date.now()),
+    pomodoro: pomodoroBlock(),
     // 好感度（exe 显示档位；overlay 忽略）。
     affection: affection.snapshot(),
     /**
@@ -3118,19 +3149,9 @@ export function apply (ctx, config) {
     },
     /** 番茄钟状态存取（`/pet/pomodoro` 用；见 routes.js 的说明）。 */
     pomodoro: {
-      snapshot: () => ({
-        ...pomodoro.snapshot(Date.now()),
-        /**
-         * v10：当前任务名（设置页「今天」页签与统计用）。
-         *
-         * 为什么加在这里而不是 `settings`：任务是**番茄钟的会话状态**
-         *（"这一轮我在做什么"），不是用户偏好 —— 放进设置会让它被
-         * "重置设置"清掉，而且它每轮都可能变。
-         */
-        task: stats.task(),
-        /** v10：本阶段累计的摸鱼次数（专注中才有意义）。 */
-        interrupts: stats.phaseInterrupts()
-      }),
+      // ⚠️ 与快照走**同一个** `pomodoroBlock()` —— 两处各写一份的话，
+      // 加字段时漏一处就是"路由有、快照没有"（v10 真的这么错过一次）。
+      snapshot: () => pomodoroBlock(),
       /**
        * @param {string} action - 白名单动作（路由层已校验）
        * @param {object} [options] - `set-task` 时带 `{task}`

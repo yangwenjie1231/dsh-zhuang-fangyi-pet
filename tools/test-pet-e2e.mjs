@@ -2496,28 +2496,35 @@ await ok('⭐⭐ 情境感应真的生效：同一动作在不同状态下给出
   assert.ok(['trouble', 'busy'].includes(trouble.context),
     `出错后应是 trouble（或仍在 busy），实际 ${trouble.context}`)
 
-  // ⚠️ **收尾：把这个会话的 error 闩锁清掉**。
+  // ⚠️ **收尾：把这个会话彻底清干净**。
   //
-  // 不清理的话，`e2e-mood` 会以 error(60) 一直压住后面的 happy(50) ——
-  // 于是**后面那条完全无关的用例**（"turn/end completed → 推 happy"）会红，
-  // 而失败信息看起来与本节毫无关系。我第一版就是这样：新加的用例全绿，
-  // 却让下游一条老用例红了。
+  // 这里踩过两次，都是"新用例全绿、却让下游老用例红"：
   //
-  // 清法走**正常路径**（设计里就是这么定的：`running` 清掉该会话的 error 闩锁）：
-  // 先 running（清闩锁）再 idle（让它回到不参与聚合的状态）。
+  //  1. `e2e-mood` 会以 error(60) 一直压住后面的 happy(50) —— 下游那条
+  //     "turn/end completed → 推 happy" 无论怎么派发都到不了 happy；
+  //  2. 更隐蔽的一次：我在这里留了**一个仍在 running 的会话**，
+  //     于是下游"派发 agent/status running → 推 thinking"**不产生新帧**
+  //     （状态没变，`#emitIfChanged` 就不广播）—— 那条用例断言的是
+  //     "帧数变多了"，于是失败信息看起来与本节毫无关系。
+  //
+  // e2e 的用例共享**同一个真实宿主**，"我这条绿了"不等于"整体还绿"。
+  // 所以收尾必须做到：闩锁清掉 + 会话退出聚合 + **断言真的清干净了**。
+  //
+  // 清法走正常路径（设计里就是这么定的：`running` 清 error 闩锁）：
+  // 先 running（清闩锁）再 idle（让它不再参与聚合）。
   ctx.emit('agent/status', { agent: { id: 'e2e-mood' }, status: 'running' })
   await new Promise(r => setTimeout(r, 120))
   ctx.emit('agent/status', { agent: { id: 'e2e-mood' }, status: 'idle' })
-  // 等到聚合状态不再被这个会话的 error 压住为止
+  // 等到聚合状态不再被这个会话压住为止
   const deadline3 = Date.now() + 4000
   while (Date.now() < deadline3) {
     const sess = sse.snapshots().slice(-1)[0]?.sessions?.find(s => s.sessionId === 'e2e-mood')
-    if (sess === undefined || sess.state !== 'error') break
+    if (sess === undefined || (sess.state !== 'error' && sess.running !== true)) break
     await new Promise(r => setTimeout(r, 50))
   }
   const finalSess = sse.snapshots().slice(-1)[0]?.sessions?.find(s => s.sessionId === 'e2e-mood')
-  assert.ok(finalSess === undefined || finalSess.state !== 'error',
-    `e2e-mood 的 error 闩锁没清掉（会污染下游用例）：${JSON.stringify(finalSess)}`)
+  assert.ok(finalSess === undefined || (finalSess.state !== 'error' && finalSess.running !== true),
+    `e2e-mood 没收干净（会污染下游用例：既不产生新帧、又压住低优先级状态）：${JSON.stringify(finalSess)}`)
 })
 
 await ok('⭐ 手势动作走真实路由（pat 带 level / fling / hover）', async () => {
@@ -2559,6 +2566,33 @@ await ok('⭐ set-task 真的写进快照（任务绑定）', async () => {
   assert.equal(p.task, 'e2e 任务', `快照里的 task 不对：${p.task}`)
   // 还原（清空）
   await post2('/api/zhuang-fangyi/pet/pomodoro', { action: 'set-task', task: '' })
+})
+
+await ok('⭐⭐⭐ 快照的 pomodoro 块与 /pet/pomodoro 路由**形状必须一致**', async () => {
+  // 这条断言来自一个**我亲手犯的**缺陷：v10 加 `task` / `interrupts` 时，
+  // 我只改了路由那一份、忘了快照那一份 —— 于是：
+  //
+  //   · `/pet/pomodoro`（GET）：有 task / interrupts
+  //   · 快照（SSE 每帧）：**没有**
+  //
+  // 而设置页「今天」页签的任务输入框读的是 `snapshot.pomodoro.task`
+  //（它的数据源是快照）→ **任务名永远显示空**，即使宿主明明存着它，且不报错。
+  //
+  // 这就是"同一份数据只该有一个产出形状"那条纪律的又一次翻车
+  //（`voiceManifest` 那次是手挑字段 → 数字静默变成 0）。现在两处都走
+  // 同一个 `pomodoroBlock()`，这条断言把"键集必须相同"钉住。
+  const route = JSON.parse((await get('/api/zhuang-fangyi/pet/pomodoro')).body).pomodoro
+  const snap = sse.snapshots().slice(-1)[0]
+  assert.ok(snap, '应该已经有快照了')
+  assert.ok(snap.pomodoro, '快照里必须有 pomodoro 块')
+  const routeKeys = Object.keys(route).sort()
+  const snapKeys = Object.keys(snap.pomodoro).sort()
+  assert.deepEqual(snapKeys, routeKeys,
+    `两处的 pomodoro 块键集不一致：\n  路由独有：${routeKeys.filter(k => !snapKeys.includes(k))}\n` +
+    `  快照独有：${snapKeys.filter(k => !routeKeys.includes(k))}`)
+  // 具体把 v10 那两个字段点名（键集相同但两边都漏掉也会全绿）
+  assert.ok(snapKeys.includes('task'), '快照的 pomodoro 块缺 task（设置页任务框会永远显示空）')
+  assert.ok(snapKeys.includes('interrupts'), '快照的 pomodoro 块缺 interrupts（摸鱼计数看不到）')
 })
 
 await ok('派发 agent/status running → SSE 推 thinking', async () => {
