@@ -2439,6 +2439,91 @@ await ok('⭐⭐ 手势指引的文案在状态机的文案表里（否则气泡
   }
 })
 
+await ok('⭐⭐⭐ 文案表里有 key **不等于**气泡会把它送到屏幕上', async () => {
+  // 上一条断言只证明"表里有文案"。而真机上出的正是**表里有、屏幕上没有**：
+  //
+  //   · 选图走全池随机，42 张里 36 张自带文字；
+  //   · 状态机有一条正确性规则：**图自带文字时不叠 Host 文案**（契约 §4）
+  //     → `text` 被置 null，只剩一张「好吵啊」贴纸，指引一个字都没出现。
+  //
+  // 实测（真机触发后读快照）：
+  //   {kind:'image', image:'bubble/new/15-so-loud.png', text:null, imageHasText:true}
+  //
+  // 所以这里直接验证**交付物**：真实状态机 + 无文字图池，气泡必须
+  // 同时满足 (a) `text` 是那句指引、(b) 配图 `hasText === false`。
+  const { createPetState, EVENT_TEXT } = await import(
+    `file://${path.join(ROOT, 'src/pet/state.js').replace(/\\/g, '/')}`)
+  const noTextRec = { file: 'bubble/safe.png', hasText: false, opaque: false }
+  const s = createPetState({
+    config: { locale: 'zh' },
+    pickBubbleImage: () => noTextRec
+  })
+  s.notify({
+    key: 'pet/gesture-hint',
+    state: 'listening',
+    text: EVENT_TEXT['pet/gesture-hint'].zh,
+    image: noTextRec,
+    priority: 93,
+    durationMs: 10000
+  })
+  const b = s.snapshot(Date.now()).bubble
+  assert.ok(b, '没有气泡')
+  assert.equal(b.text, EVENT_TEXT['pet/gesture-hint'].zh,
+    `气泡的 text 必须是那句指引，实际 ${JSON.stringify(b.text)}`)
+  assert.notEqual(b.text, 'pet/gesture-hint', '气泡显示了裸 key（说明文案解析回落了）')
+  assert.equal(b.imageHasText, false, '配图自带文字 → 会把指引吞掉')
+
+  // 反向：**故意**给一张自带文字的图 → `text` 必须被吞掉（证明上面那条
+  // 断言不是恒真 —— 它抓的正是"图与文案互斥"这条规则本身）。
+  const s2 = createPetState({
+    config: { locale: 'zh' },
+    pickBubbleImage: () => ({ file: 'bubble/with-text.png', hasText: true, opaque: true })
+  })
+  s2.notify({
+    key: 'pet/gesture-hint',
+    state: 'listening',
+    text: EVENT_TEXT['pet/gesture-hint'].zh,
+    image: { file: 'bubble/with-text.png', hasText: true, opaque: true },
+    priority: 93,
+    force: true
+  })
+  const b2 = s2.snapshot(Date.now()).bubble
+  assert.equal(b2.text, null, '自带文字的图必须压掉 Host 文案（否则屏幕上两段文字打架）')
+})
+
+await ok('⭐⭐ 文案表写错名也能查到（resolveBubbleText 兜底，不再回落到裸 key）', async () => {
+  // 真 bug 的第二半：`pet/gesture-hint` 写在 EVENT_TEXT 里，而调用方没传
+  // `table` → `requestBubble` 查 STATE_TEXT 查不到 → 回落成 key 本身。
+  // 现在两张表都查，所以**不传 table 也能拿到文案**。
+  const { createPetState, EVENT_TEXT, STATE_TEXT } = await import(
+    `file://${path.join(ROOT, 'src/pet/state.js').replace(/\\/g, '/')}`)
+  const s = createPetState({
+    config: { locale: 'zh' },
+    pickBubbleImage: () => null
+  })
+  // 不传 table、不传 text —— 完全靠兜底
+  s.notify({ key: 'pet/gesture-hint', state: 'listening', priority: 93, force: true })
+  const b = s.snapshot(Date.now()).bubble
+  assert.equal(b.text, EVENT_TEXT['pet/gesture-hint'].zh,
+    `应查 EVENT_TEXT 兜底，实际 ${JSON.stringify(b.text)}`)
+
+  // 显式传错表（STATE_TEXT）也要能兜到 —— 这是最容易犯的写法
+  const s2 = createPetState({
+    config: { locale: 'zh' },
+    pickBubbleImage: () => null
+  })
+  s2.notify({ key: 'pet/gesture-hint', table: STATE_TEXT, state: 'listening', priority: 93, force: true })
+  const b2 = s2.snapshot(Date.now()).bubble
+  assert.equal(b2.text, EVENT_TEXT['pet/gesture-hint'].zh,
+    `表名传错也应兜到 EVENT_TEXT，实际 ${JSON.stringify(b2.text)}`)
+
+  // 两张表都没有的 key → 才回落 key 本身（保留原设计）
+  const s3 = createPetState({ config: { locale: 'zh' }, pickBubbleImage: () => null })
+  s3.notify({ key: 'nonexistent/key', state: 'listening', priority: 93, force: true })
+  const b3 = s3.snapshot(Date.now()).bubble
+  assert.equal(b3.text, 'nonexistent/key', '未知 key 应回落 key 本身（不抛错）')
+})
+
 await ok('⭐ GET /pet/growth 与快照里的两块**同一份真相**', async () => {
   const g = JSON.parse((await get('/api/zhuang-fangyi/pet/growth')).body)
   const snap = sse.snapshots().slice(-1)[0]

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
@@ -1128,6 +1129,24 @@ namespace DshZhuangFangyiPet
         /// <summary>按下之后是否移动超过阈值（超过就不是点击）。</summary>
         private bool _movedSincePress;
 
+        /// <summary>
+        /// 按下之后的位移**记账**（唯一入口）。
+        ///
+        /// 容差用 <see cref="PetGesture.IsPatMove"/>（6px，摸头的口径），
+        /// **不是** <see cref="ClickMaxMovePx"/>（4px）—— 见调用点那段注释里
+        /// 记的真 bug（4~6px 漂移会永久掐死长按计时器）。
+        ///
+        /// 抽成方法是为了**可测**：它原先内联在 `OnMouseMove` 里，而无头自检
+        /// 造不出真的 MouseMove 事件，所以"这里用错了阈值"没有任何断言能抓
+        /// （回滚验证实测：改回 4px 仍然 264 全绿）。
+        /// </summary>
+        private void TrackMove(double dx, double dy)
+        {
+            if (_movedSincePress) return;
+            if (double.IsNaN(_pressScreen.X)) return;
+            if (!PetGesture.IsPatMove(dx, dy)) _movedSincePress = true;
+        }
+
         // ------------------------------------------------------------------
         // v10：手势采样（抛掷速度）与长按计时（摸头）
         // ------------------------------------------------------------------
@@ -1164,13 +1183,26 @@ namespace DshZhuangFangyiPet
         private int _flingIndex;
 
         /// <summary>
-        /// 单调时钟（ms）。用 `Environment.TickCount` 而不是 `DateTime.Now`：
-        /// 用户改系统时间 / NTP 校正时，后者会跳变，而速度是**差值** ——
-        /// 跳变一次就能算出 ±10⁶ px/s 的荒唐速度，把一次普通点击判成抛掷。
+        /// 单调时钟（ms）。**高精度**，不是 `Environment.TickCount`。
+        ///
+        /// ⚠️ 为什么换掉 `TickCount`（实测证据）：它的粒度是 **15.625ms**
+        /// （实测：连续读 1 秒只变化 64 次）。而抛掷判据要在
+        /// `FlingWindowMs`(100ms) 窗口里算速度，窗口内的样本可能**全部落在
+        /// 同一个 tick** → `dt == 0` → `FlingVelocity` 直接 return 0 →
+        /// **判不出抛掷**。500Hz 以上的鼠标（8 个样本只跨 14ms）必然踩中；
+        /// 125Hz 也会被量化成"跳着走"的锯齿速度。
+        ///
+        /// 这正是"日志里抛掷次数为 0"而自检全绿的原因：自检喂的是
+        /// **手工构造的时间戳**（间隔 100ms），完全绕过了真实时钟的粒度 ——
+        /// 纯函数测得再全，也测不出"喂给它的时钟本身是坏的"。
+        ///
+        /// `Stopwatch` 基于 QPC（实测 `IsHighResolution=True`，频率 10MHz
+        /// = 亚微秒分辨率），且**同样是单调的**（保持原注释要的语义：
+        /// 用户改系统时间 / NTP 校正不会让速度算出 ±10⁶ px/s 的荒唐值）。
         /// </summary>
         private static double ClockMs()
         {
-            return (double)Environment.TickCount;
+            return Stopwatch.GetTimestamp() * 1000.0 / Stopwatch.Frequency;
         }
 
         /// <summary>清空速度样本（每次按下时调）。</summary>
@@ -1431,11 +1463,165 @@ namespace DshZhuangFangyiPet
         ///
         /// ⚠️ 300ms 这条 v10 起**语义变了**：以前"按住超过 300ms"什么都不触发，
         /// 现在它是**长按摸头**的下界（`PetGesture.PatMinMs` = 350）。
-        /// 300 与 350 之间那 50ms 是**故意的死区**：两个判据紧贴在一起时，
-        /// 采样抖动会让同一次按下在两条路径里一会儿算点击、一会儿算长按。
+        ///
+        /// ⚠️⚠️ v12 修正：300~350 之间那 50ms 原先被写成"**故意的死区**"，
+        /// 说"两个判据紧贴在一起时采样抖动会让人一会儿算点击、一会儿算长按"。
+        /// **那个理由站不住**：这里两条判据本来就不冲突 —— 位移小 + 时间短 = 点击，
+        /// 位移小 + 时间长 = 摸头，是**互斥且连续**的两段，中间留空只会造成
+        /// "按了没反应"。用户实测踩中（按住 320ms 松手 → 什么都不发生）。
+        /// 现在这 50ms 明确归入**单击**（见 `PetGesture.ClosesGapAsClick`），
+        /// 两个常量本身不动（语义与既有断言都保留）。
         /// </summary>
         internal const double ClickMaxMovePx = PetGesture.ClickMaxMovePx;
         internal const int ClickMaxMs = PetGesture.ClickMaxMs;
+        /// <summary>
+        /// 摸头（长按）允许的最大位移。**必须严格宽于 `ClickMaxMovePx`** ——
+        /// 见 `PetGesture.IsPatMove` 里记的那个真 bug（4~6px 漂移曾掐死摸头）。
+        /// </summary>
+        internal const double PatMaxMovePx = PetGesture.PatMaxMovePx;
+        /// <summary>`Stopwatch` 是否是高精度计时源（自检用）。</summary>
+        internal static bool DiagClockHighRes
+        {
+            get { return Stopwatch.IsHighResolution; }
+        }
+
+        /// <summary>读一次手势时钟（ms）。自检直接断言它的精度（见 `ClockMs`）。</summary>
+        internal static double DiagClockMs()
+        {
+            return ClockMs();
+        }
+
+        // ── v12：把**真实接线**暴露给自检 ────────────────────────────────────
+        //
+        // 为什么需要这几个：回滚验证揭穿了一个尴尬事实 —— 我新加的断言
+        // 测的全是**纯函数与常量**（`IsPatMove` / `ClosesGapAsClick` /
+        // `PatLevelOnRelease`）。把**调用点**改回旧行为（错误的阈值、没有兜底、
+        // 退回 TickCount），自检**依然 264 全绿**。也就是说那些断言能证明
+        // "零件是对的"，却证明不了"零件被装上了"。
+        //
+        // 这几个 hook 直接驱动事件处理器用的**同一条代码路径**（不是平行副本），
+        // 于是"装没装上"变成可断言的。
+
+        /// <summary>
+        /// 自检用：模拟按下（只做记账，不碰鼠标捕获 / 计时器）。
+        /// 顺序与 <see cref="OnMouseLeftButtonDown"/> 一致。
+        /// </summary>
+        internal void DiagPressAt(double screenX, double screenY, double clockMs)
+        {
+            _dragging = true;
+            _pressScreen = new Point(screenX, screenY);
+            _movedSincePress = false;
+            _patLevelReported = 0;
+            _pressClockMs = clockMs;
+            ResetSamples();
+            PushSample(clockMs, _pressScreen);
+        }
+
+        /// <summary>自检用：喂一次鼠标移动的位移（走 `OnMouseMove` 的同一条记账）。</summary>
+        internal void DiagMoveBy(double dx, double dy)
+        {
+            TrackMove(dx, dy);
+        }
+
+        /// <summary>自检用：位移是否已被记为"真的移动过"。</summary>
+        internal bool DiagMovedSincePress
+        {
+            get { return _movedSincePress; }
+        }
+
+        /// <summary>自检用：模拟一次长按计时器到期（走 `OnHoldTick` 的同一条判定）。</summary>
+        internal bool DiagHoldTick(double nowMs)
+        {
+            if (!_dragging || _flinging || _movedSincePress) return false;
+            int level = PetGesture.PatLevel((int)(nowMs - _pressClockMs));
+            if (level <= _patLevelReported) return false;
+            _patLevelReported = level;
+            return true;   // 调用方据此判断"这次 tick 会真的上报摸头"
+        }
+
+        /// <summary>自检用：已上报到第几级。</summary>
+        internal int DiagPatLevelReported
+        {
+            get { return _patLevelReported; }
+        }
+
+        /// <summary>松手时要做的动作（`ResolveRelease` 的返回值）。</summary>
+        internal enum ReleaseAction { None, Click, Fling, Pat }
+
+        /// <summary>
+        /// 松手判定的**唯一实现**（事件处理器与自检共用，**不是两份拷贝**）。
+        ///
+        /// 为什么必须抽出来：我最初把自检用的 `DiagRelease` 写成了**平行拷贝**
+        /// （又抄一遍判定链）。那正是本项目最贵的一类 bug —— 断言测拷贝、
+        /// 产品走原件，两者一漂移就回到"测试全绿但功能坏"。回滚验证已经
+        /// 证实过这个风险：4 条新断言里 3 条把调用点改回旧行为后仍然全绿。
+        ///
+        /// 现在两边都调这个函数，**没有第二份判据可以漂移**。
+        /// </summary>
+        internal ReleaseAction ResolveRelease(double dx, double dy, int elapsedMs,
+                                              out int patLevel, out double speed)
+        {
+            patLevel = 0;
+            speed = ReleaseSpeed();
+
+            // ⚠️ 这里**故意不重复** `ClosesGapAsClick` —— 那条规则归 `Classify`
+            // 独家所有（它是"手势判定的唯一真相"）。
+            //
+            // 我第一版在两层都写了一遍，回滚验证立刻暴露了代价：
+            // 单独拆掉**任何一层**，另一层仍然把它判成 Click → 断言**不会变红**
+            // → 回滚验证失效（B 与 B2 两条都 GREEN）。两份判据互相掩护，
+            // 表面"纵深防御"，实际是"漂移了也看不出来"。
+            //
+            // 这里保留 `IsClickGesture` 只为一件事：`Classify` 在**坏数据**上
+            // 会 try/catch 回落 Drag，而点击判定要能独立兜住那次异常。
+            // 两者口径相同（同一个 `PetGesture.IsClick`），不构成第二套判据。
+            bool isClick = !_movedSincePress && IsClickGesture(dx, dy, elapsedMs);
+
+            PetGestureKind kind = PetGestureKind.Drag;
+            try { kind = PetGesture.Classify(dx, dy, elapsedMs, speed); }
+            catch { kind = PetGestureKind.Drag; }
+
+            if (isClick || kind == PetGestureKind.Click) return ReleaseAction.Click;
+
+            // v10：抛掷。`FlingEnabled` 为 false 时**什么都不做**（= 当作普通
+            // 拖动，她停在松手的位置）。不是"飞了但不上报"—— 那会让用户看到
+            // "关了开关她还在飞"，以为开关坏了。
+            if (kind == PetGestureKind.Fling && FlingEnabled) return ReleaseAction.Fling;
+
+            // v12：**摸头的松手兜底**。
+            //
+            // 原先摸头**完全**由长按计时器驱动（`OnHoldTick`），而松手路径只处理
+            // Click 与 Fling —— **没有 Pat 分支**。于是只要计时器没走成（被漂移
+            // 掐死、UI 线程被卡、消息循环刚好忙），`Classify` 明确判出 `Pat`，
+            // 却**没有任何人响应**，用户松开手指什么都没有。
+            //
+            // 兜底规则：已经报过级就不重复（否则一次按住会上报两次），
+            // 一级都没报过且时长够了就补第 1 级。
+            if (kind == PetGestureKind.Pat && LongPressEnabled)
+            {
+                int back = PetGesture.PatLevelOnRelease(_patLevelReported, elapsedMs);
+                if (back > 0) { patLevel = back; return ReleaseAction.Pat; }
+            }
+
+            return ReleaseAction.None;
+        }
+
+        /// <summary>
+        /// 自检用：走**事件处理器同款**的松手判定（`ResolveRelease` 薄壳）。
+        /// 返回 `"click"` / `"fling"` / `"pat:N"` / `"none"`。
+        ///
+        /// `"none"` 就是用户看到的"点了/按了没反应"。
+        /// </summary>
+        internal string DiagRelease(double dx, double dy, int elapsedMs)
+        {
+            int patLevel;
+            double speed;
+            ReleaseAction a = ResolveRelease(dx, dy, elapsedMs, out patLevel, out speed);
+            if (a == ReleaseAction.Pat) return "pat:" + patLevel;
+            if (a == ReleaseAction.Click) return "click";
+            if (a == ReleaseAction.Fling) return "fling";
+            return "none";
+        }
 
         /// <summary>
         /// 判定一次按下-抬起是否算"单击"。**纯函数**（自检直接断言，
@@ -1496,13 +1682,24 @@ namespace DshZhuangFangyiPet
                 Point screen = PointToScreen(e.GetPosition(this));
                 // v10：每个移动都进速度样本（抛掷判据的唯一数据来源）。
                 PushSample(ClockMs(), screen);
-                // v9：记下"有没有真的移动过"（超过阈值就不算点击了）。
-                if (!_movedSincePress &&
-                    !double.IsNaN(_pressScreen.X) &&
-                    IsClickGesture(screen.X - _pressScreen.X, screen.Y - _pressScreen.Y, 0) == false)
-                {
-                    _movedSincePress = true;
-                }
+                // v12：**"按住不动"的容差必须与手势判定一致**。
+                //
+                // 这里原先调 `IsClickGesture(..., 0)`，也就是用**单击**的
+                // `ClickMaxMovePx`(4px) 判"有没有动过"。而 `Classify` 判摸头用的
+                // 是 `PatMaxMovePx`(6px) —— 两边不一致，4~6px 的漂移会让
+                // `OnHoldTick` 永久停表（`if (_movedSincePress) StopHoldTimer()`），
+                // 于是**明明判出摸头，却没人上报**。按住鼠标时手漂 4~6px 是常态，
+                // 所以用户感觉"摸头大部分时候不灵"。
+                //
+                // 现在改调 `IsPatMove`（同一个 6px），并把"真的移动了"（用于
+                // 排除单击）单独记为 `_movedSincePress`。
+                //
+                // ⚠️ 抽成 `TrackMove` 不是为了好看：这段判据**长在事件处理器里**
+                // 时，无头自检根本造不出真的 MouseMove 事件 —— 于是"阈值用错了"
+                // **没有任何断言能发现**。回滚验证证实了这点：我把这行改回
+                // `IsClickGesture(..., 0)`，自检照样 264 全绿。抽出来之后，
+                // 自检能直接驱动这段**真实接线**（见 `SelfTest` 的 v12 接线断言）。
+                TrackMove(screen.X - _pressScreen.X, screen.Y - _pressScreen.Y);
                 double dpi = _hwnd == IntPtr.Zero ? 1.0 : PetNative.GetDpiForWindowSafe(_hwnd) / 96.0;
                 if (dpi <= 0) dpi = 1.0;
                 Left = screen.X / dpi - _dragOffsetDip.X;
@@ -1522,7 +1719,6 @@ namespace DshZhuangFangyiPet
             // v9：先判定"这是点击还是拖动"，**再**结束拖动。
             // 顺序不能反：`EndDrag` 会清 `_dragging` 并 ReclampPosition，
             // 而点击判定要用按下时的坐标（不受 Reclamp 影响，但逻辑上先判更清楚）。
-            bool isClick = false;
             double dx = double.NaN;
             double dy = double.NaN;
             int elapsed = 0;
@@ -1532,19 +1728,14 @@ namespace DshZhuangFangyiPet
                 dx = now.X - _pressScreen.X;
                 dy = now.Y - _pressScreen.Y;
                 elapsed = (int)(DateTime.UtcNow - _pressAt).TotalMilliseconds;
-                isClick = !_movedSincePress && IsClickGesture(dx, dy, elapsed);
             }
-            catch { isClick = false; }
+            catch { dx = double.NaN; dy = double.NaN; }
 
-            // v10：手势判定要在**样本还完整**的时候算 —— `EndDrag` 之后
-            // 这些样本会被下一次按下清掉。
-            double speed = ReleaseSpeed();
-            PetGestureKind kind = PetGestureKind.Drag;
-            try
-            {
-                kind = PetGesture.Classify(dx, dy, elapsed, speed);
-            }
-            catch { kind = PetGestureKind.Drag; }
+            // v10/v12：判定链收敛在 `ResolveRelease`（事件处理器与自检**同一份**）。
+            // 速度必须在 `EndDrag` 之前取 —— 之后样本会被下一次按下清掉。
+            int patLevel;
+            double speed;
+            ReleaseAction action = ResolveRelease(dx, dy, elapsed, out patLevel, out speed);
 
             StopHoldTimer();
             _pressClockMs = 0;
@@ -1552,20 +1743,13 @@ namespace DshZhuangFangyiPet
             EndDrag();
             e.Handled = true;
 
-            // 单击保持原有语义（`_movedSincePress` 已经把"拖过"排除了）。
-            if (isClick || kind == PetGestureKind.Click)
+            if (action == ReleaseAction.Click)
             {
                 try { ClickInvoked(); } catch { }
                 return;
             }
 
-            // v10：抛掷。**只有**在拖动真的发生过、且速度达标时才飞 ——
-            // `Classify` 已经在坏数据上回落 Click/Drag，这里不再重复判断。
-            //
-            // ⚠️ `FlingEnabled` 为 false 时**什么都不做**（= 当作普通拖动，
-            // 她停在松手的位置）。不是"飞了但不上报" —— 那会让用户看到
-            // "关了开关她还在飞"，以为开关坏了。
-            if (kind == PetGestureKind.Fling && FlingEnabled)
+            if (action == ReleaseAction.Fling)
             {
                 // 初速方向取样本算出来的那一段（与判据同一个窗口，不会"判定用
                 // 这一段、飞行用另一段"）。
@@ -1575,6 +1759,25 @@ namespace DshZhuangFangyiPet
                             "px/s 方向=(" + vx.ToString("0", CultureInfo.InvariantCulture) + "," +
                             vy.ToString("0", CultureInfo.InvariantCulture) + ")");
                 try { StartFling(vx, vy); } catch (Exception ex) { PetLog.Warn("抛掷失败: " + PetLog.Describe(ex)); }
+                return;
+            }
+
+            // v12：**摸头的松手兜底**。
+            //
+            // 原先摸头**完全**由长按计时器驱动（`OnHoldTick`），而松手路径
+            // 只处理 Click 与 Fling —— **没有 Pat 分支**。于是只要计时器没走成
+            // （被漂移掐死、UI 线程被卡、消息循环刚好忙），`Classify` 明确判出
+            // `Pat`，却**没有任何人响应它**，用户松开手指什么都没有。
+            //
+            // 这不是理论风险：`d6c5bbe` 加的引导气泡在教"按住"，
+            // 而用户报"手势没法正常触发"里最先被验证的就是这条。
+            //
+            // 兜底规则（`PatLevelOnRelease`）：已经报过级就不重复（否则一次
+            // 按住会上报两次），一级都没报过且时长够了就补第 1 级。
+            if (action == ReleaseAction.Pat)
+            {
+                PetLog.Info("长按摸头 → 第 " + patLevel + " 级（松手兜底：计时器未上报）");
+                try { PatInvoked(patLevel); } catch { }
             }
         }
 

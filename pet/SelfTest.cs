@@ -90,7 +90,7 @@ namespace DshZhuangFangyiPet
                 TestPomodoro();
                 TestVisualV11(opt, artDir, cacheDir);
                 TestVoice();
-                TestInteract();
+                TestInteract(artDir, cacheDir);
                 TestChatMode();
                 TestMutex();
                 TestHttp(opt);
@@ -880,13 +880,30 @@ namespace DshZhuangFangyiPet
             Check(patOk, "手势：350ms~4000ms 且位移 ≤6px → 长按摸头",
                   "350ms/1200ms/4000ms 都是 Pat");
 
-            // (2b) ⭐ 300~350ms 是**故意留的死区**：既不算点击、也不算长按。
-            //      两个判据紧贴时，采样抖动会让同一次按下在两条路径里各自命中一次
-            //      （用户看到"点一下"和"摸一下"同时发生）。
-            bool deadZone =
-                PetGesture.Classify(0, 0, 320, 0) == PetGestureKind.Drag;
-            Check(deadZone, "手势：300~350ms 是死区（既不点击也不长按，避免双重触发）",
-                  "320ms → Drag");
+            // (2b) ⭐⭐ 300~350ms 归入**单击**（v12 修正）。
+            //
+            // ⚠️ 这条断言原先写的是"300~350ms 是**故意留的死区**，320ms → Drag"，
+            // 理由为"两个判据紧贴时采样抖动会让同一次按下在两条路径里各自命中一次"。
+            // **那个理由是错的**，而且这条断言把 bug 锁进了测试里 ——
+            // 我修好产品代码后，是**它**先红，我才发现自己在推翻一条旧断言。
+            //
+            // 为什么原理由不成立：
+            //   · `Classify` 是**单值函数**，一次调用只返回一个 kind，
+            //     结构上不可能"同时判出 Click 和 Pat"；
+            //   · 真正可能重复上报的是**长按计时器**与**松手兜底**这两条独立
+            //     通道，而它们由 `PatLevelOnRelease` 的"已上报就不再补"保证唯一。
+            // 空档唯一的实际效果，就是用户按住 0.32 秒松手时"按了没反应"。
+            bool gapIsClick =
+                PetGesture.Classify(0, 0, 320, 0) == PetGestureKind.Click &&
+                PetGesture.Classify(0, 0, 301, 0) == PetGestureKind.Click &&
+                PetGesture.Classify(2, 0, 349, 0) == PetGestureKind.Click &&
+                // 350ms 起仍是摸头（空档只到 349）
+                PetGesture.Classify(0, 0, 350, 0) == PetGestureKind.Pat &&
+                // 位移超过 6px → 不是点击（那是拖动/抛掷的地盘）
+                PetGesture.Classify(30, 0, 320, 0) == PetGestureKind.Drag;
+            Check(gapIsClick,
+                  "⭐⭐ 300~350ms 归入单击（v12 修正：原先是被断言锁死的\"死区\"）",
+                  "301/320/349ms → Click；350ms → Pat；30px/320ms → Drag");
 
             // (3) ⭐⭐ 抛掷：速度达标 **且** 按下够久。位移大但速度低 → 仍是挪位置。
             //
@@ -2670,7 +2687,7 @@ namespace DshZhuangFangyiPet
         // `src/pet/interactions.js` 里（那边有 27 条带假时钟的单测）。
         // exe 不重算任何数值 —— 这里测的是 exe 自己那部分：
         // 手势判定、白名单、菜单解析、互动信号的去重。
-        private static void TestInteract()
+        private static void TestInteract(string artDir, string cacheDir)
         {
             // (1) ⭐⭐ 点击 vs 拖动：两个阈值都要看
             // 只看位移的话"慢慢拖 3px"会被当成点击；只看时间的话"快速拖一大段"也是。
@@ -2718,6 +2735,212 @@ namespace DshZhuangFangyiPet
                   !PetWindow.DiagIsClick(0, double.NegativeInfinity, 50),
                   "⭐ 坐标算不出来（NaN/Inf）时保守判成不是点击（宁可漏一次互动）",
                   "NaN×3 / +Inf / -Inf 全部返回 false");
+
+            // (2b) ⭐⭐⭐ 摸头容差必须**严格宽于**点击容差。
+            //
+            // 这条断言是**为真 bug 立的**（用户 2026-10-08："手势没法正常触发"）：
+            // `_movedSincePress` 原先用 `ClickMaxMovePx`(4px) 置位，一旦置位就
+            // **永久停掉长按计时器**；而 `Classify` 判摸头用 `PatMaxMovePx`(6px)。
+            // 位移落在 4~6px 之间时两边结论相反 —— `Classify` 说"这是摸头"，
+            // 计时器却已经被掐死 → **松手什么都不发生**。
+            //
+            // 而"按住鼠标时手漂 4~6px"是常态（高 DPI + 光滑鼠标垫尤甚），
+            // 所以这不是边角情况，是"摸头大部分时候不灵"的主因。
+            //
+            // 为什么断言写成**关系**（>）而不是"两个数各等于某值"：
+            // 单看常量，4 和 6 两个魔数都"合法"；正是这个"看起来都对"的
+            // 组合漏掉了 bug。关系式才抓得住它。
+            Check(PetWindow.PatMaxMovePx > PetWindow.ClickMaxMovePx,
+                  "⭐⭐⭐ 摸头容差必须严格宽于点击容差（否则 4~6px 漂移会掐死摸头）",
+                  "PatMaxMovePx=" + PetWindow.PatMaxMovePx +
+                  " > ClickMaxMovePx=" + PetWindow.ClickMaxMovePx);
+
+            // (2c) ⭐⭐ `IsPatMove` 是"按住不动"的**唯一**判据（两处都调它）。
+            // 6px 内算没动（计时器继续跑），>6px 才算真拖动。
+            // 注意 `3,3` 的直线距离 ≈4.24px，在 6px 容差内 → 必须算"没动"。
+            bool patMoveCases =
+                PetGesture.IsPatMove(0, 0) &&
+                PetGesture.IsPatMove(4, 0) &&      // 原先这里被判成"动过"→ 掐死计时器
+                PetGesture.IsPatMove(0, 5) &&
+                PetGesture.IsPatMove(6, 0) &&      // 边界含
+                PetGesture.IsPatMove(3, 3) &&      // 4.24px ≤ 6 → 没动
+                !PetGesture.IsPatMove(7, 0) &&
+                !PetGesture.IsPatMove(double.NaN, 0) &&
+                !PetGesture.IsPatMove(0, double.PositiveInfinity);
+            Check(patMoveCases,
+                  "⭐⭐ IsPatMove：6px 内（含致命的 4~6px 中间区）算「按住不动」",
+                  "0/4/5/6px 与 3+3px 全部「没动」；7px/NaN/Inf 算「动过」");
+
+            // (2d) ⭐⭐ 300~350ms 的**死区**必须归到单击，不能什么都不发生。
+            //
+            // 原先按住 320ms 松手：超过 ClickMaxMs(300) 不算点击、不到
+            // PatMinMs(350) 不算摸头 → **什么都不发生**。这是最容易复现的
+            // 误操作（"想点一下，手按久了点"），用户就是这样踩到的。
+            bool gapCases =
+                PetGesture.ClosesGapAsClick(0, 0, 301) &&
+                PetGesture.ClosesGapAsClick(0, 0, 320) &&     // 用户实测踩中的点
+                PetGesture.ClosesGapAsClick(2, 0, 349) &&
+                // 300 及以下本来就是点击 → 这个函数不该管
+                !PetGesture.ClosesGapAsClick(0, 0, 300) &&
+                // 350 及以上是摸头 → 不该抢
+                !PetGesture.ClosesGapAsClick(0, 0, 350) &&
+                !PetGesture.ClosesGapAsClick(0, 0, 800) &&
+                // 位移超点击容差 → 那是拖动/抛掷的事
+                !PetGesture.ClosesGapAsClick(9, 0, 320) &&
+                !PetGesture.ClosesGapAsClick(double.NaN, 0, 320);
+            Check(gapCases,
+                  "⭐⭐ 300~350ms 死区归入单击（原先「按了没反应」）",
+                  "301/320/349ms 判点击；300/350/800ms 不抢；9px/NaN 拒绝");
+
+            // (2e) ⭐⭐ 松手时的摸头兜底：计时器没上报就补第 1 级。
+            // 已报过级 → 补 0（否则同一次按住会上报两次）。
+            bool patRelease =
+                PetGesture.PatLevelOnRelease(0, 400) == 1 &&   // 计时器没走成 → 补
+                PetGesture.PatLevelOnRelease(0, 350) == 1 &&
+                PetGesture.PatLevelOnRelease(0, 349) == 0 &&   // 还没到门槛
+                PetGesture.PatLevelOnRelease(1, 400) == 0 &&   // 已报过 → 不重复
+                PetGesture.PatLevelOnRelease(3, 5000) == 0 &&
+                PetGesture.PatLevelOnRelease(0, 0) == 0;
+            Check(patRelease,
+                  "⭐⭐ 摸头松手兜底：计时器未上报时补第 1 级，已上报则不重复",
+                  "400/350ms 补 1 级；349ms 与已报过 1/3 级 → 补 0");
+
+            // (2f) ⭐⭐⭐ 手势时钟必须是**高精度**的。
+            //
+            // `Environment.TickCount` 粒度实测 **15.625ms**（连续读 1 秒只
+            // 变化 64 次）。而抛掷要在 `FlingWindowMs`(100ms) 窗口里算速度：
+            // 500Hz 鼠标的 8 个样本只跨 14ms → **全部落在同一个 tick** →
+            // `dt == 0` → `FlingVelocity` 直接 return 0 → **永远判不出抛掷**。
+            //
+            // 这条只能直接测时钟本身：自检原先全绿，是因为它喂的是
+            // **手工构造的时间戳**（间隔 100ms），完全绕过了真实时钟的粒度 ——
+            // 纯函数测得再全，也测不出"喂给它的时钟是坏的"。
+            // ⚠️ 这条断言**第一版是恒真的**：我原先只检查
+            // `Stopwatch.IsHighResolution` —— 那是**这台机器**的属性，
+            // 跟我用什么时钟毫无关系。回滚验证（把 ClockMs 改回 TickCount）
+            // 它依然全绿，等于没测。
+            //
+            // 现在改成测**可分辨性**：连续采样若干个微小间隔，若时钟粒度是
+            // TickCount 的 15.625ms，那么"忙等 1ms 再读"拿到的差值会是 0 或
+            // 约 15.6，**绝不会**出现 0<d<1ms 的细粒度读数。
+            // 高精度时钟能轻松给出这种读数。
+            bool sawSubMs = false;
+            double prev = PetWindow.DiagClockMs();
+            for (int i = 0; i < 200 && !sawSubMs; i++)
+            {
+                double t = PetWindow.DiagClockMs();
+                double d = t - prev;
+                if (d > 0 && d < 1.0) sawSubMs = true;
+                prev = t;
+            }
+            Check(sawSubMs,
+                  "⭐⭐⭐ 手势时钟能分辨**亚毫秒**（TickCount 的 15.625ms 粒度做不到）",
+                  "200 次连续采样中出现 0<Δt<1ms 的读数=" + sawSubMs);
+
+            // (2g) ⭐⭐⭐⭐ **接线**断言：把调用点改回旧行为必须变红。
+            //
+            // 这一组是**回滚验证逼出来的**。我最初只写了纯函数断言，结果是：
+            // 把 `PetWindow` 里的调用点改回旧写法（用 4px 判"动过"、
+            // 没有 Pat 兜底、时钟退回 TickCount），自检**仍然全绿** ——
+            // 那些断言证明了"零件对"，却证明不了"零件装上了"。
+            //
+            // 这里驱动的是事件处理器的**真实路径**：
+            //   `DiagPressAt` → `DiagMoveBy`（走 `TrackMove`）
+            //   → `DiagHoldTick`（走摸头判定）→ `DiagRelease`（走 `ResolveRelease`）
+            // 用**不显示**的窗口（Opacity=0，与 TestWindows 同一套约定），
+            // 只驱动逻辑，不弹任何界面。
+            PetOptions wo = new PetOptions();
+            wo.ArtDir = artDir;
+            wo.Scale = 1.0;
+            wo.Opacity = 0.0;
+            wo.ClickThrough = false;
+            wo.Topmost = false;
+            wo.HasPos = false;
+            wo.State = "idle";
+            wo.BubbleEnabled = false;
+            PetSpriteStore wstore = new PetSpriteStore(wo, null, cacheDir);
+            PetWindow w = new PetWindow(wo, null, wstore);
+            try
+            {
+                // (2g-1) 漂移 5px：**不该**被记成"真的移动过"（否则摸头计时器
+                //        会被掐死 —— 这正是用户报的"手势没法正常触发"）。
+                w.DiagPressAt(100, 100, 0);
+                w.DiagMoveBy(5, 0);
+                bool notMoved5 = !w.DiagMovedSincePress;
+                // 同一场景下继续：长按计时器**必须**还能上报摸头。
+                // ⚠️ 这条与下面的"松手兜底"是**互斥**的两种情形，不能混在
+                // 一次按下的断言里：计时器报过级之后，兜底**故意**不再补
+                //（`PatLevelOnRelease` 的"已上报则不重复"）。
+                // 我第一版把两者写进同一条断言，于是自检报了 FAIL ——
+                // 那是**断言写错**，不是产品错：`Release=none` 在这里是对的。
+                bool holdStillWorks = w.DiagHoldTick(900);
+                int afterTick = w.DiagPatLevelReported;
+                Check(notMoved5 && holdStillWorks && afterTick == 1,
+                      "⭐⭐⭐⭐ 接线：按住时漂移 5px 仍算「没动」，长按计时器照常上报第 1 级",
+                      "未被记为移动=" + notMoved5 + " 计时器上报=" + holdStillWorks +
+                      " 级别=" + afterTick);
+
+                // (2g-1b) 换一次按下：计时器**没走成**（不上报）→ 松手必须兜底补第 1 级。
+                w.DiagPressAt(100, 100, 0);
+                w.DiagMoveBy(5, 0);
+                string relDrift = w.DiagRelease(5, 0, 900);
+                Check(relDrift == "pat:1",
+                      "⭐⭐⭐⭐ 接线：漂移 5px + 计时器未上报 → 松手兜底补摸头第 1 级",
+                      "Release=" + relDrift);
+
+                // (2g-2) 漂移 9px：**该**被记成"移动过"（那是真拖动）。
+                w.DiagPressAt(100, 100, 0);
+                w.DiagMoveBy(9, 0);
+                bool drift9Ok = w.DiagMovedSincePress;
+                Check(drift9Ok,
+                      "⭐⭐⭐ 接线：漂移 9px 记为「真的移动过」（真拖动不该当点击/摸头）",
+                      "MovedSincePress=" + drift9Ok);
+
+                // (2g-3) 300~350ms 空档：松手必须**有反应**（原先死区 → "none"）。
+                w.DiagPressAt(100, 100, 0);
+                string relGap = w.DiagRelease(0, 0, 320);
+                Check(relGap == "click",
+                      "⭐⭐⭐ 接线：按住 320ms 松手 → 单击（原先死区什么都不发生）",
+                      "Release=" + relGap);
+
+                // (2g-4) 摸头兜底：计时器**一次都没上报**时，松手仍要补第 1 级。
+                w.DiagPressAt(100, 100, 0);
+                string relPat = w.DiagRelease(0, 0, 800);
+                Check(relPat == "pat:1",
+                      "⭐⭐⭐ 接线：计时器未上报时，松手兜底补摸头第 1 级（原先 Pat 无人响应）",
+                      "Release=" + relPat);
+
+                // (2g-5) 已上报过 → **不重复**补（否则一次按住上报两次）。
+                w.DiagPressAt(100, 100, 0);
+                bool ticked = w.DiagHoldTick(900);          // 计时器报了第 1 级
+                int lvlReported = w.DiagPatLevelReported;
+                string relDup = w.DiagRelease(0, 0, 900);
+                Check(ticked && lvlReported == 1 && relDup == "none",
+                      "⭐⭐⭐ 接线：计时器已上报第 1 级 → 松手**不重复**上报",
+                      "Tick上报=" + ticked + " 级别=" + lvlReported + " Release=" + relDup);
+
+                // (2g-6) 真拖动（位移大）不能被判成点击。
+                w.DiagPressAt(100, 100, 0);
+                w.DiagMoveBy(40, 0);
+                string relDrag = w.DiagRelease(40, 0, 200);
+                Check(relDrag == "none",
+                      "⭐⭐ 接线：拖动 40px/200ms → 不是点击（什么都不做是对的）",
+                      "Release=" + relDrag);
+
+                // (2g-7) 关掉长按开关 → 松手不该补摸头（开关要真的起作用）。
+                w.LongPressEnabled = false;
+                w.DiagPressAt(100, 100, 0);
+                string relOff = w.DiagRelease(0, 0, 800);
+                w.LongPressEnabled = true;
+                Check(relOff == "none",
+                      "⭐⭐ 接线：关掉 longPress 后，松手不再补摸头（开关真的接通）",
+                      "Release=" + relOff);
+            }
+            finally
+            {
+                try { w.ForceClose(); } catch { }
+                try { wstore.Dispose(); } catch { }
+            }
 
             // (2) ⭐ 拖动过程中的"移动过"判定用的是同一个阈值（单一真相）
             // 若两处各写一套，早晚出现"判定说没动、实际动了"。

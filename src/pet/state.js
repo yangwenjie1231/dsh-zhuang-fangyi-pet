@@ -263,6 +263,38 @@ export function textOf (table, key, locale) {
 }
 
 /**
+ * 气泡文案解析：**两张表都查**，再回落 key。
+ *
+ * ── 为什么需要它（真机上出过的事故）────────────────────────────────────
+ *
+ * `requestBubble` 原先只查 `extra.table ?? STATE_TEXT`。而调用方很容易忘传
+ * `table` —— `pet/gesture-hint` 就写在 `EVENT_TEXT` 里，调用时没传 table，
+ * 于是 `textOf` 查不到、按设计**回落成 key 本身**，用户在气泡里看到的是一串
+ * 「pet/gesture-hint」英文键名（或者更糟：被贴纸的 `hasText` 规则整个吞掉，
+ * 一个字都不显示）。
+ *
+ * 这个回落"绝不抛错"的设计本身是对的（文案缺失不该让桌宠崩），但它**太安静**：
+ * 写错了表名没有任何信号。所以这里改成**两张表都查**：
+ *   · 显式给了 `table` → 先查它（调用方明确指定时必须尊重）；
+ *   · 都不是 → 再依次查另一张；
+ *   · 仍然没有 → 才回落 key。
+ *
+ * 这样"表名写错"这个错误类别**根本不存在**了，而不是靠人记得传参。
+ */
+function resolveBubbleText (table, key, locale) {
+  const tables = table === undefined || table === null
+    ? [STATE_TEXT, EVENT_TEXT]
+    : [table, table === STATE_TEXT ? EVENT_TEXT : STATE_TEXT]
+  for (const t of tables) {
+    const entry = t[key]
+    if (entry !== undefined && entry !== null) {
+      return entry[locale] ?? entry.zh ?? key
+    }
+  }
+  return key
+}
+
+/**
  * 建立一个会话记录。
  *
  * `toolsInFlight` 用 **Set 而不是计数器**：工具结果可能乱序或重复到达，
@@ -521,7 +553,7 @@ export function createPetState (options = {}) {
     // 这不是显示偏好，是正确性要求 —— 见契约 §4 的 `hasText`。
     const text = imageHasText
       ? null
-      : (extra.text ?? textOf(extra.table ?? STATE_TEXT, key, cfg.locale))
+      : (extra.text ?? resolveBubbleText(extra.table, key, cfg.locale))
 
     if (extra.force !== true) {
       if (bubble !== null && at < bubble.at + bubble.durationMs && priority <= bubble.priority) return false

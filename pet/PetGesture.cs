@@ -168,6 +168,80 @@ namespace DshZhuangFangyiPet
             return Math.Sqrt(dx * dx + dy * dy) <= ClickMaxMovePx;
         }
 
+        /// <summary>
+        /// 位移是否还在"按住不动"的量级（摸头的容差）。
+        ///
+        /// ⚠️⚠️ **这个函数存在的唯一理由是修一个真 bug**（用户 2026-10-08：
+        /// "手势没法正常触发"）。原先有两套不同的容差：
+        ///   · `PetWindow._movedSincePress` 用 **`ClickMaxMovePx`(4px)** 置位，
+        ///     一旦置位就**永久停掉长按计时器**；
+        ///   · 而 `Classify` 判摸头用的是 **`PatMaxMovePx`(6px)**。
+        /// 于是位移落在 **4~6px 之间**时两边结论相反：
+        /// `Classify` 说"这是摸头"，计时器却已经被掐死 → **松手什么都不发生**。
+        ///
+        /// 而"按住鼠标时手漂 4~6 像素"是**常态**（尤其在高 DPI + 玻璃鼠标垫上），
+        /// 所以这不是边角情况 —— 它是"摸头大部分时候不灵"的主因。
+        ///
+        /// 现在两处都调这个函数，**单一真相**。
+        /// </summary>
+        internal static bool IsPatMove(double dx, double dy)
+        {
+            if (double.IsNaN(dx) || double.IsNaN(dy)) return false;
+            if (double.IsInfinity(dx) || double.IsInfinity(dy)) return false;
+            return Math.Sqrt(dx * dx + dy * dy) <= PatMaxMovePx;
+        }
+
+        /// <summary>
+        /// 松手时"还差一点点才到摸头"的那段空档，算作**单击**。
+        ///
+        /// 由来：`ClickMaxMs`(300) 到 `PatMinMs`(350) 之间原先是一个**死区** ——
+        /// 位移很小、按住 0.32 秒、松手：既不算点击（超过 300ms）
+        /// 也不算摸头（不到 350ms）→ **什么都不发生**。
+        /// 对用户来说就是"我明明按了，她没反应"，而这恰恰是最容易复现的
+        /// 误操作（想点一下，手按久了一点）。
+        ///
+        /// ⚠️ 这里**推翻了** SelfTest 里原先那条"300~350ms 是**故意的**死区"
+        /// 的断言。它给的理由是"两个判据紧贴时，采样抖动会让同一次按下在两条
+        /// 路径里各自命中一次"。**那个理由不成立**：
+        ///   · `Classify` 是**单值函数**，一次调用只可能返回一个 kind，
+        ///     结构上就不可能出现"同时判出 Click 和 Pat"；
+        ///   · 真正会重复上报的是**长按计时器**与松手路径这两条独立通道，
+        ///     而它们由 `PatLevelOnRelease` 的"已上报就不再补"来保证唯一
+        ///     （计时器要到 `PatMinMs` 之后才可能报级数）。
+        /// 所以空档唯一的实际效果就是"按了没反应"。
+        ///
+        /// 位移容差用 `PatMaxMovePx`(6px) 而不是点击的 4px：进到这个时间窗口
+        /// 说明用户本意可能是长按，只是没按够 —— 此时 6px 才是"没在拖"的口径。
+        /// </summary>
+        internal static bool ClosesGapAsClick(double dx, double dy, int elapsedMs)
+        {
+            if (elapsedMs <= ClickMaxMs || elapsedMs >= PatMinMs) return false;
+            if (double.IsNaN(dx) || double.IsNaN(dy)) return false;
+            if (double.IsInfinity(dx) || double.IsInfinity(dy)) return false;
+            return Math.Sqrt(dx * dx + dy * dy) <= PatMaxMovePx;
+        }
+
+        /// <summary>
+        /// 松手时该补报的摸头级数（0 = 不用补）。
+        ///
+        /// ⚠️ 又一个真 bug 的修法：摸头**完全**由长按计时器驱动
+        /// （`OnHoldTick` → `PatInvoked`），而松手路径**没有处理 Pat 分支** ——
+        /// 它只管 Click 与 Fling。于是只要计时器出于任何原因没走成
+        /// （被漂移掐死、被 UI 线程卡住、消息循环刚好忙），
+        /// `Classify` 明确判出 `Pat`，**却没有任何人响应它**。
+        ///
+        /// 所以松手时补一次下限：已经报过级就别重复（那只会上报两次），
+        /// 一级都没报过就补第 1 级。
+        /// </summary>
+        /// <param name="reportedLevel">本次按下已经上报到第几级</param>
+        /// <param name="elapsedMs">按下到松手的时长</param>
+        internal static int PatLevelOnRelease(int reportedLevel, int elapsedMs)
+        {
+            if (reportedLevel > 0) return 0;
+            if (elapsedMs < PatMinMs) return 0;
+            return 1;
+        }
+
         /// <summary>两点距离；任一坐标坏掉返回 NaN（调用方必须自己挡）。</summary>
         private static double Distance(double dx, double dy)
         {
@@ -207,6 +281,15 @@ namespace DshZhuangFangyiPet
             if (elapsedMs < 0) return PetGestureKind.Drag;
 
             if (IsClick(dx, dy, elapsedMs)) return PetGestureKind.Click;
+
+            // v12：300~350ms 的**空档归入单击**（见 `ClosesGapAsClick`）。
+            //
+            // ⚠️ 这一支必须在这里，而不是只写在 `PetWindow` 的松手路径里：
+            // `Classify` 是手势判定的**唯一真相**，而窗口那边会
+            // `if (isClick || kind == PetGestureKind.Click)`。
+            // 如果只在窗口里补 `isClick`，就会出现**两个互相矛盾的结论**
+            // （`Classify` 说 Drag、窗口说 Click），下次谁读 `kind` 谁就错。
+            if (ClosesGapAsClick(dx, dy, elapsedMs)) return PetGestureKind.Click;
 
             double dist = Distance(dx, dy);
 

@@ -812,14 +812,40 @@ export function apply (ctx, config) {
       flushGrowth()
     }
     try {
+      // ⚠️⚠️ 这条气泡此前**根本看不见**（用户 2026-10-08："新手引导的气泡也没有
+      // 正常显示"）。两个独立的坑叠在一起，都静默：
+      //
+      // **坑一：文案被贴纸吞掉。** `requestBubble` 的选图走
+      // `pickBubbleImage(key, seed)` → `pet/gesture-hint` **没有专属池** →
+      // 回落到**全池随机**，而全池 42 张里 36 张（86%）自带文字。
+      // 状态机有一条正确性规则：**图自带文字时不叠 Host 文案**（契约 §4
+      // `hasText`）→ 于是 `text` 被置 null，屏幕上只剩一张
+      // 「好吵啊」之类的贴纸，那句指引**一个字都没出现**。
+      // 实测（真机 /pet/command 触发后读快照）：
+      //     {kind:'image', image:'bubble/new/15-so-loud.png', text:null, imageHasText:true}
+      //
+      // **坑二：文案表查错了。** 文本来自 `textOf(extra.table ?? STATE_TEXT, key)`，
+      // 而 `pet/gesture-hint` 写在 `EVENT_TEXT` 里 —— 不显式传 `table` 的话，
+      // `textOf` 查不到就**回落成 key 本身**（`textOf` 的注释写着"未知 key 回落到
+      // key 本身，绝不抛错"）。就算坑一没发生，用户看到的也会是
+      // 「pet/gesture-hint」这串英文键名。番茄钟那几条 notify 有同样的隐患。
+      //
+      // 修法（与聊天回复 `pickChatBubbleImage` 完全同一套纪律）：
+      //   · **显式传 `text`**，不依赖表查找；
+      //   · **显式挑一张无文字的图**；挑不到就干脆不配图 ——
+      //     "宁可没有图，也不能吞掉正文"。
+      const image = pickChatBubbleImage()
       machine.notify({
         key: 'pet/gesture-hint',
         state: 'listening',
+        text: EVENT_TEXT['pet/gesture-hint'].zh,
+        image,
         priority: 93,
         // 10 秒：三个手势要读完，6 秒（默认）不够。
         durationMs: 10000
       })
-      boot('手势指引已发出（点一下 / 按住 / 甩出去）' + (force ? '（手动）' : '（首次）'))
+      boot('手势指引已发出（点一下 / 按住 / 甩出去）' + (force ? '（手动）' : '（首次）') +
+        ' 配图=' + (image === null ? '(纯文字)' : image.file))
     } catch (error) {
       logger.warn?.(`zhuang-fangyi-pet: 手势指引气泡失败（${error?.message ?? error}）`)
     }
@@ -2069,6 +2095,30 @@ export function apply (ctx, config) {
       // 番茄钟倒计时是否常显（独立于 statusAlways：那是"状态文字"，
       // 这是用户主动开的计时器，两者可以各自开关）。
       pomodoroCountdown: s.pomodoroCountdown,
+      /**
+       * ⚠️⚠️ v10 的四个手势/呼吸开关 —— **此前根本没发给 exe**。
+       *
+       * `33d1eb9`（"让设置页那三个开关真的接到行为上"）只改了 exe 半边
+       * （`PetSnapshot` / `PetWindow` / `Program` / `SelfTest`），
+       * **没有在 `exeSettings()` 里补上这几个键**。而 exe 的 `ApplySettings`
+       * 用的是 `Has*` 守卫（"键不存在 = 不动现状"，为了旧 Host 兼容）——
+       * 键永远不存在，那四个赋值分支就**永远不会执行**。
+       *
+       * 后果分两种，都很安静：
+       *   · `longPress: false`（用户关掉摸头）→ exe 仍用默认 true → **照摸**；
+       *   · `flingEnabled: false` → exe 仍用默认 true → **照飞**；
+       *   · `hoverReact: true` → exe 仍用默认 false → **她永远不看你一眼**；
+       *   · `pomodoroBreath: true` → 呼吸引导永远不出现。
+       *
+       * 也就是说：设置页那四个开关**全是装饰**（用户报"手势没法正常触发"，
+       * 其中一个原因就在这里 —— 他可能在调试时把它们关过）。
+       * 快照契约里早就定义了这几个字段（`PetSettingsInfo` 的 `Has*`/值对），
+       * 缺的是**发送方**。
+       */
+      longPress: s.longPress,
+      flingEnabled: s.flingEnabled,
+      hoverReact: s.hoverReact,
+      pomodoroBreath: s.pomodoroBreath,
       // 语音总开关（默认关：桌宠突然开口是强打扰，用户主动打开才生效）。
       voice: s.voice
     }
