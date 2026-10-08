@@ -457,6 +457,14 @@ namespace DshZhuangFangyiPet
             };
             _tray.FocusDsh = delegate { OnFocusDsh(); };
             _tray.OpenGallery = delegate { OpenGallery(); };
+            // v10：托盘「手势提示」→ 让宿主把那条指引气泡再发一次。
+            // 走命令通道（`/pet/command`）而不是 exe 自己拼气泡：
+            // 文案是**封闭集合**、由宿主的状态机给（两端同一份真相）。
+            _tray.ShowGestureHint = delegate
+            {
+                try { if (_http != null) _http.PostCommand("gesture-hint"); } catch { }
+                PetLog.Info("托盘：请求重发手势提示");
+            };
             _tray.Quit = delegate { Quit(); };
 
             // ── 番茄钟（托盘）───────────────────────────────────────────────

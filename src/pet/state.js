@@ -131,6 +131,21 @@ export const EVENT_TEXT = {
    */
   'pomodoro/focus-end-clean': { zh: '整整一轮，一次都没碰我。厉害。', en: 'A whole round — you never touched me. Nice.' },
   'pomodoro/focus-end-busted': { zh: '这一轮你摸了我 {n} 次。', en: 'You poked me {n} times that round.' },
+
+  /**
+   * v10：**手势首次指引**（用户 2026-10-08："手势之内的缺乏第一次的指引"）。
+   *
+   * 这是一个**我自己造成的**问题：v10 把互动从右键菜单里移走了（避免"同一个
+   * 动作两个入口"），却没有任何**发现途径** —— 用户不可能凭空猜到
+   * "按住不动 = 摸头"、"甩出去 = 抛掷"。功能都在，但没人知道怎么用。
+   *
+   * 文案必须**一句话讲完三个手势**：气泡宽度有限（`MaxWidth` 240px），
+   * 分三条弹会像广告。所以用「·」分隔的短句，一眼扫完。
+   */
+  'pet/gesture-hint': {
+    zh: '点一下打招呼 · 按住不动是摸头 · 甩出去她会飞',
+    en: 'Click to greet · hold still to pet · flick her and she flies'
+  },
   'pomodoro/break-end': { zh: '休息结束，继续加油！', en: 'Break over — back to it!' },
   'pomodoro/long-end': { zh: '长休息结束，回来啦～', en: 'Long break over — welcome back!' }
 }

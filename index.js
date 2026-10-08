@@ -691,6 +691,21 @@ export function apply (ctx, config) {
   let growthDayKey = dayKeyFor(Date.now())
   let lastMilestone = null
 
+  /**
+   * v10：手势指引**是否已经说过**（用户 2026-10-08："手势之内的缺乏第一次的指引"）。
+   *
+   * ── 为什么需要一个持久化标记 ────────────────────────────────────────────
+   *
+   * 提示的价值全在"**第一次**"：说过一次之后再重复就是噪音（而且每次重启
+   * DSH 都说一遍会让人烦）。所以它必须**落盘** —— 只在内存里的话，
+   * 重启就重置，用户每次开机都被念一遍。
+   *
+   * 存哪：与成长记账同一个 `growth.json`（它本来就是"跨会话记住的事"）。
+   * 不放进 `settings.json`：那是**用户偏好**，而这个标记是"程序自己记住
+   * 做过什么"—— 混进去会让"重置设置"把提示也重置了（然后又被念一遍）。
+   */
+  let gestureHintShown = false
+
   /** 跨天就把今日计数清零（进程可能跨天不重启 —— 与 `interactions.js` 同一纪律）。 */
   const rollGrowthDay = at => {
     const key = dayKeyFor(at)
@@ -716,6 +731,99 @@ export function apply (ctx, config) {
     const dayB = Date.UTC(b.getFullYear(), b.getMonth(), b.getDate())
     const diff = Math.floor((dayB - dayA) / (24 * 60 * 60 * 1000))
     return Math.max(1, diff + 1)
+  }
+
+  // ── 成长记账的持久化（v10）──────────────────────────────────────────────
+  //
+  // 存两样"跨会话该记住的事"：
+  //   · `gestureHintShown` —— 手势指引说过没有（只在第一次说，重启不该重复念）；
+  //   · `firstMetAt`       —— 初次见面时刻（"今天第几天"的基准）。
+  //
+  // ⚠️ 与 `stats.json` / `affection.json` **分开**：那两个是"记账"（会被
+  // 统计口径与档位门槛影响），这个只是"程序自己记住做过什么"。
+  // 混在一起的话，"重置好感度"会顺手把"已经教过手势"也清掉。
+  let growthStore = null
+  try {
+    growthStore = new JsonStore(path.join(dataDir, 'growth.json'), null, { log: null })
+  } catch (error) {
+    logger.warn?.(`zhuang-fangyi-pet: 成长状态无法持久化（${error?.message ?? error}）`)
+  }
+  if (growthStore !== null && growthStore.get() !== null) {
+    try {
+      const saved = growthStore.get()
+      if (typeof saved?.gestureHintShown === 'boolean') gestureHintShown = saved.gestureHintShown
+      // 初次见面时刻只在"文件里没有"时用当前的 —— 否则每次重启都会把
+      // "第几天"重置回第 1 天（那会让"她记得你"这条线彻底失效）。
+      if (Number.isFinite(Number(saved?.firstMetAt)) && Number(saved.firstMetAt) > 0) {
+        firstMetAt = Number(saved.firstMetAt)
+      }
+    } catch (error) {
+      boot(`⚠️ 成长状态恢复失败（已忽略）：${error?.message ?? error}`)
+    }
+  }
+
+  /** 把成长状态落盘（只在**状态真的变了**时调，不是每帧）。 */
+  const flushGrowth = () => {
+    if (growthStore === null) return
+    try {
+      growthStore.value = { gestureHintShown, firstMetAt, savedAt: Date.now() }
+      growthStore.schedule()
+    } catch (error) {
+      logger.warn?.(`zhuang-fangyi-pet: 成长状态落盘失败（${error?.message ?? error}）`)
+    }
+  }
+
+  /**
+   * v10：**手势首次指引**（用户 2026-10-08："手势之内的缺乏第一次的指引"）。
+   *
+   * ── 这是我造成的缺口 ────────────────────────────────────────────────────
+   *
+   * v10 把互动从右键菜单移走了（避免"同一个动作两个入口"），却**没有补任何
+   * 发现途径**。结果：三个手势全部可用，但用户不可能凭空猜到
+   * "按住不动 = 摸头"、"甩出去 = 抛掷" —— 功能在，没人知道怎么用。
+   *
+   * ── 什么时候说 ──────────────────────────────────────────────────────────
+   *
+   * 三个条件**全部**满足才说（缺一不可）：
+   *   1. **还没说过**（`gestureHintShown`，落盘，重启不重复）；
+   *   2. **exe 真的在跑**（`nativeAvailable`）—— 手势只在原生窗口上有；
+   *      overlay 里说"甩出去她会飞"是**骗人**（那边没有这个能力）；
+   *   3. **桌面窗口已就绪**（有快照了）—— 否则气泡没地方显示。
+   *
+   * ⚠️ 不说的时候**不能消耗掉那个标记**：比如用户在 overlay 模式下启动，
+   * 标记一旦被吃掉，等切回原生就再也不提示了。
+   */
+  const maybeShowGestureHint = (opts = {}) => {
+    const force = opts.force === true
+    // ⚠️ `force` 是给"用户主动要求再看一次"用的（托盘菜单 / 设置页按钮）。
+    // 主动要求时必须能重复看 —— 但**不重置** `gestureHintShown`：
+    // 那会让"自动提示"在下次重启时又冒出来一次。
+    if (!force && gestureHintShown) return false
+    // 只在原生窗口上提示（overlay 没有手势 —— 见上面第 2 条）
+    let native = false
+    try { native = machine.snapshot().nativeAvailable === true } catch { native = false }
+    if (!native) return false
+    // 至少有一个手势是开着的才有意义（全关了就没什么可教的）
+    const s = settings.get()
+    if (s.longPress !== true && s.flingEnabled !== true) return false
+
+    if (!gestureHintShown) {
+      gestureHintShown = true
+      flushGrowth()
+    }
+    try {
+      machine.notify({
+        key: 'pet/gesture-hint',
+        state: 'listening',
+        priority: 93,
+        // 10 秒：三个手势要读完，6 秒（默认）不够。
+        durationMs: 10000
+      })
+      boot('手势指引已发出（点一下 / 按住 / 甩出去）' + (force ? '（手动）' : '（首次）'))
+    } catch (error) {
+      logger.warn?.(`zhuang-fangyi-pet: 手势指引气泡失败（${error?.message ?? error}）`)
+    }
+    return true
   }
 
   // ── 聊天（用户点名："可以与桌宠聊天"）───────────────────────────────────
@@ -2310,6 +2418,12 @@ export function apply (ctx, config) {
     diagnostics.lastState = snapshot.petState
     if (snapshot.bubble !== null) diagnostics.lastBubbleAt = new Date().toISOString()
     hub.broadcast(withSettings(snapshot))
+    // v10：手势首次指引。放在广播**之后**（`notify` 会再触发一次 refresh，
+    // 于是那一帧带上气泡）—— 放在之前的话指引会被这一帧的 snapshot 覆盖掉。
+    //
+    // ⚠️ 它自己会判"说过没有 / 原生在不在跑"，所以每帧调用是安全的；
+    // 真发出去之后 `gestureHintShown` 立刻置位，后续帧直接早退。
+    maybeShowGestureHint()
   })
   ctx.effect(() => () => offChange(), 'zhuang-fangyi-pet: state subscription')
 
@@ -3192,6 +3306,13 @@ export function apply (ctx, config) {
           // 重建语音包后不必重启 DSH（与 reload-art 同一考虑）。
           voice = loadVoice(VOICE_DIR, logger)
           return voiceReport(voice)
+        case 'gesture-hint':
+          // v10：用户主动要求再看一次手势指引（托盘菜单 / 设置页按钮）。
+          //
+          // 为什么需要"主动再看一次"：首次提示是个 10 秒的气泡，**很容易错过**
+          //（刚开机时人在别处、或者正好没看屏幕）。而"错过之后再也看不到"
+          // 正是这次要修的问题本身 —— 只给一次机会等于没修。
+          return { shown: maybeShowGestureHint({ force: true }) }
         case 'reset-affection':
           // 诊断用：好感度写坏了（比如手工改了 json）时能归零重来。
           // **故意不做成界面按钮** —— 一键清空累计好感是很粗暴的事。

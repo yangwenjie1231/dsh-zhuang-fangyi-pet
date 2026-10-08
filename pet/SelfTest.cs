@@ -1109,6 +1109,36 @@ namespace DshZhuangFangyiPet
                   "「今天」行的显隐：一次没用过 → 隐藏；用过 → 显示",
                   "空白隐藏 / 有番茄显示");
 
+            // (14b) ⭐⭐ 手势提示的**命令名**必须与宿主一致（写错就是"点了没反应"）
+            //
+            // 这类跨进程字符串契约没有任何编译期检查：exe 发 `gesture-hint`、
+            // 宿主认 `gesture-hint` —— 写错一个字符两边都不报错，只是按钮失效。
+            // 这里断言 exe 侧确实用了这个名字（宿主侧由 e2e 断言）。
+            string csSources = "";
+            try
+            {
+                string petDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "pet");
+                if (!Directory.Exists(petDir)) petDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "pet");
+                if (Directory.Exists(petDir))
+                {
+                    StringBuilder sb = new StringBuilder();
+                    foreach (string f in Directory.GetFiles(petDir, "*.cs"))
+                        sb.Append(File.ReadAllText(f, System.Text.Encoding.UTF8));
+                    csSources = sb.ToString();
+                }
+            }
+            catch { }
+            if (csSources.Length > 0)
+            {
+                bool cmdOk = csSources.IndexOf("PostCommand(\"gesture-hint\")", StringComparison.Ordinal) >= 0;
+                Check(cmdOk, "⭐ exe 用的手势提示命令名与宿主一致（gesture-hint）",
+                      cmdOk ? "PostCommand(\"gesture-hint\") 已接线" : "源码里找不到这个命令名");
+            }
+            else
+            {
+                Check(true, "⭐ 手势提示命令名核对（跳过：读不到 pet/*.cs）", "跳过");
+            }
+
             // (15) ⭐⭐ 三个手势开关：缺键 ≠ 用户设成 false。
             //
             // 这是"升级插件后手势失灵"的根因：旧 Host 的快照里根本没有这三个键，

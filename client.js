@@ -212,6 +212,9 @@ window.__ModuleLoader__.load({
         pomodoroTaskPlaceholder: '比如：桌宠开发',
         // ── v10：互动手势 ──────────────────────────────────────────────────
         groupGesture: '手势互动',
+        gestureLead: '在桌宠身上：点一下 = 打招呼 · 按住不动 = 摸头 · 快速甩出去 = 她会飞',
+        gestureHintBtn: '再看一次手势提示',
+        gestureHintNote: '提示会出现在桌宠的气泡里（需要桌面窗口在运行）',
         flingEnabled: '拖住甩出去',
         flingEnabledHint: '快速甩动她会飞出去再落地；慢慢拖仍然只是挪位置',
         longPress: '按住摸头',
@@ -462,6 +465,9 @@ window.__ModuleLoader__.load({
         pomodoroTaskPlaceholder: 'e.g. pet plugin',
         // ── v10: gestures ──────────────────────────────────────────────────
         groupGesture: 'Gestures',
+        gestureLead: 'On the pet itself: click = greet · hold still = pet · flick = she flies',
+        gestureHintBtn: 'Show the gesture hint again',
+        gestureHintNote: 'The hint appears in the pet bubble (needs the desktop window running)',
         flingEnabled: 'Fling by dragging',
         flingEnabledHint: 'Flick her and she flies and lands; a slow drag still just moves her',
         longPress: 'Pet by holding',
@@ -2253,7 +2259,7 @@ window.__ModuleLoader__.load({
          *
          * 位置在「活跃度」**之后**：那一张是这一页的主卡（"她什么时候活跃"
          * 是这一页存在的理由），手势是它的补充。 */
-        card('behavior', { key: 'gGesture', title: t('groupGesture'), open: true }, [
+        card('behavior', { key: 'gGesture', title: t('groupGesture'), open: true, lead: t('gestureLead') }, [
           h(Toggle, {
             key: 'longPress',
             label: t('longPress'),
@@ -2274,7 +2280,26 @@ window.__ModuleLoader__.load({
             hint: t('hoverReactHint'),
             value: settings.hoverReact,
             onChange: v => set({ hoverReact: v })
-          })
+          }),
+          // v10：手势提示只有**一次**（10 秒气泡），很容易错过 ——
+          // 而"错过之后再也看不到"正是用户报的那个问题。所以给一个
+          // 随时能再要一次的入口（托盘里也有一份）。
+          h('div', { key: 'gestureHintBtns', className: 'zf-pet-settings__btns' }, [
+            h('button', {
+              key: 'hint',
+              className: 'zf-pet-settings__btn',
+              onClick: () => {
+                const fn = runtime.sendCommand
+                if (typeof fn !== 'function') return
+                Promise.resolve(fn('gesture-hint'))
+                  .then(r => setChatNote(r?.result?.shown === true
+                    ? '手势提示已发出（看桌宠的气泡）'
+                    : '没能发出 —— 桌面窗口没在运行？'))
+                  .catch(e => setChatNote(`手势提示失败：${e?.message ?? e}`))
+              }
+            }, t('gestureHintBtn'))
+          ]),
+          h('p', { key: 'gestureHintNote', className: 'zf-pet-settings__note' }, t('gestureHintNote'))
         ]),
 
         /* 番茄钟：默认关 → 整张卡片收起（8 个控件不该占着主面板）。 */

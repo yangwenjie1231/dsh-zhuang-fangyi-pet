@@ -2396,6 +2396,49 @@ await ok('⭐⭐ 快照每帧都带 growth 与 today 两块（缺块 = 旧宿主
   assert.equal(hit.today.recent.length, 7, 'recent 应给 7 天')
 })
 
+/* ══════════════════════════════════════════════════════════════════════════
+ * 3c. v10：手势首次指引（用户："手势之内的缺乏第一次的指引"）
+ *
+ * 这是一个**我自己造成的**缺口：v10 把互动从右键菜单移走了（避免"同一个
+ * 动作两个入口"），却没有任何发现途径 —— 用户不可能凭空猜到"按住 = 摸头"。
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+await ok('⭐⭐ 手势指引**只在原生窗口上**发（overlay 里说"甩出去她会飞"是骗人）', async () => {
+  // 本套 e2e 的 ctx **没有** subprocess → nativeAvailable=false →
+  // 指引**不该**发出来。这条同时验证了"不该发的时候不发"。
+  const r = await post2('/api/zhuang-fangyi/pet/command', { command: 'gesture-hint' })
+  assert.equal(r.status, 200, `命令应被接受，实际 ${r.status}`)
+  const body = JSON.parse(r.body)
+  assert.equal(body.result?.shown, false,
+    `没有原生窗口时不该发出指引（实际 ${JSON.stringify(body.result)}）`)
+})
+
+await ok('⭐ 手势指引的命令在**路由层**就被认（不是静默忽略）', async () => {
+  // `/pet/command` 没有动作白名单，靠 `onCommand` 的 switch default 兜底。
+  // 这条断言"已知命令有回执、未知命令有 unknown"，防止把新命令写错名字后
+  // **静默什么都不做**（那看起来就是"按钮点了没反应"）。
+  const known = JSON.parse((await post2('/api/zhuang-fangyi/pet/command', { command: 'gesture-hint' })).body)
+  assert.ok(known.result !== undefined, '已知命令必须有 result')
+  assert.ok('shown' in known.result, `gesture-hint 的 result 应含 shown：${JSON.stringify(known.result)}`)
+  const unknown = JSON.parse((await post2('/api/zhuang-fangyi/pet/command', { command: 'nope-nope' })).body)
+  assert.equal(unknown.result?.unknown, 'nope-nope', '未知命令应回 unknown（不静默）')
+})
+
+await ok('⭐⭐ 手势指引的文案在状态机的文案表里（否则气泡显示裸 key）', async () => {
+  // `t()`/`textOf` 取不到 key 时**回落成 key 名本身** —— 界面上会一本正经地
+  // 显示 `pet/gesture-hint`。这类错没有任何断言会红（"只是难看"）。
+  const { EVENT_TEXT } = await import(`file://${path.join(ROOT, 'src/pet/state.js').replace(/\\/g, '/')}`)
+  assert.ok(EVENT_TEXT['pet/gesture-hint'], '文案表里没有 pet/gesture-hint')
+  const zh = EVENT_TEXT['pet/gesture-hint'].zh
+  const en = EVENT_TEXT['pet/gesture-hint'].en
+  assert.ok(typeof zh === 'string' && zh !== '', '缺中文文案')
+  assert.ok(typeof en === 'string' && en !== '', '缺英文文案')
+  // 一句话要讲完三个手势（气泡宽度只有 240px，分三条弹像广告）
+  for (const word of ['点', '按', '甩']) {
+    assert.ok(zh.includes(word), `中文文案应提到「${word}」：${zh}`)
+  }
+})
+
 await ok('⭐ GET /pet/growth 与快照里的两块**同一份真相**', async () => {
   const g = JSON.parse((await get('/api/zhuang-fangyi/pet/growth')).body)
   const snap = sse.snapshots().slice(-1)[0]

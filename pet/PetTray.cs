@@ -33,6 +33,8 @@ namespace DshZhuangFangyiPet
         public Action FocusDsh = delegate { };
         /// <summary>打开表情包画廊（托盘入口）。</summary>
         public Action OpenGallery = delegate { };
+        /// <summary>v10：再看一次手势提示（首次提示只有一次，很容易错过）。</summary>
+        public Action ShowGestureHint = delegate { };
         public Action Quit = delegate { };
         public Func<bool> IsVisible = delegate { return true; };
         public Func<bool> GetClickThrough = delegate { return true; };
@@ -184,6 +186,16 @@ namespace DshZhuangFangyiPet
             ToolStripMenuItem gallery = new ToolStripMenuItem("表情包…(&G)");
             gallery.Click += delegate { OpenGallery(); };
             _menu.Items.Add(gallery);
+
+            // v10：手势提示（用户："手势之内的缺乏第一次的指引"）。
+            //
+            // 托盘里放一份，是因为**首次提示只有一次**（10 秒气泡，很容易错过），
+            // 而"错过之后再也看不到"正是要修的那个问题本身。
+            // 放托盘而不是右键菜单：右键菜单已经收成"手势做不到的事"，
+            // 把提示塞回去会重新变乱；托盘是"我找不到东西时去看一眼"的地方。
+            ToolStripMenuItem hint = new ToolStripMenuItem("手势提示(&H)");
+            hint.Click += delegate { ShowGestureHint(); };
+            _menu.Items.Add(hint);
 
             // ── 番茄钟 ──────────────────────────────────────────────────────
             //
