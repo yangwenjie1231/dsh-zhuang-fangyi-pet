@@ -1,9 +1,9 @@
 {
     "version":  1,
-    "generatedAt":  "2026-10-07T05:40:22Z",
-    "count":  137,
-    "totalMs":  416866,
-    "totalBytes":  3411904,
+    "generatedAt":  "2026-10-08T00:59:53Z",
+    "count":  163,
+    "totalMs":  475948,
+    "totalBytes":  3899540,
     "lines":  [
                   {
                       "name":  "wake",
@@ -1237,6 +1237,240 @@
                       "text":  "嗯？需要我做什么？",
                       "durationMs":  2020,
                       "bytes":  16762
+                  },
+                  {
+                      "name":  "pat-1",
+                      "file":  "pat-1.mp3",
+                      "event":  "pet/pat",
+                      "source":  "synth",
+                      "text":  "嗯……？",
+                      "durationMs":  860,
+                      "bytes":  7358
+                  },
+                  {
+                      "name":  "pat-1v2",
+                      "file":  "pat-1v2.mp3",
+                      "event":  "pet/pat",
+                      "source":  "synth",
+                      "text":  "嗯……？",
+                      "durationMs":  860,
+                      "bytes":  7358
+                  },
+                  {
+                      "name":  "pat-2",
+                      "file":  "pat-2.mp3",
+                      "event":  "pet/pat",
+                      "source":  "synth",
+                      "text":  "……再摸一会儿也行。",
+                      "durationMs":  1500,
+                      "bytes":  12582
+                  },
+                  {
+                      "name":  "pat-2v2",
+                      "file":  "pat-2v2.mp3",
+                      "event":  "pet/pat",
+                      "source":  "synth",
+                      "text":  "……再摸一会儿也行。",
+                      "durationMs":  1500,
+                      "bytes":  12582
+                  },
+                  {
+                      "name":  "pat-3",
+                      "file":  "pat-3.mp3",
+                      "event":  "pet/pat",
+                      "source":  "synth",
+                      "text":  "好啦好啦，我快睡着了。",
+                      "durationMs":  3020,
+                      "bytes":  24703
+                  },
+                  {
+                      "name":  "pat-3v2",
+                      "file":  "pat-3v2.mp3",
+                      "event":  "pet/pat",
+                      "source":  "synth",
+                      "text":  "好啦好啦，我快睡着了。",
+                      "durationMs":  3020,
+                      "bytes":  24703
+                  },
+                  {
+                      "name":  "pat-4",
+                      "file":  "pat-4.mp3",
+                      "event":  "pet/pat",
+                      "source":  "synth",
+                      "text":  "手不酸吗？",
+                      "durationMs":  1100,
+                      "bytes":  9448
+                  },
+                  {
+                      "name":  "pat-4v2",
+                      "file":  "pat-4v2.mp3",
+                      "event":  "pet/pat",
+                      "source":  "synth",
+                      "text":  "手不酸吗？",
+                      "durationMs":  1100,
+                      "bytes":  9448
+                  },
+                  {
+                      "name":  "fling-1",
+                      "file":  "fling-1.mp3",
+                      "event":  "pet/fling",
+                      "source":  "synth",
+                      "text":  "哇——放我下来！",
+                      "durationMs":  2901,
+                      "bytes":  23867
+                  },
+                  {
+                      "name":  "fling-1v2",
+                      "file":  "fling-1v2.mp3",
+                      "event":  "pet/fling",
+                      "source":  "synth",
+                      "text":  "哇——放我下来！",
+                      "durationMs":  2901,
+                      "bytes":  23867
+                  },
+                  {
+                      "name":  "fling-2",
+                      "file":  "fling-2.mp3",
+                      "event":  "pet/fling",
+                      "source":  "synth",
+                      "text":  "喂！我又不是球！",
+                      "durationMs":  3180,
+                      "bytes":  25957
+                  },
+                  {
+                      "name":  "fling-2v2",
+                      "file":  "fling-2v2.mp3",
+                      "event":  "pet/fling",
+                      "source":  "synth",
+                      "text":  "喂！我又不是球！",
+                      "durationMs":  3180,
+                      "bytes":  25957
+                  },
+                  {
+                      "name":  "fling-3",
+                      "file":  "fling-3.mp3",
+                      "event":  "pet/fling",
+                      "source":  "synth",
+                      "text":  "……我站稳了。下次轻点。",
+                      "durationMs":  3260,
+                      "bytes":  26584
+                  },
+                  {
+                      "name":  "fling-3v2",
+                      "file":  "fling-3v2.mp3",
+                      "event":  "pet/fling",
+                      "source":  "synth",
+                      "text":  "……我站稳了。下次轻点。",
+                      "durationMs":  3260,
+                      "bytes":  26584
+                  },
+                  {
+                      "name":  "hover-1",
+                      "file":  "hover-1.mp3",
+                      "event":  "pet/hover",
+                      "source":  "synth",
+                      "text":  "……嗯？",
+                      "durationMs":  740,
+                      "bytes":  6522
+                  },
+                  {
+                      "name":  "hover-1v2",
+                      "file":  "hover-1v2.mp3",
+                      "event":  "pet/hover",
+                      "source":  "synth",
+                      "text":  "……嗯？",
+                      "durationMs":  740,
+                      "bytes":  6522
+                  },
+                  {
+                      "name":  "hover-2",
+                      "file":  "hover-2.mp3",
+                      "event":  "pet/hover",
+                      "source":  "synth",
+                      "text":  "有事？",
+                      "durationMs":  900,
+                      "bytes":  7776
+                  },
+                  {
+                      "name":  "hover-2v2",
+                      "file":  "hover-2v2.mp3",
+                      "event":  "pet/hover",
+                      "source":  "synth",
+                      "text":  "有事？",
+                      "durationMs":  900,
+                      "bytes":  7776
+                  },
+                  {
+                      "name":  "pomodoro-clean",
+                      "file":  "pomodoro-clean.mp3",
+                      "event":  "pomodoro/focus-end-clean",
+                      "source":  "synth",
+                      "text":  "整整一轮，一次都没碰我。厉害。",
+                      "durationMs":  3220,
+                      "bytes":  26375
+                  },
+                  {
+                      "name":  "pomodoro-cleanv2",
+                      "file":  "pomodoro-cleanv2.mp3",
+                      "event":  "pomodoro/focus-end-clean",
+                      "source":  "synth",
+                      "text":  "整整一轮，一次都没碰我。厉害。",
+                      "durationMs":  3220,
+                      "bytes":  26375
+                  },
+                  {
+                      "name":  "pomodoro-busted",
+                      "file":  "pomodoro-busted.mp3",
+                      "event":  "pomodoro/focus-end-busted",
+                      "source":  "synth",
+                      "text":  "这一轮你心思不太在这儿啊。",
+                      "durationMs":  2980,
+                      "bytes":  24494
+                  },
+                  {
+                      "name":  "pomodoro-bustedv2",
+                      "file":  "pomodoro-bustedv2.mp3",
+                      "event":  "pomodoro/focus-end-busted",
+                      "source":  "synth",
+                      "text":  "这一轮你心思不太在这儿啊。",
+                      "durationMs":  2980,
+                      "bytes":  24494
+                  },
+                  {
+                      "name":  "milestone-1",
+                      "file":  "milestone-1.mp3",
+                      "event":  "pet/milestone",
+                      "source":  "synth",
+                      "text":  "又一个里程碑。记下了。",
+                      "durationMs":  3020,
+                      "bytes":  24703
+                  },
+                  {
+                      "name":  "milestone-1v2",
+                      "file":  "milestone-1v2.mp3",
+                      "event":  "pet/milestone",
+                      "source":  "synth",
+                      "text":  "又一个里程碑。记下了。",
+                      "durationMs":  3020,
+                      "bytes":  24703
+                  },
+                  {
+                      "name":  "milestone-2",
+                      "file":  "milestone-2.mp3",
+                      "event":  "pet/milestone",
+                      "source":  "synth",
+                      "text":  "这一步不小，值得停一下。",
+                      "durationMs":  2860,
+                      "bytes":  23449
+                  },
+                  {
+                      "name":  "milestone-2v2",
+                      "file":  "milestone-2v2.mp3",
+                      "event":  "pet/milestone",
+                      "source":  "synth",
+                      "text":  "这一步不小，值得停一下。",
+                      "durationMs":  2860,
+                      "bytes":  23449
                   }
               ]
 }

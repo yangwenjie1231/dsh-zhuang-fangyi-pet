@@ -34,6 +34,10 @@ namespace DshZhuangFangyiPet
         internal static readonly string[] SpokenEvents = new string[] {
             // 互动（Host 用 interact.voice 告知"这次互动算数了"）
             "pet/click", "pet/pet-head", "pet/feed", "pet/praise",
+            // v10 手势互动（同样是 Host 用 interact.voice 告知 —— 判定在宿主，
+            // exe 只负责"收到就播"。所以它们**不需要** ForStateTransition 里的分支，
+            // 只需要在这里登记：SelfTest 会反向断言"清单里的事件都在这张表里"）
+            "pet/pat", "pet/fling", "pet/hover",
             // 状态（PetVoiceTrigger.ForStateTransition）
             "pet/wake", "pet/sleeping", "agent/working", "agent/thinking",
             "agent/error", "turn/complete",
@@ -42,6 +46,12 @@ namespace DshZhuangFangyiPet
             // 番茄钟（阶段切换 + ForPomodoroStart）
             "pomodoro/start", "pomodoro/focus-end", "pomodoro/break-end",
             "pomodoro/long-end", "pomodoro/long-start",
+            // v10：专注结束的两个极端档（零摸鱼 / 摸鱼太多）—— 见 index.js 的
+            // `pomodoro/focus-end-clean` / `-busted`。它们与 `pomodoro/focus-end`
+            // **三选一**，由宿主按 `interrupts` 决定，所以 exe 侧只是"能播"。
+            "pomodoro/focus-end-clean", "pomodoro/focus-end-busted",
+            // v10：里程碑达成（宿主通过气泡的 key `milestone/<key>` 驱动）。
+            "pet/milestone",
             // 其它时机
             "chat/reply", "session/start", "pet/idle-long"
         };

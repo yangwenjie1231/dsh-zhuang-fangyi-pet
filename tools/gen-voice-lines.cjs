@@ -199,7 +199,53 @@ const BASE_LINES = [
   { name: 'click-6', event: 'pet/click', source: 'synth', text: '在的，你说。',
     why: '点击轮换 —— 最短的应答，高频点击时不啰嗦。' },
   { name: 'click-7', event: 'pet/click', source: 'synth', text: '嗯？需要我做什么？',
-    why: '点击轮换 —— 把点击理解成"有活要派"，符合她随时待命的状态。' }
+    why: '点击轮换 —— 把点击理解成"有活要派"，符合她随时待命的状态。' },
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // v10：手势互动（用户："通过右键就点个按钮，很奇怪"）
+  //
+  // 三个动作各有各的语气，**不能共用** `pet/click` 那几条：
+  //   · `pat`（长按摸头）是**持续**的 —— 一次按下最多报 3 级，
+  //     所以台词要能"越摸越软"，而不是每次都同一句；
+  //   · `fling`（被甩出去）是**意外**，语气必须与"被摸"完全不同；
+  //   · `hover`（她主动看你一眼）是**她开口**，要短、要像"注意到你了"。
+  // ══════════════════════════════════════════════════════════════════════════
+  { name: 'pat-1', event: 'pet/pat', source: 'synth', text: '嗯……？',
+    why: '摸头第 1 级（刚碰到）—— 最短，像被打断又没生气。' },
+  { name: 'pat-2', event: 'pet/pat', source: 'synth', text: '……再摸一会儿也行。',
+    why: '摸头第 2 级（蹭）—— 开始享受，但嘴上还留着余地。' },
+  { name: 'pat-3', event: 'pet/pat', source: 'synth', text: '好啦好啦，我快睡着了。',
+    why: '摸头第 3 级（彻底放松）—— 用"快睡着"收尾，暗示该停了。' },
+  { name: 'pat-4', event: 'pet/pat', source: 'synth', text: '手不酸吗？',
+    why: '摸头轮换 —— 用反问打断，比直接说"别摸了"更符合她的性格。' },
+  { name: 'fling-1', event: 'pet/fling', source: 'synth', text: '哇——放我下来！',
+    why: '被甩出去 —— 短促、带惊叹，与"被摸"的语气拉开距离。' },
+  { name: 'fling-2', event: 'pet/fling', source: 'synth', text: '喂！我又不是球！',
+    why: '被甩轮换 —— 抗议但好笑，不真的生气（用户是在玩）。' },
+  { name: 'fling-3', event: 'pet/fling', source: 'synth', text: '……我站稳了。下次轻点。',
+    why: '被甩轮换 —— 落地后的一句，把"飞出去"这件事收住。' },
+  { name: 'hover-1', event: 'pet/hover', source: 'synth', text: '……嗯？',
+    why: '悬停（她主动看你一眼）—— 极短。默认关着，开了也不该刷屏。' },
+  { name: 'hover-2', event: 'pet/hover', source: 'synth', text: '有事？',
+    why: '悬停轮换 —— 两个字的问句，正好是"注意到你了"的分量。' },
+
+  // ── v10：番茄钟的两个极端档 + 里程碑 ────────────────────────────────────
+  //
+  // "专注结束"现在**三选一**（见 index.js）：零摸鱼 / 一般 / 摸鱼太多。
+  // 前两档各给一条，第三档的**次数是动态填的**（所以这里只写语气骨架，
+  // 实际文案由 `state.js` 的 `pomodoro/focus-end-busted` 决定 —— 语音这条
+  // 不带具体数字，因为录音里塞不进变量）。
+  { name: 'pomodoro-clean', event: 'pomodoro/focus-end-clean', source: 'synth',
+    text: '整整一轮，一次都没碰我。厉害。',
+    why: '零摸鱼 —— 把"没打扰"当成一件值得夸的事，这是番茄钟与互动的连接点。' },
+  { name: 'pomodoro-busted', event: 'pomodoro/focus-end-busted', source: 'synth',
+    text: '这一轮你心思不太在这儿啊。',
+    why: '摸鱼太多 —— 具体次数在气泡里（文字能带变量，录音不能），' +
+      '所以语音只给语气，不与气泡数字冲突。' },
+  { name: 'milestone-1', event: 'pet/milestone', source: 'synth', text: '又一个里程碑。记下了。',
+    why: '里程碑达成 —— 她"记下了"，呼应"她记得你"这条线。' },
+  { name: 'milestone-2', event: 'pet/milestone', source: 'synth', text: '这一步不小，值得停一下。',
+    why: '里程碑轮换 —— 认可积累，而不是欢呼（她不是啦啦队）。' }
 ]
 
 /**

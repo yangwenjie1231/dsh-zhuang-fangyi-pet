@@ -2246,14 +2246,21 @@ namespace DshZhuangFangyiPet
             //   触发点与名单现在同源，且下面 (4c) 反向再查一遍。
             string[] spokenEvents = PetVoiceTrigger.SpokenEvents;
             // 名单本身必须是**合法**的台词事件名（不能写错字却"自洽"地全绿）
-            bool listSane = spokenEvents.Length == 20 &&
+            bool listSane = spokenEvents.Length == 26 &&
                             Array.IndexOf(spokenEvents, "pet/wake") >= 0 &&
                             Array.IndexOf(spokenEvents, "pet/sleeping") >= 0 &&
                             Array.IndexOf(spokenEvents, "chat/reply") >= 0 &&
-                            Array.IndexOf(spokenEvents, "pomodoro/start") >= 0;
+                            Array.IndexOf(spokenEvents, "pomodoro/start") >= 0 &&
+                            // v10 手势三件套 + 番茄钟两个极端档 + 里程碑
+                            Array.IndexOf(spokenEvents, "pet/pat") >= 0 &&
+                            Array.IndexOf(spokenEvents, "pet/fling") >= 0 &&
+                            Array.IndexOf(spokenEvents, "pet/hover") >= 0 &&
+                            Array.IndexOf(spokenEvents, "pomodoro/focus-end-clean") >= 0 &&
+                            Array.IndexOf(spokenEvents, "pomodoro/focus-end-busted") >= 0 &&
+                            Array.IndexOf(spokenEvents, "pet/milestone") >= 0;
             Check(listSane,
-                  "⭐⭐ 可说事件名单就是那 20 个（含 pet/wake / pet/sleeping / chat/reply / pomodoro/start）",
-                  "20 个：" + string.Join(", ", spokenEvents));
+                  "⭐⭐ 可说事件名单就是那 26 个（含 v10 的手势/番茄钟极端档/里程碑）",
+                  spokenEvents.Length + " 个：" + string.Join(", ", spokenEvents));
             string manifestJson = null;
             try
             {
@@ -2278,7 +2285,10 @@ namespace DshZhuangFangyiPet
                 Check(gap.Count == 0,
                       "⭐⭐ 代码会说的每个事件，台词表里都有语音（无静默缺口）",
                       gap.Count == 0
-                        ? "20 个事件全部有货（清单 " + real.Count + " 条）"
+                        // ⚠️ 数字**从名单长度算**，不写死 —— 这里原先写死 "20 个"，
+                        // 名单扩到 26 之后那句话就变成了假信息（自检全绿，
+                        // 却告诉你一个错的数字）。诊断文字说谎比没有诊断更糟。
+                        ? spokenEvents.Length + " 个事件全部有货（清单 " + real.Count + " 条）"
                         : "缺：" + string.Join(", ", gap.ToArray()));
             }
             else
