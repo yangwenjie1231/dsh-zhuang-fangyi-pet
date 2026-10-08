@@ -109,8 +109,10 @@ namespace DshZhuangFangyiPet
         private double DefaultImageMaxW = BaseImageMaxW;
         private Brush _defaultBackground;
         private Brush _defaultBorderBrush;
-        /// <summary>当前配色（ApplyTheme 时更新）。</summary>
-        private PetTheme.BubblePalette _palette;
+        // 注：原先这里还有一个 `_palette` 字段（ApplyTheme 里赋值），
+        // 但**全仓从未读取过它** —— 死的。v11 清理时删掉。
+        // 配色经由 `_defaultBackground` / `_defaultBorderBrush` / `_text.Foreground`
+        // 三条路径生效，不需要再存一份。
 
         // 契约 §4 opaque=true：不透明满幅贴纸本身就是整张卡片（含文字），
         // 160px 高度下 baked-in 中文读不清 → 放宽到 240（窗口 SizeToContent 自适应）。
@@ -938,7 +940,6 @@ namespace DshZhuangFangyiPet
             _defaultBackground = new SolidColorBrush(Color.FromArgb(p.BgA, p.BgR, p.BgG, p.BgB));
             _defaultBorderBrush = new SolidColorBrush(Color.FromArgb(p.BdA, p.BdR, p.BdG, p.BdB));
             _text.Foreground = new SolidColorBrush(Color.FromRgb(p.FgR, p.FgG, p.FgB));
-            _palette = p;
             // 正在显示的普通气泡立即换色；attention 有自己的橙色描边（只换底与字）。
             if (Showing)
             {

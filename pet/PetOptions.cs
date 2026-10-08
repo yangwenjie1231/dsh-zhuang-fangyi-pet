@@ -23,6 +23,14 @@ namespace DshZhuangFangyiPet
         public bool ClickThrough = true;   // --click-through 0|1
         public bool BubbleEnabled = true;  // --bubble 0|1
         public bool SelfTest;              // --selftest
+        /// <summary>
+        /// `--shots &lt;dir&gt;`：自检时把各窗口**离屏渲染**成 PNG（纯诊断，不改运行行为）。
+        ///
+        /// 为什么要它：视觉类改动（圆角、进度环、配色）光靠断言只能验"数值对不对"，
+        /// 验不了"看起来对不对"。`RenderTargetBitmap` 渲染已排布的元素，
+        /// 不需要窗口显示在屏幕上、也不抢焦点 —— 于是可以**亲眼看图**再交付。
+        /// </summary>
+        public string ShotsDir;
         public bool Verbose;               // --verbose（未在契约中，纯诊断；默认不额外输出）
         public bool Help;                  // --help
 
@@ -107,6 +115,12 @@ namespace DshZhuangFangyiPet
                 string a = args[i];
                 if (string.IsNullOrEmpty(a)) continue;
                 if (a == "--selftest") { o.SelfTest = true; continue; }
+                if (a == "--shots" && i + 1 < args.Length)
+                {
+                    // 诊断选项：只与 --selftest 联用，不影响正常运行路径。
+                    o.ShotsDir = args[++i];
+                    continue;
+                }
                 if (a == "--verbose" || a == "-v") { o.Verbose = true; continue; }
                 if (a == "--help" || a == "-h" || a == "/?") { o.Help = true; continue; }
 

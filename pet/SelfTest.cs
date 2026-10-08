@@ -88,6 +88,7 @@ namespace DshZhuangFangyiPet
                 TestWindows(opt, artDir, cacheDir, sheet);
                 TestAttentionPresentation();
                 TestPomodoro();
+                TestVisualV11(opt, artDir, cacheDir);
                 TestVoice();
                 TestInteract();
                 TestChatMode();
@@ -1097,7 +1098,9 @@ namespace DshZhuangFangyiPet
                            withToday.Today.StreakDays == 5 &&
                            withToday.Today.GoalCount == 8;
             Check(todayOk, "snapshot.today 解析正确，且负数被夹到 0",
-                  withToday?.Today?.MenuLine() ?? "(null)");
+                  withToday == null || withToday.Today == null
+                      ? "(null)"
+                      : withToday.Today.MenuLine());
 
             // (14) 没开过番茄钟 → 菜单那一行整项隐藏（而不是显示"今天：0 个番茄"）
             PetTodayInfo blank = new PetTodayInfo();
@@ -1301,7 +1304,9 @@ namespace DshZhuangFangyiPet
             bool fsClamp = clampSnap != null && clampSnap.Settings != null &&
                 clampSnap.Settings.StatusFontScale <= 3.0;
             Check(fsClamp, "状态文字字号倍率：越界值夹取",
-                  "99 → " + (clampSnap?.Settings?.StatusFontScale ?? -1).ToString("0.##"));
+                  "99 → " + ((clampSnap == null || clampSnap.Settings == null)
+                      ? -1
+                      : clampSnap.Settings.StatusFontScale).ToString("0.##"));
             // 缺字段 → Has=false（exe 对该字段"不动现状"，旧 Host 快照零回归）
             PetSnapshot missSnap = PetSnapshot.Parse("{\"rev\":10,\"label\":\"待机中\",\"settings\":{}}");
             bool fsMissing = missSnap != null && missSnap.Settings != null &&
@@ -1956,25 +1961,15 @@ namespace DshZhuangFangyiPet
             bubble.Show(probeBubble, null);
             Pump(150);
 
-            bool AlignedAt(double sc, out string detail)
-            {
-                bubble.SetScale(sc);
-                Pump(300);
-                int[] r = bubble.DiagWindowRect();
-                if (r == null) { detail = "拿不到窗口矩形"; return false; }
-                int petLeft = petRect[0];
-                int bubbleRight = r[0] + r[2];
-                detail = sc.ToString("0.##") + "×: 气泡 " + r[2] + "x" + r[3] + "@" + r[0] + "," + r[1] +
-                         " 右边缘=" + bubbleRight + " 本体左边缘=" + petLeft +
-                         " 差=" + (petLeft - bubbleRight);
-                // 气泡右边缘应在本体左边缘**左侧**（留 gap），容差放宽到 gap+8
-                return bubbleRight <= petLeft && petLeft - bubbleRight <= 20;
-            }
-
+            // ⚠️ 这里原先是**局部函数**（`bool AlignedAt(...)`）——
+            // 局部函数是 C# 7 语法，`tools/build-pet.ps1 -ForceCsc` 的
+            // in-box C#5 回落路径**编译不过**（实测：CS1513 起一串语法错，
+            // 而且报错位置在 1958 行附近，看起来像别处的括号不匹配）。
+            // 改成静态方法（见 `AlignedAt`），两种编译器都能过。
             string d1, d2, d3;
-            bool alignLo = AlignedAt(1.0, out d1);
-            bool alignSm = AlignedAt(0.4, out d2);
-            bool alignBg = AlignedAt(2.0, out d3);
+            bool alignLo = AlignedAt(bubble, petRect, 1.0, out d1);
+            bool alignSm = AlignedAt(bubble, petRect, 0.4, out d2);
+            bool alignBg = AlignedAt(bubble, petRect, 2.0, out d3);
             Check(alignLo && alignSm && alignBg, "气泡缩放后仍贴齐本体左上角（坐标随尺寸重算）",
                   (alignLo ? "✓" : "✗") + d1 + " | " + (alignSm ? "✓" : "✗") + d2 + " | " + (alignBg ? "✓" : "✗") + d3);
                 bubble.SetScale(1.0);
@@ -1982,6 +1977,28 @@ namespace DshZhuangFangyiPet
                 Pump(100);
             try { if (bubble != null) bubble.ForceClose(); } catch { }
             }
+        }
+
+        /// <summary>
+        /// 把气泡缩放到 <paramref name="sc"/> 后检查它是否仍贴齐本体左上角。
+        ///
+        /// ⚠️ 必须是**静态方法**而不是局部函数：局部函数是 C# 7 语法，
+        /// 而 `build-pet.ps1` 的 in-box C#5 回落路径要能编译（实测它编译不过）。
+        /// </summary>
+        private static bool AlignedAt(PetBubble bubble, int[] petRect, double sc, out string detail)
+        {
+            detail = "";
+            bubble.SetScale(sc);
+            Pump(300);
+            int[] r = bubble.DiagWindowRect();
+            if (r == null) { detail = "拿不到窗口矩形"; return false; }
+            int petLeft = petRect[0];
+            int bubbleRight = r[0] + r[2];
+            detail = sc.ToString("0.##") + "×: 气泡 " + r[2] + "x" + r[3] + "@" + r[0] + "," + r[1] +
+                     " 右边缘=" + bubbleRight + " 本体左边缘=" + petLeft +
+                     " 差=" + (petLeft - bubbleRight);
+            // 气泡右边缘应在本体左边缘**左侧**（留 gap），容差放宽到 gap+8
+            return bubbleRight <= petLeft && petLeft - bubbleRight <= 20;
         }
 
         // ------------------------------------------------------------------
@@ -2033,18 +2050,18 @@ namespace DshZhuangFangyiPet
 
             // (4) ⭐ 本地插值：跑着时用 endsAt - now（Host 不每秒推帧）
             PetPomodoroInfo run = new PetPomodoroInfo();
-            run.Enabled = true; run.Running = true; run.EndsAt = 1_700_000_060_000L;
-            run.RemainingMs = 999_999;   // 故意给个错的：跑着时应以 endsAt 为准
-            long at = 1_700_000_000_000L;
-            bool interp = run.RemainingAt(at) == 60_000L;
+            run.Enabled = true; run.Running = true; run.EndsAt = 1700000060000L;
+            run.RemainingMs = 999999;   // 故意给个错的：跑着时应以 endsAt 为准
+            long at = 1700000000000L;
+            bool interp = run.RemainingAt(at) == 60000L;
             Check(interp, "⭐ 跑着时按 endsAt 本地插值（不依赖 Host 每秒推帧）",
                   "endsAt-now=" + run.RemainingAt(at) + "ms（Host 给的 999999ms 被忽略）");
 
             // (5) ⭐ 暂停时用 Host 的 remainingMs（endsAt 为 0，绝不能拿它算）
             PetPomodoroInfo paused = new PetPomodoroInfo();
             paused.Enabled = true; paused.Running = false; paused.EndsAt = 0;
-            paused.RemainingMs = 754_000;
-            bool frozen = paused.RemainingAt(at) == 754_000L;
+            paused.RemainingMs = 754000;
+            bool frozen = paused.RemainingAt(at) == 754000L;
             Check(frozen, "⭐ 暂停时用 Host 的剩余值（EndsAt=0 不会算出负数）",
                   "remain=" + paused.RemainingAt(at) + "ms");
 
@@ -2057,14 +2074,14 @@ namespace DshZhuangFangyiPet
             // 那时硬算 `EndsAt - now` 会得到 -1750000000000ms 这种荒唐值。
             PetPomodoroInfo noEnds = new PetPomodoroInfo();
             noEnds.Enabled = true; noEnds.Running = true; noEnds.EndsAt = 0;
-            noEnds.RemainingMs = 321_000;
-            bool fellBack = noEnds.RemainingAt(at) == 321_000L;
+            noEnds.RemainingMs = 321000;
+            bool fellBack = noEnds.RemainingAt(at) == 321000L;
             Check(fellBack, "⭐⭐ Running=true 但 EndsAt 缺失 → 回落 Host 的剩余值（不硬算负数）",
                   "EndsAt=0 且 running=1 → " + noEnds.RemainingAt(at) + "ms（期望 321000）");
 
             // (6) 插值下限夹 0（倒计时走完不该显示 -00:03）
             PetPomodoroInfo over = new PetPomodoroInfo();
-            over.Running = true; over.EndsAt = at - 5_000; over.RemainingMs = 0;
+            over.Running = true; over.EndsAt = at - 5000; over.RemainingMs = 0;
             bool clamped = over.RemainingAt(at) == 0L;
             Check(clamped, "插值下限夹 0（不出现负数倒计时）",
                   "已过期 5s → " + over.RemainingAt(at) + "ms");
@@ -2075,14 +2092,14 @@ namespace DshZhuangFangyiPet
                 PetApp.FormatRemaining(400) == "00:01" &&      // 向上取整（Host 的 Math.ceil）
                 PetApp.FormatRemaining(0) == "00:00" &&
                 PetApp.FormatRemaining(-5) == "00:00" &&       // 负数不出负号
-                PetApp.FormatRemaining(60_000) == "01:00" &&
-                PetApp.FormatRemaining(1_500_000) == "25:00" &&
-                PetApp.FormatRemaining(59_999) == "01:00" &&
-                PetApp.FormatRemaining(3_600_000) == "1:00:00" &&
-                PetApp.FormatRemaining(3_661_000) == "1:01:01";
+                PetApp.FormatRemaining(60000) == "01:00" &&
+                PetApp.FormatRemaining(1500000) == "25:00" &&
+                PetApp.FormatRemaining(59999) == "01:00" &&
+                PetApp.FormatRemaining(3600000) == "1:00:00" &&
+                PetApp.FormatRemaining(3661000) == "1:01:01";
             Check(fmt, "⭐⭐ 剩余时间格式化与 Host 同口径（向上取整 / 时分进位）",
-                  "400ms→" + PetApp.FormatRemaining(400) + " 1.5Mms→" + PetApp.FormatRemaining(1_500_000) +
-                  " 3600s→" + PetApp.FormatRemaining(3_600_000));
+                  "400ms→" + PetApp.FormatRemaining(400) + " 1.5Mms→" + PetApp.FormatRemaining(1500000) +
+                  " 3600s→" + PetApp.FormatRemaining(3600000));
 
             // (8) 阶段名标签
             bool labels = PetApp.PomodoroPhaseLabel("focus") == "专注" &&
@@ -2097,7 +2114,7 @@ namespace DshZhuangFangyiPet
             PetPomodoroInfo fp = new PetPomodoroInfo();
             fp.Enabled = true; fp.Show = true; fp.Running = false;
             fp.Phase = "focus"; fp.Round = 3; fp.RoundsPerLongBreak = 4;
-            fp.RemainingMs = 754_000; fp.EndsAt = 0;
+            fp.RemainingMs = 754000; fp.EndsAt = 0;
             string focusText = PetApp.PomodoroTextFor(fp, at);
             fp.Phase = "break";
             string breakText = PetApp.PomodoroTextFor(fp, at);
@@ -2872,7 +2889,7 @@ namespace DshZhuangFangyiPet
                 "\"enabled\":true,\"reason\":\"宿主未装配 sessionController\"}}");
             Check(off != null && off.Chat != null && !PetChatInfo.ShouldShowChat(off.Chat),
                   "⭐ available=false → 不显示聊天选项（不给一个点了必失败的入口）",
-                  "reason=" + (off?.Chat?.Reason ?? "(null)"));
+                  "reason=" + (off == null || off.Chat == null ? "(null)" : off.Chat.Reason));
 
             // (4) ⭐ 用户关掉（enabled=false）时 Host 会报 available=false
             //     —— 两种"不可用"的原因不同，reason 要能区分
@@ -2883,7 +2900,7 @@ namespace DshZhuangFangyiPet
                   userOff.Chat.Enabled == false &&
                   (userOff.Chat.Reason ?? "").Contains("设置"),
                   "⭐ 用户关掉聊天 → 也不显示，且 reason 指明是设置里关的（不是宿主问题）",
-                  "reason=" + (userOff?.Chat?.Reason ?? "(null)"));
+                  "reason=" + (userOff == null || userOff.Chat == null ? "(null)" : userOff.Chat.Reason));
 
             // (5) ShouldShowChat 对 null 安全
             Check(!PetChatInfo.ShouldShowChat(null),
@@ -3032,8 +3049,26 @@ namespace DshZhuangFangyiPet
                 // 一直是"定格图"。这里逐环验证，**任何一环断掉都要红**：
                 //   解码多帧 → 缩到显示尺寸 → Show 启动定时器 → 泵消息后帧号前进
                 //   → 静态气泡重置动画器（防串台）→ 收起停推进（不后台空转）。
-                MakeGif(Path.Combine(artDir, "bubble", "anim-selftest.gif"), 96, 5);
-                BitmapSource[] anim = store.GetBubbleFrames("bubble/anim-selftest.gif", 48);
+                //
+                // ⚠️⚠️ GIF 必须写进**临时目录**，绝不能写 `artDir`。
+                // 踩过：自检原先写 `artDir/bubble/anim-selftest.gif` —— 平时 artDir
+                // 是临时合成目录所以看不出来，但只要用 `--art-dir art/pet` 跑一次
+                // （我为了拿真实素材做视觉验证就这么跑），它就会把测试产物**留在
+                // 真实素材目录里**，`test-pet-assets.mjs` 随即报"孤儿产物"。
+                // 测试永远不许往被检查的目录里写东西。
+                //
+                // 用一个**指向临时目录的独立 store** 去取它 —— 主 store 的
+                // `ArtDir` 是用户给的素材目录，不能污染。
+                string gifDir = Path.Combine(Path.GetTempPath(), "zf-selftest-gif");
+                try { if (Directory.Exists(gifDir)) Directory.Delete(gifDir, true); } catch { }
+                // 必须带 `bubble/` 子目录：`FetchBytes` 按相对路径拼在 ArtDir 之下，
+                // 放错层级会取不到图（表现为"动图解码失败"这种假红）。
+                Directory.CreateDirectory(Path.Combine(gifDir, "bubble"));
+                MakeGif(Path.Combine(gifDir, "bubble", "anim-selftest.gif"), 96, 5);
+                PetOptions gifOpt = new PetOptions();
+                gifOpt.ArtDir = gifDir;
+                PetSpriteStore gifStore = new PetSpriteStore(gifOpt, null, cacheDir);
+                BitmapSource[] anim = gifStore.GetBubbleFrames("bubble/anim-selftest.gif", 48);
                 bool decOk = anim != null && anim.Length == 5 &&
                              Math.Max(anim[0].PixelWidth, anim[0].PixelHeight) <= 48;
                 Check(decOk, "动图解码：解出全部帧并缩到显示尺寸",
@@ -3286,8 +3321,12 @@ namespace DshZhuangFangyiPet
                 win.ReclampPosition(true);
                 int x2, y2, w2, h2;
                 win.GetScreenRect(out x2, out y2, out w2, out h2);
-                PetNative.WorkArea v = PetNative.VirtualWorkspace();
-                bool posOk = x2 >= v.X && y2 >= v.Y && x2 + w2 <= v.Right && y2 + h2 <= v.Bottom;
+                // ⚠️ 变量名不能叫 `v`：同一方法上面已经有一个 `v`（虚拟工作区），
+                // C#5 的 in-box 回落编译器会报 CS0136（"局部变量名冲突"），
+                // Roslyn 不报 —— 于是只有回落路径编译失败。
+                PetNative.WorkArea wsArea = PetNative.VirtualWorkspace();
+                bool posOk = x2 >= wsArea.X && y2 >= wsArea.Y &&
+                             x2 + w2 <= wsArea.Right && y2 + h2 <= wsArea.Bottom;
                 Check(posOk, "本体窗位置在工作区内", "(" + x2 + "," + y2 + ") " + w2 + "x" + h2);
 
                 // 状态切换不崩
@@ -3374,6 +3413,868 @@ namespace DshZhuangFangyiPet
             };
             t.Start();
             Dispatcher.PushFrame(frame);
+        }
+
+        // ==================================================================
+        // v11：桌宠 UI 优化（满幅圆角 / 互动反馈 / 番茄钟进度环 / 主题补齐）
+        // ==================================================================
+        //
+        // 这一节对应三个**实测出来的真问题**（不是审美意见）：
+        //   ① `thinking-starry-formula.png` 完全透明像素 0.0%、33/33 帧四角全实
+        //      → 桌宠在桌面上是个 256×256 的直角方块；
+        //   ② `pomodoroBreath` 是一句**空承诺**（字段/快照/解析/日志都有，没人渲染）；
+        //   ③ `PetInput` 是五个窗口里**唯一不跟主题**的（底色硬编码近白）。
+        private static void TestVisualV11(PetOptions opt, string artDir, string cacheDir)
+        {
+            // ── (1) 满幅判定：合成一条"满幅"与一条"抠图"条带，判定必须不同 ──
+            //
+            // 判据是"逐帧完全透明像素占比的中位数"（见 SpriteSheet.PlatedClearRatio）。
+            // 合成素材正好覆盖两端：MakeStrip 画的是**比帧小一圈的椭圆**（有透明边，
+            // 抠图），MakeFullStrip 铺满整帧（满幅）。
+            string dir = Path.Combine(Path.GetTempPath(), "zf-v11-plated");
+            try
+            {
+                if (Directory.Exists(dir)) Directory.Delete(dir, true);
+                Directory.CreateDirectory(dir);
+                int fh = 64, fw = 71;
+                MakeCutStrip(Path.Combine(dir, "cut.png"), fw, fh, 3, Color.FromArgb(255, 96, 152, 232));
+                MakeFullStrip(Path.Combine(dir, "full.png"), fw, fh, 3, Color.FromArgb(255, 40, 60, 110));
+                PetSpriteStore store = new PetSpriteStore(opt, null, cacheDir);
+                SpriteSheet cut = LoadSheetDirect(store, Path.Combine(dir, "cut.png"), fw, fh, 3);
+                SpriteSheet full = LoadSheetDirect(store, Path.Combine(dir, "full.png"), fw, fh, 3);
+
+                bool cutOk = cut != null && !cut.IsPlated;
+                bool fullOk = full != null && full.IsPlated;
+                Check(cutOk && fullOk,
+                      "⭐⭐ 满幅判定：自带背景板的图被认出，抠图不被误判",
+                      "抠图 IsPlated=" + (cut == null ? "?" : cut.IsPlated.ToString()) +
+                      "（期望 false）；满幅 IsPlated=" + (full == null ? "?" : full.IsPlated.ToString()) +
+                      "（期望 true）");
+
+                // 判定必须**稳定**（同一个条带问两次给同一个答案，缓存不改变结果）。
+                bool stable = full != null && full.IsPlated && full.IsPlated && full.DiagPlatedComputed;
+                Check(stable, "满幅判定结果稳定（懒算一次后缓存，重复查询一致）",
+                      "computed=" + (full == null ? "?" : full.DiagPlatedComputed.ToString()));
+
+                // ── (2) 圆角半径纯函数：随宽度缩放、有上下限 ──
+                double r256 = SpriteSheet.PlatedCornerRadiusDip(256);
+                double r90 = SpriteSheet.PlatedCornerRadiusDip(90);
+                double rTiny = SpriteSheet.PlatedCornerRadiusDip(4);
+                double rHuge = SpriteSheet.PlatedCornerRadiusDip(4000);
+                bool radiusOk = r256 > r90 && r90 > 0 && rTiny >= SpriteSheet.PlatedCornerMin &&
+                                rHuge <= SpriteSheet.PlatedCornerMax;
+                Check(radiusOk, "⭐ 圆角半径按显示宽度缩放（并有上下限，不随缩放变形）",
+                      "256→" + r256.ToString("0.#") + "  90→" + r90.ToString("0.#") +
+                      "  4→" + rTiny.ToString("0.#") + "  4000→" + rHuge.ToString("0.#") +
+                      "（夹在 " + SpriteSheet.PlatedCornerMin + "~" + SpriteSheet.PlatedCornerMax + "）");
+
+                // ── (3) 窗口：满幅裁圆角、抠图不裁、**换素材要清掉上一张的裁剪** ──
+                //
+                // ⚠️ 第三条是这一节的核心 —— 它是"窗口复用"类 bug，只在
+                // "满幅 → 抠图"连续切换时暴露（气泡那边踩过同一个坑）。
+                PetWindow win = null;
+                try
+                {
+                    win = new PetWindow(opt, null, store);
+                    win.Show();
+                    Pump(200);
+
+                    win.DiagForceSheet(full);
+                    Pump(60);
+                    // ⚠️ 诊断值必须**当场取**：`Check` 的 detail 字符串是在调用处
+                    // 求值的，若放到切换素材之后再拼，报出来的就是**另一个素材**
+                    // 的状态（第一版就是这样，写着"判定=False"而 full 明明是 true）。
+                    bool fullPlated = win.DiagSheetIsPlated;
+                    bool fullClipped = win.DiagHasPlatedClip;
+                    double r = win.DiagPlatedRadius;
+                    string fullDetail = "判定=" + fullPlated + " 裁剪=" + fullClipped +
+                                        " 半径=" + r.ToString("0.#") + " 素材=" + win.DiagSheetFile +
+                                        " 图片[" + win.DiagImageState + "]";
+
+                    win.DiagForceSheet(cut);
+                    Pump(60);
+                    bool cutCleared = !win.DiagHasPlatedClip;
+                    bool cutPlated = win.DiagSheetIsPlated;
+                    string cutDetail = "切回抠图后还有裁剪=" + win.DiagHasPlatedClip +
+                                       "（期望 false）判定=" + cutPlated + " 素材=" + win.DiagSheetFile;
+
+                    Check(fullPlated && fullClipped && r > 0,
+                          "⭐ 满幅素材挂上圆角裁剪（方块 → 圆角卡片）",
+                          fullDetail);
+                    Check(cutCleared,
+                          "⭐⭐ 换素材清掉上一张的圆角（抠图绝不被切角）",
+                          cutDetail);
+
+                    // ── (3b) 真实素材：`thinking` 必须是满幅、`idle` 必须不是 ──
+                //
+                // 合成素材只证明"判据能区分两端"；**用户看到的方块是真实素材**，
+                // 所以必须拿真图再验一次。跳过条件：跑的是合成素材目录（没有真图）。
+                {
+                    string realThinking = Path.Combine(artDir, "thinking-starry-formula.png");
+                    if (File.Exists(realThinking))
+                    {
+                        PetSpriteStore rs = new PetSpriteStore(opt, null, cacheDir);
+                        SpriteSheet th = LoadSheetDirect(rs, realThinking, 256, 256, 33);
+                        string realIdle = Path.Combine(artDir, "idle-smile.png");
+                        SpriteSheet idl = File.Exists(realIdle)
+                            ? LoadSheetDirect(rs, realIdle, 256, 256, 33) : null;
+                        bool thPlated = th != null && th.IsPlated;
+                        bool idleNot = idl == null || !idl.IsPlated;
+                        Check(thPlated && idleNot,
+                              "⭐⭐ 真实素材：thinking 判为满幅（会裁圆角）、idle 不裁（头发不被切）",
+                              "thinking-starry-formula IsPlated=" + thPlated +
+                              "（期望 true）；idle-smile IsPlated=" +
+                              (idl == null ? "(缺图，跳过)" : idl.IsPlated.ToString()) +
+                              "（期望 false）");
+                    }
+                }
+
+                // ── (4) 命中测试与裁剪一致：被切掉的角不可点 ──
+                    //
+                    // 不挡的话会出现"看得见桌面、点得着"的隐形可点角。
+                    // 判据用**同一个纯函数**（`DiagInClippedCorner`），
+                    // 而运行路径的 `InClippedCorner` 就是转发到它。
+                    double w = 256, h = 256;
+                    double cr = SpriteSheet.PlatedCornerRadiusDip(w);
+                    // 左上角的极角点：在圆角外 → 应判为"被裁"
+                    bool cornerClipped = PetWindow.DiagInClippedCorner(0.5, 0.5, w, h);
+                    // 中心：绝不在裁剪区
+                    bool centerKept = !PetWindow.DiagInClippedCorner(w / 2, h / 2, w, h);
+                    // 上边缘中间（离角很远）：不该被裁
+                    bool edgeKept = !PetWindow.DiagInClippedCorner(w / 2, 0.5, w, h);
+                    Check(cornerClipped && centerKept && edgeKept,
+                          "⭐⭐ 圆角切掉区不可点（命中与裁剪一致，无隐形可点角）",
+                          "半径=" + cr.ToString("0.#") +
+                          " 角落被裁=" + cornerClipped + " 中心保留=" + centerKept +
+                          " 上边中点保留=" + edgeKept);
+                }
+                finally
+                {
+                    try { if (win != null) win.ForceClose(); } catch { }
+                }
+                Pump(80);
+
+                // ── (5) 互动反馈动画：只缩不放、结束归位、抛掷期间不播 ──
+                PetWindow anim = null;
+                try
+                {
+                    anim = new PetWindow(opt, null, store);
+                    anim.Show();
+                    Pump(200);
+                    anim.DiagForceSheet(cut);
+                    Pump(40);
+
+                    bool idleUnit = Math.Abs(anim.DiagReactScaleX - 1.0) < 0.001 &&
+                                    Math.Abs(anim.DiagReactScaleY - 1.0) < 0.001 &&
+                                    Math.Abs(anim.DiagReactShiftY) < 0.001;
+                    Check(idleUnit, "反应动画静止时是单位变换（不会自己抖）",
+                          "scale=" + anim.DiagReactScaleX.ToString("0.###") +
+                          " shiftY=" + anim.DiagReactShiftY.ToString("0.###"));
+
+                    anim.PlayReact("click", 0);
+                    bool started = anim.DiagReactPlaying;
+                    // 中途取样：应当已经离开 1.0（动画在跑）
+                    Pump(SelfTest_ReactMidMs);
+                    double midScale = anim.DiagReactScaleX;
+                    // ⭐ 只缩不放：任何时刻都不得 > 1.0（否则满幅素材溢出窗口被裁）
+                    bool neverGrows = midScale <= 1.0001;
+                    Pump(PetWindow.ReactMs * 2);
+                    bool backToUnit = Math.Abs(anim.DiagReactScaleX - 1.0) < 0.02 &&
+                                      Math.Abs(anim.DiagReactScaleY - 1.0) < 0.02;
+                    Check(started && neverGrows && backToUnit,
+                          "⭐⭐ 反应动画：会动、**只缩不放**、结束自动归位",
+                          "启动=" + started + " 中途 scale=" + midScale.ToString("0.###") +
+                          "（必须 ≤1.0） 结束 scale=" + anim.DiagReactScaleX.ToString("0.###"));
+
+                    // 分级：摸头 3 级压得比点击深
+                    anim.ResetReact();
+                    anim.PlayReact("pat", 3);
+                    // 采样整段动画取**最深**那一帧（单点取样太脆：动画时钟的推进
+                    // 与 Pump 的粒度不一定对齐，取到边界值就会假红）。
+                    double patDeep = SampleMinScale(anim, PetWindow.ReactMs + 40);
+                    anim.ResetReact();
+                    anim.PlayReact("click", 0);
+                    double clickShallow = SampleMinScale(anim, PetWindow.ReactMs + 40);
+                    Check(patDeep < clickShallow,
+                          "摸头分级：级数越高压得越深（3 级 vs 单击）",
+                          "摸头3级 最深 scale=" + patDeep.ToString("0.###") +
+                          " 单击 最深 scale=" + clickShallow.ToString("0.###"));
+                    anim.ResetReact();
+                }
+                finally
+                {
+                    try { if (anim != null) anim.ForceClose(); } catch { }
+                }
+                Pump(80);
+
+                // ── (6) 番茄钟进度环：占比数学 + 未知进度不编假环 ──
+                long at = 1700000000000L;
+                PetPomodoroInfo fp = new PetPomodoroInfo();
+                fp.Enabled = true; fp.Show = true; fp.Running = false;
+                fp.Phase = "focus"; fp.Round = 2; fp.RoundsPerLongBreak = 4;
+                fp.TotalMs = 1500000; fp.RemainingMs = 750000; fp.EndsAt = 0;
+
+                double half = PetApp.PomodoroFraction(fp, at);
+                fp.RemainingMs = 0;
+                double zero = PetApp.PomodoroFraction(fp, at);
+                fp.RemainingMs = 1500000;
+                double whole = PetApp.PomodoroFraction(fp, at);
+                fp.TotalMs = 0;                       // 旧 Host 没有 totalMs
+                double unknown = PetApp.PomodoroFraction(fp, at);
+                fp.TotalMs = 1500000;
+                PetPomodoroInfo offP = new PetPomodoroInfo();
+                offP.Enabled = false; offP.Show = true;
+                double offFrac = PetApp.PomodoroFraction(offP, at);
+
+                bool fracOk = Math.Abs(half - 0.5) < 0.0001 && zero == 0.0 && whole == 1.0;
+                Check(fracOk, "⭐⭐ 进度环占比 = 剩余 / 总时长（夹 0..1）",
+                      "一半→" + half.ToString("0.###") + " 走完→" + zero.ToString("0.###") +
+                      " 满→" + whole.ToString("0.###"));
+                Check(unknown < 0 && offFrac < 0,
+                      "⭐⭐ totalMs 缺失/未启用 → 返回 -1（环隐藏，**不编一个假进度**）",
+                      "totalMs=0→" + unknown.ToString("0.###") + " 未启用→" + offFrac.ToString("0.###"));
+
+                // ── (7) 文字拆分不变式：两段拼回 == 原来那一整行 ──
+                //
+                // 界面改成"环内时间 + 环右侧阶段"两段之后，最容易出的错是
+                // "只改一边"（比如轮次只在其中一处加）。这条断言把它钉死。
+                PetPomodoroInfo tp = new PetPomodoroInfo();
+                tp.Enabled = true; tp.Show = true; tp.Running = false;
+                tp.Phase = "focus"; tp.Round = 3; tp.RoundsPerLongBreak = 4;
+                tp.TotalMs = 1500000; tp.RemainingMs = 754000; tp.EndsAt = 0;
+                string ringT = PetApp.PomodoroRingText(tp, at);
+                string phaseT = PetApp.PomodoroPhaseText(tp);
+                string oneLine = PetApp.PomodoroTextFor(tp, at);
+                // `专注 12:34 · 3/4`  ←→  `12:34` + `专注 · 第 3/4 轮`
+                bool joinOk = ringT == "12:34" && oneLine != null &&
+                              oneLine.IndexOf(ringT, StringComparison.Ordinal) >= 0 &&
+                              phaseT.IndexOf("专注", StringComparison.Ordinal) >= 0 &&
+                              phaseT.IndexOf("3/4", StringComparison.Ordinal) >= 0;
+                Check(joinOk, "⭐⭐ 进度环文字拆分：环内时间 + 环右侧阶段（与整行同口径）",
+                      "环内=\"" + ringT + "\" 右侧=\"" + phaseT + "\" 整行=\"" + oneLine + "\"");
+
+                // 休息阶段不带轮次（与 PomodoroTextFor 同一条规则）
+                tp.Phase = "break";
+                string restPhase = PetApp.PomodoroPhaseText(tp);
+                Check(restPhase == "休息", "休息阶段不带轮次（与整行口径一致）",
+                      "\"" + restPhase + "\"");
+
+                // ── (8) 进度环控件：可见性/弧长/未知进度隐藏 ──
+                PetPomodoro pomo = null;
+                try
+                {
+                    pomo = new PetPomodoro();
+                    pomo.Update("12:34", "专注 · 第 2/4 轮", 0.5, true, true,
+                                new[] { 100, 100, 200, 200 }, null);
+                    bool ringOn = pomo.DiagRingVisible && pomo.DiagProgressVisible;
+                    double dash = pomo.DiagDashFirst;
+                    bool dashOk = dash > 0;
+
+                    pomo.Update("00:00", "专注", 0.0, true, true, new[] { 100, 100, 200, 200 }, null);
+                    bool zeroHidden = pomo.DiagRingVisible && !pomo.DiagProgressVisible;
+
+                    pomo.Update("25:00", "专注", 1.0, true, true, new[] { 100, 100, 200, 200 }, null);
+                    bool wholeNoDash = pomo.DiagRingVisible && pomo.DiagDashArray == null;
+
+                    pomo.Update("12:34", "专注", -1.0, true, true, new[] { 100, 100, 200, 200 }, null);
+                    bool unknownHidden = !pomo.DiagRingVisible;
+
+                    Check(ringOn && dashOk, "⭐ 进度环：占比 0.5 时进度弧可见且 dash 有长度",
+                          "环可见=" + ringOn + " dash[0]=" + dash.ToString("0.#"));
+                    Check(zeroHidden, "占比 0 → 进度椭圆隐藏（不画 0 长度的斑点）",
+                          "环可见=" + pomo.DiagRingVisible + " 进度可见=" + pomo.DiagProgressVisible);
+                    Check(wholeNoDash, "占比 1 → 整圈（不设 dash，避免起点细缝）",
+                          "dash=" + (pomo.DiagDashArray == null ? "null" : "有"));
+                    Check(unknownHidden, "⭐⭐ 进度未知（-1）→ 整环隐藏（不编假进度）",
+                          "环可见=" + pomo.DiagRingVisible + "（期望 false）");
+                }
+                finally
+                {
+                    try { if (pomo != null) pomo.ForceClose(); } catch { }
+                }
+                Pump(60);
+
+                // ── (9) 呼吸引导：开关真的接到动画上（兑现设置页那句承诺）──
+                PetPomodoro breath = null;
+                try
+                {
+                    breath = new PetPomodoro();
+                    breath.Update("12:34", "专注", 0.5, true, true, new[] { 100, 100, 200, 200 }, null);
+                    breath.DiagSetBreath(false);
+                    bool offIdle = !breath.DiagBreathing;
+                    breath.DiagSetBreath(true);
+                    bool onRunning = breath.DiagBreathing;
+                    // ⚠️ 缩放只缩不放：否则 SizeToContent 的窗口会被撑大。
+                    //
+                    // ⚠️⚠️ 这里必须验"**真的在动**"，不能只验"值在合法区间内"：
+                    // 一个卡在 1.0 的动画同样满足 `0.85 ≤ s ≤ 1.0`，那种断言是假绿。
+                    // 所以跨整段吸气期（4s）反复取样，取**最小**值 ——
+                    // 只有真的在缩，最小值才会明显小于 1.0。
+                    double minBreath = 1.0, maxBreath = 0.0;
+                    for (int i = 0; i < 16; i++)
+                    {
+                        Pump(300);
+                        double s = breath.DiagBreathScale;
+                        if (s < minBreath) minBreath = s;
+                        if (s > maxBreath) maxBreath = s;
+                    }
+                    bool shrinkOnly = maxBreath <= 1.0001 && minBreath >= PetPomodoro.BreathMinScale - 0.0001;
+                    bool reallyMoves = minBreath < 0.97;      // 真的缩下去了（不是卡在 1.0）
+                    breath.DiagSetBreath(false);
+                    bool stopped = !breath.DiagBreathing &&
+                                   Math.Abs(breath.DiagBreathScale - 1.0) < 0.001;
+                    Check(offIdle && onRunning && shrinkOnly && reallyMoves && stopped,
+                          "⭐⭐ 呼吸引导开关真的有效（且**真的在缩放**，不是卡住不动）",
+                          "关→" + offIdle + " 开→" + onRunning +
+                          " 取样 min=" + minBreath.ToString("0.###") + " max=" + maxBreath.ToString("0.###") +
+                          "（期望 min<0.97 且 max≤1.0） 再关→" + stopped);
+                }
+                finally
+                {
+                    try { if (breath != null) breath.ForceClose(); } catch { }
+                }
+                Pump(60);
+
+                // ── (10) 输入窗跟主题（此前是五个窗口里唯一不跟的）──
+                PetInput input = null;
+                try
+                {
+                    input = new PetInput(null);
+                    input.ApplyTheme(false);
+                    // ⚠️ 全程**全限定**：SelfTest 里 `Color` 指的是
+                    // `System.Drawing.Color`（既有代码全在用它），而 PetInput 的
+                    // 诊断属性返回 WPF 的 `System.Windows.Media.Color`。
+                    System.Windows.Media.Color lightBg = input.DiagChromeBackground;
+                    System.Windows.Media.Color lightBox = input.DiagBoxBackground;
+                    System.Windows.Media.Color lightHint = input.DiagHintForeground;
+                    input.ApplyTheme(true);
+                    bool dark = input.DiagDark;
+                    System.Windows.Media.Color darkBg = input.DiagChromeBackground;
+                    System.Windows.Media.Color darkBox = input.DiagBoxBackground;
+                    System.Windows.Media.Color darkHint = input.DiagHintForeground;
+
+                    PetTheme.BubblePalette dp = PetTheme.BubblePalette.For(true);
+                    bool chromeMatch = darkBg.R == dp.BgR && darkBg.G == dp.BgG && darkBg.B == dp.BgB;
+                    bool changed = dark && darkBg != lightBg && darkBox != lightBox && darkHint != lightHint;
+                    Check(changed && chromeMatch,
+                          "⭐⭐ 输入窗跟主题（深色下不再是一块白卡）",
+                          "浅色底=" + lightBg + " 深色底=" + darkBg +
+                          "（期望 " + dp.BgR + "," + dp.BgG + "," + dp.BgB + "）");
+
+                    // ⭐⭐ 下拉框也要跟着变 —— 这条是**截图抓出来的**：
+                    // 第一版只设了 `ComboBox.Background`，而 Aero2 的模板用的是
+                    // 主题级 `StaticResource`，于是属性设了、界面纹丝不动，
+                    // 深色卡片里嵌着三个白框。所以这里**渲染取像素**来验，
+                    // 不信任属性值（属性值那次是对的，界面是错的）。
+                    input.ApplyTheme(false);
+                    Pump(80);
+                    input.ApplyTheme(true);
+                    Pump(120);
+                    double comboDarkLum = MeasureBrightness(input.DiagModeBox);
+                    input.ApplyTheme(false);
+                    Pump(120);
+                    double comboLightLum = MeasureBrightness(input.DiagModeBox);
+                    Check(comboDarkLum >= 0 && comboLightLum >= 0 &&
+                          comboDarkLum < comboLightLum - 0.2,
+                          "⭐⭐ 输入窗的下拉框真的变暗了（渲染取像素，不是看属性）",
+                          "深色下拉亮度=" + comboDarkLum.ToString("0.00") +
+                          " 浅色下拉亮度=" + comboLightLum.ToString("0.00") + "（期望深色明显更暗）");
+                }
+                finally
+                {
+                    try { if (input != null) input.Close(); } catch { }
+                }
+                Pump(60);
+
+                // ── (11) 右键菜单跟主题 ──
+                {
+                    System.Windows.Controls.ContextMenu menu = new System.Windows.Controls.ContextMenu();
+                    System.Windows.Controls.MenuItem mi = new System.Windows.Controls.MenuItem();
+                    mi.Header = "更多";
+                    System.Windows.Controls.MenuItem sub = new System.Windows.Controls.MenuItem();
+                    sub.Header = "投喂";
+                    mi.Items.Add(sub);
+                    menu.Items.Add(mi);
+
+                    PetApp.ApplyMenuTheme(menu, true);
+                    PetTheme.BubblePalette dp = PetTheme.BubblePalette.For(true);
+                    System.Windows.Media.SolidColorBrush mb =
+                        menu.Background as System.Windows.Media.SolidColorBrush;
+                    System.Windows.Media.SolidColorBrush sb =
+                        sub.Foreground as System.Windows.Media.SolidColorBrush;
+                    bool menuOk = mb != null && mb.Color.R == dp.BgR && mb.Color.G == dp.BgG &&
+                                  mb.Color.B == dp.BgB;
+                    bool subOk = sb != null && sb.Color.R == dp.FgR && sb.Color.G == dp.FgG &&
+                                 sb.Color.B == dp.FgB;
+                    Check(menuOk && subOk,
+                          "⭐ 右键菜单跟主题（含子菜单 —— 它们有独立的弹出层）",
+                          "菜单底=" + (mb == null ? "null" : mb.Color.ToString()) +
+                          " 子项字=" + (sb == null ? "null" : sb.Color.ToString()));
+                }
+                // ── (12) 离屏截图：把每个窗口渲染成 PNG，供人眼确认 ──
+                //
+                // `RenderTargetBitmap` 渲染的是**已排布的元素**，不需要窗口真的显示
+                // 在屏幕上、也不抢焦点。所以这是"客观视觉证据"，比读代码可靠得多。
+                // 输出到 `--shots <dir>` 指定的目录（没给就跳过，不产生副作用）。
+                if (!string.IsNullOrEmpty(opt.ShotsDir))
+                {
+                    try { WriteShots(opt, artDir, cacheDir, dir); }
+                    catch (Exception ex) { Check(false, "离屏截图", PetLog.Describe(ex)); }
+                }
+            }
+            catch (Exception ex)
+            {
+                Check(false, "v11 视觉自检", PetLog.Describe(ex));
+            }
+            finally
+            {
+                try { if (Directory.Exists(dir)) Directory.Delete(dir, true); } catch { }
+            }
+        }
+
+        /// <summary>
+        /// 把元素离屏渲染后**读回像素**，返回"最角那一点"与"中心"的 alpha 均值（0..1）。
+        ///
+        /// ⚠️ 为什么不只断言 `Clip != null`：那只证明"我设了属性"，
+        /// 不证明"屏幕上真的没有那个角"（可能设错了元素、半径算成了 0、
+        /// 或者几何落到了元素外面 —— 气泡那边三种都踩过）。
+        /// 这里直接看渲染结果，是这条改动**唯一**的硬证据。
+        /// </summary>
+        private static void MeasureRenderedCorners(System.Windows.FrameworkElement el,
+                                                   out double cornerAlpha, out double centerAlpha)
+        {
+            cornerAlpha = 1.0;
+            centerAlpha = 0.0;
+            if (el == null) return;
+            try
+            {
+                int w = (int)Math.Ceiling(el.ActualWidth > 0 ? el.ActualWidth : el.DesiredSize.Width);
+                int h = (int)Math.Ceiling(el.ActualHeight > 0 ? el.ActualHeight : el.DesiredSize.Height);
+                if (w <= 2 || h <= 2) return;
+                RenderTargetBitmap rtb = new RenderTargetBitmap(w, h, 96, 96,
+                    System.Windows.Media.PixelFormats.Pbgra32);
+                rtb.Render(el);
+                rtb.Freeze();
+                int stride = w * 4;
+                byte[] px = new byte[stride * h];
+                rtb.CopyPixels(px, stride, 0);
+
+                // 四角各取 3×3 小块的平均 alpha（单点会被抗锯齿边缘干扰）
+                double sum = 0;
+                int n = 0;
+                int[] xs = new int[] { 0, w - 3 };
+                int[] ys = new int[] { 0, h - 3 };
+                for (int i = 0; i < 2; i++)
+                {
+                    for (int j = 0; j < 2; j++)
+                    {
+                        for (int dy = 0; dy < 3; dy++)
+                        {
+                            for (int dx = 0; dx < 3; dx++)
+                            {
+                                int x = xs[i] + dx, y = ys[j] + dy;
+                                if (x < 0 || y < 0 || x >= w || y >= h) continue;
+                                sum += px[y * stride + x * 4 + 3];
+                                n++;
+                            }
+                        }
+                    }
+                }
+                cornerAlpha = n == 0 ? 1.0 : (sum / n) / 255.0;
+
+                // 中心 5×5
+                double csum = 0;
+                int cn = 0;
+                for (int dy = -2; dy <= 2; dy++)
+                {
+                    for (int dx = -2; dx <= 2; dx++)
+                    {
+                        int x = w / 2 + dx, y = h / 2 + dy;
+                        if (x < 0 || y < 0 || x >= w || y >= h) continue;
+                        csum += px[y * stride + x * 4 + 3];
+                        cn++;
+                    }
+                }
+                centerAlpha = cn == 0 ? 0.0 : (csum / cn) / 255.0;
+            }
+            catch (Exception ex) { PetLog.Warn("渲染取像素失败: " + PetLog.Describe(ex)); }
+        }
+
+        /// <summary>
+        /// 把元素离屏渲染后取**平均亮度**（0..1）。失败返回 -1。
+        ///
+        /// 用途：验证"某个控件真的变暗了"。⚠️ 必须取渲染像素而不是读属性 ——
+        /// 输入窗下拉框那次，`Background` 属性是对的、界面却是白的
+        /// （Aero2 模板用主题级 `StaticResource`，不吃这个属性）。
+        /// 只信渲染结果。
+        /// </summary>
+        private static double MeasureBrightness(System.Windows.FrameworkElement el)
+        {
+            if (el == null) return -1;
+            try
+            {
+                el.Measure(new System.Windows.Size(double.PositiveInfinity, double.PositiveInfinity));
+                int w = (int)Math.Ceiling(el.ActualWidth > 0 ? el.ActualWidth : el.DesiredSize.Width);
+                int h = (int)Math.Ceiling(el.ActualHeight > 0 ? el.ActualHeight : el.DesiredSize.Height);
+                if (w <= 0 || h <= 0) return -1;
+                el.Arrange(new System.Windows.Rect(0, 0, w, h));
+                el.UpdateLayout();
+                RenderTargetBitmap rtb = new RenderTargetBitmap(w, h, 96, 96,
+                    System.Windows.Media.PixelFormats.Pbgra32);
+                rtb.Render(el);
+                rtb.Freeze();
+                int stride = w * 4;
+                byte[] px = new byte[stride * h];
+                rtb.CopyPixels(px, stride, 0);
+                double sum = 0;
+                int n = 0;
+                // 只取上 1/3（避开文字与边框，那里主要是底色）
+                int rows = Math.Max(1, h / 3);
+                for (int y = 0; y < rows; y++)
+                {
+                    for (int x = 0; x < w; x++)
+                    {
+                        int o = y * stride + x * 4;
+                        if (px[o + 3] < 8) continue;      // 全透明处不计（不是底色）
+                        sum += (px[o + 2] * 0.299 + px[o + 1] * 0.587 + px[o] * 0.114) / 255.0;
+                        n++;
+                    }
+                }
+                return n == 0 ? -1 : sum / n;
+            }
+            catch (Exception ex)
+            {
+                PetLog.Warn("取亮度失败: " + PetLog.Describe(ex));
+                return -1;
+            }
+        }
+
+        /// <summary>
+        /// 把 v11 的每个视觉改动渲染成 PNG（`--shots &lt;dir&gt;`）。
+        ///
+        /// 每张图都是**运行路径的真实渲染**（同一个 `PetWindow`/`PetPomodoro`），
+        /// 不是"照着代码画一个示意图" —— 后者只会证明我画得对，不能证明程序对。
+        /// </summary>
+        private static void WriteShots(PetOptions opt, string artDir, string cacheDir, string tmpDir)
+        {
+            string outDir = opt.ShotsDir;
+            Directory.CreateDirectory(outDir);
+            int count = 0;
+
+            // ---- 1. 满幅素材（thinking）圆角前后 ----
+            string thPath = Path.Combine(artDir, "thinking-starry-formula.png");
+            string idlePath = Path.Combine(artDir, "idle-smile.png");
+            if (File.Exists(thPath))
+            {
+                PetSpriteStore store = new PetSpriteStore(opt, null, cacheDir);
+                PetWindow win = null;
+                try
+                {
+                    win = new PetWindow(opt, null, store);
+                    win.Show();
+                    Pump(250);
+                    SpriteSheet th = LoadSheetDirect(store, thPath, 256, 256, 33);
+                    win.DiagForceSheet(th);
+                    Pump(150);
+                    SaveShot(win.DiagRoot, Path.Combine(outDir, "01-pet-thinking-rounded.png"), 0, 0);
+                    count++;
+                    PetLog.Info("截图 01 满幅圆角：IsPlated=" + win.DiagSheetIsPlated +
+                                " 半径=" + win.DiagPlatedRadius.ToString("0.#"));
+
+                    // ⭐ 像素级验证：把渲染结果读回来，确认**四角真的透明了**。
+                    // 这是最硬的证据 —— 它验的是"屏幕上真的没有那个角"，
+                    // 而不是"我设了 Clip 属性"（后者可能是设错了对象）。
+                    double cornerAlpha, centerAlpha;
+                    MeasureRenderedCorners(win.DiagRoot, out cornerAlpha, out centerAlpha);
+                    Check(cornerAlpha < 0.25 && centerAlpha > 0.75,
+                          "⭐⭐ 满幅素材渲染后四角真的透明（像素级验证，不是「设了属性」）",
+                          "角落 alpha=" + cornerAlpha.ToString("0.00") + "（期望 <0.25）" +
+                          " 中心 alpha=" + centerAlpha.ToString("0.00") + "（期望 >0.75）");
+                }
+                finally { try { if (win != null) win.ForceClose(); } catch { } }
+                Pump(80);
+
+                // ---- 2. 抠图素材（idle）：四角必须仍是透明的 ----
+                if (File.Exists(idlePath))
+                {
+                    PetWindow win2 = null;
+                    try
+                    {
+                        win2 = new PetWindow(opt, null, store);
+                        win2.Show();
+                        Pump(250);
+                        SpriteSheet idl = LoadSheetDirect(store, idlePath, 256, 256, 33);
+                        win2.DiagForceSheet(idl);
+                        Pump(150);
+                        SaveShot(win2.DiagRoot, Path.Combine(outDir, "02-pet-idle-cutout.png"), 0, 0);
+                        count++;
+                        PetLog.Info("截图 02 抠图不裁：IsPlated=" + win2.DiagSheetIsPlated +
+                                    " 有裁剪=" + win2.DiagHasPlatedClip);
+
+                        // ⭐ 反向像素验证：抠图素材**没有**被裁圆角 ——
+                        // 它的透明角来自素材自身（idle 的 alpha 掩码四角本来就是空的）。
+                        // 这条与 01 的断言配对，一起证明"只有满幅图被裁"。
+                        double c2, m2;
+                        MeasureRenderedCorners(win2.DiagRoot, out c2, out m2);
+                        Check(!win2.DiagHasPlatedClip,
+                              "⭐⭐ 抠图素材**没有**挂圆角裁剪（头发/发饰不会被切）",
+                              "IsPlated=" + win2.DiagSheetIsPlated +
+                              " 有裁剪=" + win2.DiagHasPlatedClip + "（期望 false）" +
+                              " 角alpha=" + c2.ToString("0.00") + " 中心alpha=" + m2.ToString("0.00"));
+                    }
+                    finally { try { if (win2 != null) win2.ForceClose(); } catch { } }
+                    Pump(80);
+                }
+
+                // ---- 3. 反应动画：静止帧 vs 压得最深那一帧 ----
+                PetWindow win3 = null;
+                try
+                {
+                    win3 = new PetWindow(opt, null, store);
+                    win3.Show();
+                    Pump(250);
+                    SpriteSheet idl = File.Exists(idlePath)
+                        ? LoadSheetDirect(store, idlePath, 256, 256, 33)
+                        : LoadSheetDirect(store, thPath, 256, 256, 33);
+                    win3.DiagForceSheet(idl);
+                    Pump(150);
+                    SaveShot(win3.DiagRoot, Path.Combine(outDir, "03-react-idle.png"), 256, 256);
+                    count++;
+
+                    win3.PlayReact("pat", 3);
+                    // 取压得最深的那一帧（约动画 35% 处）
+                    double minS = 1.0;
+                    int slice = Math.Max(8, PetWindow.ReactMs / 12);
+                    for (int i = 0; i < 12; i++)
+                    {
+                        Pump(slice);
+                        double s = win3.DiagReactScaleX;
+                        if (s < minS)
+                        {
+                            minS = s;
+                            SaveShot(win3.DiagRoot, Path.Combine(outDir, "04-react-squash.png"), 256, 256);
+                        }
+                    }
+                    count++;
+                    PetLog.Info("截图 03/04 反应动画：最深 scale=" + minS.ToString("0.###"));
+                }
+                finally { try { if (win3 != null) win3.ForceClose(); } catch { } }
+                Pump(80);
+            }
+
+            // ---- 5. 番茄钟进度环：四个占比 ----
+            PetPomodoro pomo = null;
+            try
+            {
+                pomo = new PetPomodoro();
+                pomo.Show();
+                Pump(200);
+                double[] fracs = new double[] { 1.0, 0.66, 0.33, 0.0 };
+                for (int i = 0; i < fracs.Length; i++)
+                {
+                    string time = PetApp.FormatRemaining((long)(1500000 * fracs[i]));
+                    pomo.Update(time, "专注 · 第 2/4 轮", fracs[i], true, true,
+                                new[] { 100, 100, 200, 200 }, null);
+                    Pump(120);
+                    SaveShot(pomo.Content as System.Windows.FrameworkElement,
+                             Path.Combine(outDir, "05-ring-" + ((int)(fracs[i] * 100)).ToString() + ".png"),
+                             0, 0);
+                    count++;
+                }
+                PetLog.Info("截图 05 进度环：4 档占比");
+            }
+            finally { try { if (pomo != null) pomo.ForceClose(); } catch { } }
+            Pump(80);
+
+            // ---- 6. 呼吸引导：开/关各一张 ----
+            PetPomodoro breath = null;
+            try
+            {
+                breath = new PetPomodoro();
+                breath.Show();
+                Pump(200);
+                breath.Update("12:34", "专注", 0.5, true, true, new[] { 100, 100, 200, 200 }, null);
+                breath.DiagSetBreath(false);
+                Pump(120);
+                SaveShot(breath.Content as System.Windows.FrameworkElement,
+                         Path.Combine(outDir, "06-breath-off.png"), 0, 0);
+                breath.DiagSetBreath(true);
+                Pump(2500);   // 落在"吸气"段（4s 内）
+                SaveShot(breath.Content as System.Windows.FrameworkElement,
+                         Path.Combine(outDir, "07-breath-on.png"), 0, 0);
+                count += 2;
+                PetLog.Info("截图 06/07 呼吸引导：scale=" + breath.DiagBreathScale.ToString("0.###"));
+            }
+            finally { try { if (breath != null) breath.ForceClose(); } catch { } }
+            Pump(80);
+
+            // ---- 8/9. 输入窗：浅色 vs 深色 ----
+            PetInput input = null;
+            try
+            {
+                input = new PetInput(null);
+                input.Show();
+                Pump(200);
+                input.ApplyTheme(false);
+                Pump(120);
+                SaveShot(input.Content as System.Windows.FrameworkElement,
+                         Path.Combine(outDir, "08-input-light.png"), 0, 0);
+                input.ApplyTheme(true);
+                Pump(120);
+                SaveShot(input.Content as System.Windows.FrameworkElement,
+                         Path.Combine(outDir, "09-input-dark.png"), 0, 0);
+                count += 2;
+            }
+            finally { try { if (input != null) input.Close(); } catch { } }
+            Pump(80);
+
+            Check(count >= 8, "离屏截图已生成 → " + outDir,
+                  count + " 张（满幅圆角 / 抠图 / 反应动画 / 进度环 / 呼吸 / 输入窗深浅色）");
+        }
+
+        /// <summary>
+        /// 把一个元素渲染成 PNG。
+        ///
+        /// ⚠️ `w`/`h` 优先用**元素当前实际尺寸**（`ActualWidth/Height`），
+        /// 而不是调用方给的期望值 —— 本体窗的尺寸是 `帧宽 × scale × (96/dpi)`，
+        /// 在 150% DPI 下 256px 的帧只有 ~171 DIP。若按 256 渲染，
+        /// 图里会留一大圈空白，看起来像"桌宠变小了"（第一版就吃了这个亏）。
+        /// 传 0 = 完全按元素自己的尺寸。
+        /// </summary>
+        private static void SaveShot(System.Windows.FrameworkElement el, string path, int w, int h)
+        {
+            if (el == null) return;
+            try
+            {
+                el.Measure(new System.Windows.Size(double.PositiveInfinity, double.PositiveInfinity));
+                System.Windows.Size want = el.DesiredSize;
+                if (w <= 0 && el.ActualWidth > 0) w = (int)Math.Ceiling(el.ActualWidth);
+                if (h <= 0 && el.ActualHeight > 0) h = (int)Math.Ceiling(el.ActualHeight);
+                if (w <= 0) w = (int)Math.Ceiling(want.Width);
+                if (h <= 0) h = (int)Math.Ceiling(want.Height);
+                if (w <= 0) w = 1;
+                if (h <= 0) h = 1;
+                el.Arrange(new System.Windows.Rect(0, 0, w, h));
+                el.UpdateLayout();
+
+                RenderTargetBitmap rtb = new RenderTargetBitmap(w, h, 96, 96,
+                    System.Windows.Media.PixelFormats.Pbgra32);
+                rtb.Render(el);
+                rtb.Freeze();
+                PngBitmapEncoder enc = new PngBitmapEncoder();
+                enc.Frames.Add(BitmapFrame.Create(rtb));
+                using (FileStream fs = File.Create(path)) enc.Save(fs);
+                PetLog.Info("截图已存 " + path + " (" + w + "x" + h + ")");
+            }
+            catch (Exception ex) { PetLog.Warn("截图失败 " + path + ": " + PetLog.Describe(ex)); }
+        }
+
+        /// <summary>反应动画中途取样的等待时间（约为动画时长的 1/3，落在压得最深的那一段）。</summary>
+        private const int SelfTest_ReactMidMs = PetWindow.ReactMs / 3;
+
+        /// <summary>
+        /// 在整段动画期间反复取样，返回**最深的缩放值**（= 最小 scale）。
+        ///
+        /// ⚠️ 为什么不用单点取样：动画时钟的推进与 `Pump` 的粒度不保证对齐 ——
+        /// 单点取样可能正好落在动画开始前（scale 还是 1.0）或结束后（已归位），
+        /// 于是"分级"这种**比较两个深度**的断言会假红/假绿。
+        /// 实测踩过：单点取样拿到 摸头=1.0、单击=0.924，看起来像"分级反了"，
+        /// 实际是摸头那次取到了动画开始之前。
+        /// </summary>
+        private static double SampleMinScale(PetWindow win, int totalMs)
+        {
+            double min = double.MaxValue;
+            int steps = 12;
+            int slice = Math.Max(8, totalMs / steps);
+            for (int i = 0; i < steps; i++)
+            {
+                Pump(slice);
+                double s = win.DiagReactScaleX;
+                if (s < min) min = s;
+            }
+            return min;
+        }
+
+        /// <summary>
+        /// 直接构造一个 `SpriteSheet`（绕过 store 的下载/清单路径）。
+        /// 只给 v11 的判定测试用 —— 它要的是"一张满幅、一张抠图"，
+        /// 走真实清单反而要造两套 pet.json。
+        /// </summary>
+        private static SpriteSheet LoadSheetDirect(PetSpriteStore store, string path, int fw, int fh, int frames)
+        {
+            try
+            {
+                byte[] data = File.ReadAllBytes(path);
+                System.Windows.Media.Imaging.BitmapImage bi =
+                    new System.Windows.Media.Imaging.BitmapImage();
+                bi.BeginInit();
+                bi.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+                bi.StreamSource = new MemoryStream(data);
+                bi.EndInit();
+                bi.Freeze();
+                SpriteSheet sh = new SpriteSheet();
+                sh.State = "idle";
+                sh.File = Path.GetFileName(path);
+                sh.Strip = PetSpriteStore.EnsureBgra32(bi);
+                sh.FrameW = fw;
+                sh.FrameH = fh;
+                sh.Frames = frames;
+                sh.FrameMs = 40;
+                return sh;
+            }
+            catch (Exception ex)
+            {
+                PetLog.Warn("构造测试条带失败 " + path + ": " + PetLog.Describe(ex));
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// 造一条**抠图**条带（四周留透明边）。
+        /// 与 `MakeFullStrip` 相对，用来覆盖满幅判据的两端。
+        /// 与 `Synth.MakeStrip` 同一画法（椭圆比帧小一圈），但**独立实现** ——
+        /// `Synth.MakeStrip` 是 private，而且那边的几何是为"非方形帧宽"测试定制的。
+        /// </summary>
+        private static void MakeCutStrip(string path, int fw, int fh, int frames, Color color)
+        {
+            int w = fw * frames;
+            using (Bitmap bmp = new Bitmap(w, fh, PixelFormat.Format32bppArgb))
+            {
+                using (Graphics g = Graphics.FromImage(bmp))
+                {
+                    g.SmoothingMode = SmoothingMode.AntiAlias;
+                    g.Clear(Color.Transparent);
+                    for (int i = 0; i < frames; i++)
+                    {
+                        using (SolidBrush b = new SolidBrush(color))
+                            g.FillEllipse(b, i * fw + 5, 5, fw - 11, fh - 11);
+                    }
+                }
+                bmp.Save(path, ImageFormat.Png);
+            }
+        }
+
+        /// <summary>
+        /// 造一条**满幅**（自带背景板）的条带：整帧铺满不透明色。
+        /// 与 `MakeCutStrip`（画小一圈的椭圆 = 抠图）相对，用来覆盖判据的两端。
+        /// </summary>
+        private static void MakeFullStrip(string path, int fw, int fh, int frames, Color color)
+        {
+            int w = fw * frames;
+            using (Bitmap bmp = new Bitmap(w, fh, PixelFormat.Format32bppArgb))
+            {
+                using (Graphics g = Graphics.FromImage(bmp))
+                {
+                    g.Clear(Color.Transparent);
+                    for (int i = 0; i < frames; i++)
+                    {
+                        // 铺满整帧（含四角）→ 完全透明像素 0%
+                        using (SolidBrush b = new SolidBrush(color))
+                            g.FillRectangle(b, i * fw, 0, fw, fh);
+                    }
+                }
+                bmp.Save(path, ImageFormat.Png);
+            }
         }
 
         private static void TestMutex()

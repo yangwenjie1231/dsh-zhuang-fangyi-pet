@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Media;
@@ -162,6 +163,149 @@ namespace DshZhuangFangyiPet
             if (m == null) return true;
             for (int i = 0; i < m.Length; i++) if (m[i] > AlphaThreshold) return false;
             return true;
+        }
+
+        // ------------------------------------------------------------------
+        // 满幅背景板（"这张图自带背景，会显示成一个方块"）
+        // ------------------------------------------------------------------
+
+        /// <summary>
+        /// 满幅判据：**逐帧「完全透明像素占比」的中位数** &lt; 这个值 → 判为满幅背景板。
+        ///
+        /// ── 为什么需要这个判据 ───────────────────────────────────────────────
+        ///
+        /// 实测（全量扫描 35 张本体素材）：`thinking-starry-formula.png` 的
+        /// 完全透明像素是 **0.0%**，33 帧**每一帧**四角都是实心 —— 它是 `thinking`
+        /// 的 canonical 素材，也就是 AI 干活时最常显示的那张。结果桌宠在桌面上
+        /// 直接变成一个 **256×256 的直角方块**（素材台账里其实早写着
+        /// "满屏公式（带背景板）"，但那是给人看的，代码里没人读）。
+        ///
+        /// 用户 2026-10-08 的决定是「移除对透明度的限制，**保留图片**」——
+        /// 即不排除、不降级这些图，而是**改呈现方式**：给它裁圆角，让"背景板"
+        /// 读起来像一张有意的卡片，而不是一个硬边方块。
+        /// 这与气泡那边**已有的做法一致**（`PetBubble.ApplyOpaqueCornerClip`
+        /// 对不透明贴纸就是裁圆角），只是本体窗从来没做过。
+        ///
+        /// ── 为什么用中位数、为什么按整条带 ───────────────────────────────────
+        ///
+        /// · **中位数**（与管线 `median_opaque_ratio` 同一套思路）：个别特效帧
+        ///   满幅（白闪/爆炸）不代表"整张都是背景板"；
+        /// · **按整条带而非逐帧**：`happy-muscle.png` 是**混合**的 —— 25 帧里只有
+        ///   7 帧四角全实。若逐帧判、逐帧裁，圆角会在播放中**闪进闪出**。
+        ///   整条带一个判定，圆角就是稳定的。
+        ///
+        /// ── 阈值 0.02 的来历（量出来的，不是拍的）────────────────────────────
+        ///
+        /// 全量排序后，天然间隙在这里：
+        ///     0.0000  thinking-starry-formula.png   ← 真方块
+        ///     0.0057  happy-muscle.png              ← 真方块
+        ///     ─────── 阈值 0.02 ───────
+        ///     0.0485  sleeping-sleepy-zzz.png       ← 有可见透明区
+        /// 下方余量 3.5×、上方余量 2.4×，两侧都不贴边。
+        ///
+        /// ⚠️ **别把它调大去"多裁几张"**：`happy-heart-eyes`(0.100) 与
+        /// `error-sunglasses`(0.090) 都有多帧三个甚至四个实心角，它们**是抠图**，
+        /// 裁圆角会切到她的头发。宁可少裁，不可误裁。
+        /// </summary>
+        internal const double PlatedClearRatio = 0.02;
+
+        /// <summary>
+        /// 判据的采样步长（隔点取样，1/4 开销）。
+        /// 已实测：步长 2 下**没有任何一张**的判定发生变化（余量足够），
+        /// 所以这里省的是纯开销，不是准确性。
+        /// </summary>
+        internal const int PlatedSampleStep = 2;
+
+        /// <summary>圆角半径 = 显示宽度 × 这个比例（0.075 ≈ 256px 上 19px，与实测定下的 20px 同量级）。</summary>
+        internal const double PlatedCornerRatio = 0.075;
+        /// <summary>圆角下限（太小看不出圆，等于没裁）。</summary>
+        internal const double PlatedCornerMin = 3.0;
+        /// <summary>圆角上限（再大就把方图切成圆形了）。</summary>
+        internal const double PlatedCornerMax = 20.0;
+
+        /// <summary>缓存的判定结果（null = 还没算过）。</summary>
+        private bool? _plated;
+
+        /// <summary>自检诊断用：是否已算过判定。</summary>
+        internal bool DiagPlatedComputed { get { return _plated.HasValue; } }
+
+        /// <summary>
+        /// 这张条带是不是"自带背景板的满幅图"。懒算一次并缓存。
+        /// 取不到帧时**返回 false**（安全侧：不裁 —— 宁可留个方块，
+        /// 也不要因为判不出来就把正常素材的头发切掉）。
+        /// </summary>
+        public bool IsPlated
+        {
+            get
+            {
+                if (!_plated.HasValue) _plated = ComputePlated();
+                return _plated.Value;
+            }
+        }
+
+        /// <summary>
+        /// 逐帧数"完全透明像素"占比，取中位数与阈值比。
+        ///
+        /// ⚠️ **不复用 `Mask()`**：它只有单槽缓存，逐帧调用会退化成
+        /// "每帧解码 + 每帧重建整张掩码"（33 帧 × 256KB 白跑）。
+        /// 这里自己复用一块像素缓冲，只数 alpha，算完即弃。
+        /// </summary>
+        private bool ComputePlated()
+        {
+            if (Frames <= 0 || FrameW <= 0 || FrameH <= 0) return false;
+            if (Frame(0) == null) return false;
+
+            int step = PlatedSampleStep < 1 ? 1 : PlatedSampleStep;
+            int stride = FrameW * 4;
+            byte[] px = new byte[stride * FrameH];
+            double[] ratios = new double[Frames];
+
+            for (int i = 0; i < Frames; i++)
+            {
+                CroppedBitmap c = Frame(i);
+                if (c == null) return false;      // 有一帧取不到 → 保守不裁
+                try { c.CopyPixels(px, stride, 0); }
+                catch (Exception ex)
+                {
+                    PetLog.Warn("满幅判定取样失败 " + File + "#" + i + ": " + PetLog.Describe(ex));
+                    return false;
+                }
+                int total = 0, clear = 0;
+                for (int y = 0; y < FrameH; y += step)
+                {
+                    int row = y * stride;
+                    for (int x = 0; x < FrameW; x += step)
+                    {
+                        total++;
+                        if (px[row + x * 4 + 3] == 0) clear++;
+                    }
+                }
+                ratios[i] = total <= 0 ? 1.0 : (double)clear / total;
+            }
+
+            Array.Sort(ratios);
+            double median = ratios[ratios.Length / 2];
+            bool plated = median < PlatedClearRatio;
+            PetLog.Info("满幅判定 " + File + "：中位透明 " +
+                        (median * 100).ToString("0.0", CultureInfo.InvariantCulture) + "% → " +
+                        (plated ? "满幅（裁圆角）" : "抠图（不裁）"));
+            return plated;
+        }
+
+        /// <summary>
+        /// 满幅素材的圆角半径（DIP）。**纯函数**，自检直接断言。
+        ///
+        /// 按**显示宽度**的比例算（与气泡 `BaseOpaqueCornerRadius` 同一思路）：
+        /// 写死绝对像素的话，桌宠缩到 0.5× 时圆角还是 20px —— 一个 90px 宽的
+        /// 小图配 20px 圆角，看起来就是个圆球。
+        /// </summary>
+        /// <param name="displayWidthDip">图片当前渲染宽度（DIP）；≤0 → 用下限</param>
+        internal static double PlatedCornerRadiusDip(double displayWidthDip)
+        {
+            double r = displayWidthDip * PlatedCornerRatio;
+            if (r < PlatedCornerMin) r = PlatedCornerMin;
+            if (r > PlatedCornerMax) r = PlatedCornerMax;
+            return r;
         }
     }
 

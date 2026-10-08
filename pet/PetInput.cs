@@ -55,6 +55,16 @@ namespace DshZhuangFangyiPet
         private bool _sending;
         private bool _reallyClosing;
 
+        // ── v11：深浅色 ──────────────────────────────────────────────────────
+        //
+        // ⚠️ 输入窗此前是**五个窗口里唯一不跟主题的**：底色硬编码成近白
+        // `246,252,252,254`，Program 给 `_bubble`/`_status`/`_pomo`/`_gallery`
+        // 都调了换色、唯独漏了它 —— 深色主题下它是一块刺眼的白卡。
+        /// <summary>当前是否深色（`SetHint` 的"提示色"要用它）。</summary>
+        private bool _dark;
+        /// <summary>提示行的**正常**前景色（错误时会临时换成红色，再换回来）。</summary>
+        private Color _hintNormal = Color.FromArgb(160, 90, 100, 120);
+
         /// <summary>
         /// 自检诊断用：算出输入窗的目标位置（物理像素）。
         /// 与 `OpenNear` 同一套规则（**下方优先**），但不写窗口属性 ——
@@ -144,7 +154,6 @@ namespace DshZhuangFangyiPet
             _targetLabel = new TextBlock();
             _targetLabel.Text = "发给";
             _targetLabel.FontSize = 11;
-            _targetLabel.Foreground = new SolidColorBrush(Color.FromArgb(170, 90, 100, 120));
             _targetLabel.VerticalAlignment = VerticalAlignment.Center;
             _targetLabel.Margin = new Thickness(0, 0, 6, 0);
 
@@ -184,7 +193,6 @@ namespace DshZhuangFangyiPet
             _modeLabel = new TextBlock();
             _modeLabel.Text = "发给";
             _modeLabel.FontSize = 11;
-            _modeLabel.Foreground = new SolidColorBrush(Color.FromArgb(170, 90, 100, 120));
             _modeLabel.VerticalAlignment = VerticalAlignment.Center;
             _modeLabel.Margin = new Thickness(0, 0, 6, 0);
 
@@ -232,14 +240,11 @@ namespace DshZhuangFangyiPet
             _hint = new TextBlock();
             _hint.Text = "Ctrl+Enter 发送 · Esc 关闭";
             _hint.FontSize = 11;
-            _hint.Foreground = new SolidColorBrush(Color.FromArgb(160, 90, 100, 120));
             _hint.Margin = new Thickness(14, 0, 14, 8);
 
             _chrome = new Border();
             _chrome.CornerRadius = new CornerRadius(10);
             _chrome.Padding = new Thickness(0);
-            _chrome.Background = new SolidColorBrush(Color.FromArgb(246, 252, 252, 254));
-            _chrome.BorderBrush = new SolidColorBrush(Color.FromArgb(200, 120, 160, 220));
             _chrome.BorderThickness = new Thickness(1);
             try
             {
@@ -257,6 +262,14 @@ namespace DshZhuangFangyiPet
             sp.Children.Add(_hint);
             _chrome.Child = sp;
             Content = _chrome;
+
+            // v11：构造末尾先套一次浅色。
+            //
+            // ⚠️ 这行是**必须的**，不能只靠 Program 在首帧调 —— 踩过的坑：
+            // 气泡当初把配色留在构造期的硬编码默认值上，而 `ApplySettings` 的
+            // diff 判定"值没变"把首帧跳过了，于是**一直用着浅色**。
+            // 颜色只有一个来源（`ApplyTheme`），构造期就必须走一次。
+            ApplyTheme(false);
 
             Loaded += OnLoaded;
             // ⚠️ **不再"失焦自动关闭"**。
@@ -285,6 +298,233 @@ namespace DshZhuangFangyiPet
             }
             _box.Focus();
             SetHint();
+        }
+
+        /// <summary>
+        /// 深浅色（与气泡/状态文字/番茄钟/画廊**共用同一套调色板** ——
+        /// 不新增第五套配色真相）。
+        ///
+        /// ⚠️ `ComboBox`/`TextBox` 的 WPF 默认模板**不会**自动跟随外层背景，
+        /// 必须显式设前景/背景/边框 —— 只改 `_chrome` 的话，深色下会出现
+        /// "深色卡片里嵌着两个白色下拉框"这种更糟的效果。
+        /// </summary>
+        public void ApplyTheme(bool dark)
+        {
+            _dark = dark;
+            PetTheme.BubblePalette p = PetTheme.BubblePalette.For(dark);
+            Color fg = Color.FromRgb(p.FgR, p.FgG, p.FgB);
+            Color bg = Color.FromArgb(p.BgA, p.BgR, p.BgG, p.BgB);
+            Color bd = Color.FromArgb(p.BdA, p.BdR, p.BdG, p.BdB);
+            // 输入框底比卡片略深/略浅一档，才看得出"这里能打字"。
+            Color boxBg = dark
+                ? Color.FromArgb(255, 28, 33, 44)
+                : Color.FromArgb(255, 255, 255, 255);
+            Color boxBd = dark
+                ? Color.FromArgb(180, 90, 108, 140)
+                : Color.FromArgb(160, 170, 185, 210);
+            // 次要文字（"发给"标签、提示行）：在各自底色上都要能读。
+            _hintNormal = dark
+                ? Color.FromArgb(170, 170, 185, 210)
+                : Color.FromArgb(160, 90, 100, 120);
+            Color sub = _hintNormal;
+
+            _chrome.Background = new SolidColorBrush(bg);
+            _chrome.BorderBrush = new SolidColorBrush(bd);
+            ApplyColorsToChildren(fg, boxBg, boxBd, sub);
+        }
+
+        /// <summary>把颜色铺到所有子控件上（`ApplyTheme` 的实现细节，抽出来只是为了让上面那段读起来是一份"配色表"）。</summary>
+        private void ApplyColorsToChildren(Color fg, Color boxBg, Color boxBd, Color sub)
+        {
+            _box.Foreground = new SolidColorBrush(fg);
+            _box.Background = new SolidColorBrush(boxBg);
+            _box.BorderBrush = new SolidColorBrush(boxBd);
+            _box.CaretBrush = new SolidColorBrush(fg);
+            _hint.Foreground = new SolidColorBrush(sub);
+            _targetLabel.Foreground = new SolidColorBrush(sub);
+            _modeLabel.Foreground = new SolidColorBrush(sub);
+            ApplyComboTheme(_target, fg, boxBg, boxBd);
+            ApplyComboTheme(_projectBox, fg, boxBg, boxBd);
+            ApplyComboTheme(_modeBox, fg, boxBg, boxBd);
+        }
+
+        /// <summary>
+        /// 给一个 ComboBox 上色。
+        ///
+        /// ⚠️⚠️ **这个函数绕了两圈才写对，两个坑都留在这里**：
+        ///
+        /// **坑一：设属性没用。** Aero2 的 ComboBox 模板不是
+        /// `{TemplateBinding Background}`，而是引用**主题级资源**
+        /// （`{StaticResource ComboBox.Static.Background}` 一类）。
+        /// 于是 `box.Background = 深色` 设了、`box.Resources[...]` 也覆盖了，
+        /// 属性读出来是 `#FF1C212C`、**截图里依然是白的**。
+        ///
+        /// **坑二：连可视树都看不出来。** Aero2 用它自己的
+        /// `Microsoft.Windows.Themes.ButtonChrome` 画那个框，而它是
+        /// `Decorator` 的子类 —— 遍历可视树找 `Control`/`Border`/`Panel`/`Shape`
+        /// 时**根本不会碰到它**。所以"属性全对、树里全暗、渲染全白"。
+        ///
+        /// **结论：Aero2 的 ComboBox 不吃外部配色，只能换模板。**
+        /// 下面用一份最小模板（ToggleButton + 箭头 + Popup + 列表）替掉它 ——
+        /// 比逐个猜资源键可靠，而且以后换系统主题也不会再变白。
+        ///
+        /// 失败时**静默保留原模板**（宁可下拉框丑，也不能让它点不开）。
+        /// </summary>
+        private static void ApplyComboTheme(ComboBox box, Color fg, Color bg, Color bd)
+        {
+            if (box == null) return;
+            box.Foreground = new SolidColorBrush(fg);
+            box.Background = new SolidColorBrush(bg);
+            box.BorderBrush = new SolidColorBrush(bd);
+            try
+            {
+                box.Template = BuildComboTemplate(fg, bg, bd);
+                box.ItemContainerStyle = BuildComboItemStyle(fg, bg, bd);
+            }
+            catch (Exception ex) { PetLog.Warn("ComboBox 换模板失败（保留默认外观）: " + PetLog.Describe(ex)); }
+        }
+
+        /// <summary>颜色 → `#AARRGGBB`（喂给 XamlReader）。</summary>
+        private static string Hex(Color c)
+        {
+            return "#" + c.A.ToString("X2") + c.R.ToString("X2") +
+                   c.G.ToString("X2") + c.B.ToString("X2");
+        }
+
+        /// <summary>
+        /// 最小 ComboBox 模板。
+        ///
+        /// 两个必须保留的契约：
+        ///   · `Popup` 必须叫 **`PART_Popup`** —— ComboBox 靠这个名字找下拉层，
+        ///     改名会让键盘/定位逻辑失效（能点开但行为怪异）；
+        ///   · 收起态用 `ToggleButton` + `IsChecked` 双向绑到 `IsDropDownOpen`，
+        ///     这是 ComboBox 认的交互方式。
+        ///
+        /// 颜色全部由参数注入，**不再引用任何主题资源** —— 这是它能生效的原因。
+        /// </summary>
+        private static ControlTemplate BuildComboTemplate(Color fg, Color bg, Color bd)
+        {
+            Color hover = Blend(bg, fg, 0.16);
+            string xaml =
+                "<ControlTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' " +
+                "xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml' TargetType='ComboBox'>" +
+                "<Grid>" +
+                  "<ToggleButton Focusable='False' ClickMode='Press' " +
+                    "Background='" + Hex(bg) + "' BorderBrush='" + Hex(bd) + "' Foreground='" + Hex(fg) + "' " +
+                    "IsChecked=\"{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}\">" +
+                    "<ToggleButton.Template>" +
+                      "<ControlTemplate TargetType='ToggleButton'>" +
+                        "<Border x:Name='Bd' Background='{TemplateBinding Background}' " +
+                          "BorderBrush='{TemplateBinding BorderBrush}' BorderThickness='1' CornerRadius='4'>" +
+                          "<Grid>" +
+                            "<Grid.ColumnDefinitions>" +
+                              "<ColumnDefinition Width='*'/><ColumnDefinition Width='14'/>" +
+                            "</Grid.ColumnDefinitions>" +
+                            "<ContentPresenter Grid.Column='0' Margin='6,2,2,2' VerticalAlignment='Center' " +
+                              "HorizontalAlignment='Left' " +
+                              "Content=\"{Binding SelectionBoxItem, RelativeSource={RelativeSource AncestorType=ComboBox}}\" " +
+                              "ContentTemplate=\"{Binding SelectionBoxItemTemplate, RelativeSource={RelativeSource AncestorType=ComboBox}}\"/>" +
+                            "<Path Grid.Column='1' HorizontalAlignment='Center' VerticalAlignment='Center' " +
+                              "Data='M 0 0 L 4 4 L 8 0 Z' Fill='{TemplateBinding Foreground}'/>" +
+                          "</Grid>" +
+                        "</Border>" +
+                        "<ControlTemplate.Triggers>" +
+                          "<Trigger Property='IsMouseOver' Value='True'>" +
+                            "<Setter TargetName='Bd' Property='Background' Value='" + Hex(hover) + "'/>" +
+                          "</Trigger>" +
+                        "</ControlTemplate.Triggers>" +
+                      "</ControlTemplate>" +
+                    "</ToggleButton.Template>" +
+                  "</ToggleButton>" +
+                  "<Popup x:Name='PART_Popup' AllowsTransparency='True' Placement='Bottom' Focusable='False' " +
+                    "IsOpen='{TemplateBinding IsDropDownOpen}' MaxHeight='{TemplateBinding MaxDropDownHeight}'>" +
+                    "<Border Background='" + Hex(bg) + "' BorderBrush='" + Hex(bd) + "' " +
+                      "BorderThickness='1' CornerRadius='4' MinWidth='{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=ComboBox}}'>" +
+                      "<ScrollViewer VerticalScrollBarVisibility='Auto'><ItemsPresenter/></ScrollViewer>" +
+                    "</Border>" +
+                  "</Popup>" +
+                "</Grid>" +
+                "</ControlTemplate>";
+            return (ControlTemplate)System.Windows.Markup.XamlReader.Parse(xaml);
+        }
+
+        /// <summary>下拉项模板（默认模板同样不吃外部配色，一并换掉）。</summary>
+        private static Style BuildComboItemStyle(Color fg, Color bg, Color bd)
+        {
+            Color hover = Blend(bg, fg, 0.16);
+            string xaml =
+                "<Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' " +
+                "xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml' TargetType='ComboBoxItem'>" +
+                  "<Setter Property='Foreground' Value='" + Hex(fg) + "'/>" +
+                  "<Setter Property='Background' Value='" + Hex(bg) + "'/>" +
+                  "<Setter Property='Padding' Value='6,3'/>" +
+                  "<Setter Property='Template'>" +
+                    "<Setter.Value>" +
+                      "<ControlTemplate TargetType='ComboBoxItem'>" +
+                        "<Border x:Name='Bd' Background='{TemplateBinding Background}' Padding='{TemplateBinding Padding}'>" +
+                          "<ContentPresenter/>" +
+                        "</Border>" +
+                        "<ControlTemplate.Triggers>" +
+                          "<Trigger Property='IsHighlighted' Value='True'>" +
+                            "<Setter TargetName='Bd' Property='Background' Value='" + Hex(hover) + "'/>" +
+                          "</Trigger>" +
+                        "</ControlTemplate.Triggers>" +
+                      "</ControlTemplate>" +
+                    "</Setter.Value>" +
+                  "</Setter>" +
+                "</Style>";
+            return (Style)System.Windows.Markup.XamlReader.Parse(xaml);
+        }
+
+        /// <summary>
+        /// 把 <paramref name="a"/> 朝 <paramref name="b"/> 混 <paramref name="t"/>（0..1）。
+        /// 用来从"底色 + 前景色"推出悬停色，不必再手写一组魔数
+        /// （深色与浅色共用同一段逻辑，两套主题各自动算出合适的深浅）。
+        /// </summary>
+        private static Color Blend(Color a, Color b, double t)
+        {
+            if (t < 0) t = 0;
+            if (t > 1) t = 1;
+            return Color.FromArgb(255,
+                (byte)Math.Round(a.R + (b.R - a.R) * t),
+                (byte)Math.Round(a.G + (b.G - a.G) * t),
+                (byte)Math.Round(a.B + (b.B - a.B) * t));
+        }
+
+        /// <summary>自检诊断用：第一个下拉框（验证"真的不白了"要拿它渲染取像素）。</summary>
+        internal ComboBox DiagModeBox { get { return _modeBox; } }
+
+        /// <summary>自检诊断用：当前是否深色。</summary>
+        internal bool DiagDark { get { return _dark; } }
+
+        /// <summary>自检诊断用：输入框底色（判断"跟主题了没"）。</summary>
+        internal Color DiagBoxBackground
+        {
+            get
+            {
+                SolidColorBrush b = _box == null ? null : _box.Background as SolidColorBrush;
+                return b == null ? Colors.Transparent : b.Color;
+            }
+        }
+
+        /// <summary>自检诊断用：窗口卡片底色。</summary>
+        internal Color DiagChromeBackground
+        {
+            get
+            {
+                SolidColorBrush b = _chrome == null ? null : _chrome.Background as SolidColorBrush;
+                return b == null ? Colors.Transparent : b.Color;
+            }
+        }
+
+        /// <summary>自检诊断用：提示行前景色。</summary>
+        internal Color DiagHintForeground
+        {
+            get
+            {
+                SolidColorBrush b = _hint == null ? null : _hint.Foreground as SolidColorBrush;
+                return b == null ? Colors.Transparent : b.Color;
+            }
         }
 
         /// <summary>
@@ -628,7 +868,7 @@ namespace DshZhuangFangyiPet
             }
 
             _sending = true;
-            _hint.Foreground = new SolidColorBrush(Color.FromArgb(160, 90, 100, 120));
+            _hint.Foreground = new SolidColorBrush(_hintNormal);
             _hint.Text = "发送中…";
             _box.IsEnabled = false;
 

@@ -4,6 +4,8 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
+using System.Windows.Shapes;
 
 namespace DshZhuangFangyiPet
 {
@@ -44,8 +46,23 @@ namespace DshZhuangFangyiPet
         /// <summary>与本体底边的间距（DIP）。</summary>
         private const double GapBelowPet = 4;
 
+        // ── v11：进度环 ──────────────────────────────────────────────────────
+        /// <summary>环直径（scale=1 时的 DIP）。</summary>
+        private const double BaseRingSize = 38;
+        /// <summary>环的描边粗细（scale=1 时的 DIP）。</summary>
+        private const double BaseRingThickness = 3;
+        /// <summary>轨道色（未走完的部分）—— 两套主题各一个，见 ApplyTheme。</summary>
+        private Color _trackColor = Color.FromArgb(60, 120, 160, 220);
+
         private readonly Border _chrome;
+        /// <summary>环内的剩余时间文字（`24:59`）。</summary>
         private readonly TextBlock _text;
+        /// <summary>环右侧的阶段文字（`专注 · 第 2/4 轮`）。</summary>
+        private readonly TextBlock _phaseText;
+        /// <summary>整个环（轨道 + 进度 + 环内文字）的容器；未知进度时整组隐藏。</summary>
+        private readonly Grid _ringHost;
+        private readonly Ellipse _ringTrack;
+        private readonly Ellipse _ringProgress;
         private IntPtr _hwnd;
         private HwndSource _source;
         private bool _reallyClosing;
@@ -62,6 +79,23 @@ namespace DshZhuangFangyiPet
 
         /// <summary>当前是否该显示（`Show` + 有内容）。</summary>
         private bool _wanted;
+
+        // ── v11：呼吸引导（兑现设置页那句"随呼吸缩放的光环"）─────────────────
+        //
+        // ⚠️ 这个开关此前是一句**空承诺**：字段存了、快照带了、exe 解析了、
+        // 还打了 diff 日志 —— 然后全仓没有任何地方渲染它（`_breathOn` 只出现在
+        // 声明/默认值/diff/日志四处）。设置页写着"桌宠下方一个随呼吸缩放的光环
+        // （4-7-8 节奏）"，用户打开却什么都不会发生。
+        /// <summary>是否启用呼吸引导（由 Program 从 `settings.pomodoroBreath` 喂入）。</summary>
+        private bool _breathOn;
+        /// <summary>呼吸动画（4-7-8）挂在环上；关掉即停。</summary>
+        private readonly ScaleTransform _breathScale;
+        private bool _breathing;
+
+        /// <summary>4-7-8 一轮的总时长（ms）：吸气 4s + 屏息 7s + 呼气 8s。</summary>
+        internal const int BreathCycleMs = 19000;
+        /// <summary>呼气到底时的缩放（**永远 ≤ 1.0**：超过 1.0 会溢出窗口被裁）。</summary>
+        internal const double BreathMinScale = 0.85;
 
         public PetPomodoro()
         {
@@ -83,12 +117,61 @@ namespace DshZhuangFangyiPet
             _text.FontSize = BaseFontSize;
             _text.TextAlignment = TextAlignment.Center;
             _text.TextWrapping = TextWrapping.NoWrap;
+            // 环内的文字必须居中：用 Grid 的居中而不是 TextBlock 自己的对齐，
+            // 这样环放大缩小时文字始终在圆心。
+            _text.HorizontalAlignment = HorizontalAlignment.Center;
+            _text.VerticalAlignment = VerticalAlignment.Center;
+
+            // 轨道（整圈底）+ 进度（只画剩余那一段）。
+            _ringTrack = new Ellipse();
+            _ringTrack.Width = BaseRingSize;
+            _ringTrack.Height = BaseRingSize;
+            _ringTrack.StrokeThickness = BaseRingThickness;
+            _ringTrack.Fill = Brushes.Transparent;
+            _ringTrack.HorizontalAlignment = HorizontalAlignment.Center;
+            _ringTrack.VerticalAlignment = VerticalAlignment.Center;
+
+            _ringProgress = new Ellipse();
+            _ringProgress.Width = BaseRingSize;
+            _ringProgress.Height = BaseRingSize;
+            _ringProgress.StrokeThickness = BaseRingThickness;
+            _ringProgress.Fill = Brushes.Transparent;
+            _ringProgress.StrokeStartLineCap = PenLineCap.Round;
+            _ringProgress.StrokeEndLineCap = PenLineCap.Round;
+            _ringProgress.HorizontalAlignment = HorizontalAlignment.Center;
+            _ringProgress.VerticalAlignment = VerticalAlignment.Center;
+            // ⭐ 从 12 点开始顺时针收干。
+            //
+            // WPF 的 Ellipse 描边路径从**3 点**（最右）起画，所以旋转 -90° 才落在
+            // 12 点。旋转中心必须是元素中心 —— 用 (0.5,0.5) 而不是默认的 (0,0)。
+            _ringProgress.RenderTransformOrigin = new Point(0.5, 0.5);
+            _ringProgress.RenderTransform = new RotateTransform(-90);
+
+            _ringHost = new Grid();
+            _ringHost.Children.Add(_ringTrack);
+            _ringHost.Children.Add(_ringProgress);
+            _ringHost.Children.Add(_text);
+            // 呼吸缩放挂在整个环上（文字跟着一起"呼吸"才像一个整体）。
+            _breathScale = new ScaleTransform(1, 1);
+            _ringHost.RenderTransformOrigin = new Point(0.5, 0.5);
+            _ringHost.RenderTransform = _breathScale;
+
+            _phaseText = new TextBlock();
+            _phaseText.FontSize = BaseFontSize;
+            _phaseText.TextWrapping = TextWrapping.NoWrap;
+            _phaseText.VerticalAlignment = VerticalAlignment.Center;
+            _phaseText.Margin = new Thickness(6, 0, 0, 0);
+
+            StackPanel row = new StackPanel();
+            row.Orientation = Orientation.Horizontal;
+            row.Children.Add(_ringHost);
+            row.Children.Add(_phaseText);
 
             _chrome = new Border();
             _chrome.CornerRadius = new CornerRadius(BaseCornerRadius);
             _chrome.Padding = new Thickness(BasePaddingX, BasePaddingY, BasePaddingX, BasePaddingY);
             _chrome.BorderThickness = new Thickness(1);
-            _chrome.Child = _text;
+            _chrome.Child = row;
             Content = _chrome;
 
             ApplyTheme(false);
@@ -104,6 +187,43 @@ namespace DshZhuangFangyiPet
 
         /// <summary>自检诊断用：当前显示的文字。</summary>
         internal string DiagText { get { return _text == null ? "" : (_text.Text ?? ""); } }
+
+        /// <summary>自检诊断用：环右侧的阶段文字。</summary>
+        internal string DiagPhaseText { get { return _phaseText == null ? "" : (_phaseText.Text ?? ""); } }
+
+        /// <summary>自检诊断用：整个环是否可见（未知进度时应当隐藏）。</summary>
+        internal bool DiagRingVisible
+        {
+            get { return _ringHost != null && _ringHost.Visibility == Visibility.Visible; }
+        }
+
+        /// <summary>自检诊断用：进度椭圆是否可见（占比 0 时应当隐藏）。</summary>
+        internal bool DiagProgressVisible
+        {
+            get { return _ringProgress != null && _ringProgress.Visibility == Visibility.Visible; }
+        }
+
+        /// <summary>自检诊断用：当前进度弧的 StrokeDashArray（null = 整圈）。</summary>
+        internal DoubleCollection DiagDashArray
+        {
+            get { return _ringProgress == null ? null : _ringProgress.StrokeDashArray; }
+        }
+
+        /// <summary>自检诊断用：进度椭圆的可见性 + dash（判断"弧长算对了没"）。</summary>
+        internal double DiagDashFirst
+        {
+            get
+            {
+                DoubleCollection d = DiagDashArray;
+                return d == null || d.Count == 0 ? -1 : d[0];
+            }
+        }
+
+        /// <summary>自检诊断用：呼吸动画是否在跑。</summary>
+        internal bool DiagBreathing { get { return _breathing; } }
+
+        /// <summary>自检诊断用：当前呼吸缩放值。</summary>
+        internal double DiagBreathScale { get { return _breathScale == null ? 1.0 : _breathScale.ScaleX; } }
 
         /// <summary>自检诊断用：当前字号。</summary>
         internal double DiagFontSize { get { return _text == null ? 0 : _text.FontSize; } }
@@ -187,6 +307,14 @@ namespace DshZhuangFangyiPet
             _chrome.Background = new SolidColorBrush(Color.FromArgb(p.BgA, p.BgR, p.BgG, p.BgB));
             _chrome.BorderBrush = new SolidColorBrush(Color.FromArgb(p.BdA, p.BdR, p.BdG, p.BdB));
             _text.Foreground = new SolidColorBrush(Color.FromRgb(p.FgR, p.FgG, p.FgB));
+            _phaseText.Foreground = new SolidColorBrush(Color.FromRgb(p.FgR, p.FgG, p.FgB));
+            // 环：进度用**强调色**（它在"告诉我还剩多久"，该比边框显眼），
+            // 轨道用边框色降透明度 —— 深色下不能用浅色的淡蓝，会糊成一片。
+            _ringProgress.Stroke = new SolidColorBrush(Color.FromRgb(p.AccR, p.AccG, p.AccB));
+            _trackColor = dark
+                ? Color.FromArgb(70, 120, 140, 175)
+                : Color.FromArgb(60, 150, 175, 215);
+            _ringTrack.Stroke = new SolidColorBrush(_trackColor);
         }
 
         /// <summary>字号/内边距随桌宠缩放（与气泡/状态文字同一模式，含下限保护）。</summary>
@@ -201,11 +329,149 @@ namespace DshZhuangFangyiPet
         {
             double s = _scale;
             _text.FontSize = Math.Max(MinFontSize, BaseFontSize * s);
+            _phaseText.FontSize = Math.Max(MinFontSize, BaseFontSize * s);
             double px = Math.Max(2, BasePaddingX * s);
             double py = Math.Max(0.5, BasePaddingY * s);
             _chrome.Padding = new Thickness(px, py, px, py);
             _chrome.CornerRadius = new CornerRadius(Math.Max(2, BaseCornerRadius * s));
+            UpdateRingSize();
         }
+
+        /// <summary>
+        /// 环直径：**必须装得下环内文字**，否则 `4:00:00`（自由计时上限 4 小时）
+        /// 会从圆里溢出来 —— 7 个字符在 11px 下约 42px 宽，而基准环只有 38px。
+        ///
+        /// 算法：直径 d 的圆要装下 w×h 的矩形，需 `w² + h² ≤ d²`（对角相等），
+        /// 再留 6px 视觉余量。取"基准尺寸"与"文字所需尺寸"的较大者。
+        /// </summary>
+        private void UpdateRingSize()
+        {
+            double s = _scale <= 0 ? 1.0 : _scale;
+            double baseSize = Math.Max(16, BaseRingSize * s);
+            double thick = Math.Max(1.5, BaseRingThickness * s);
+
+            double d = baseSize;
+            if (_text != null)
+            {
+                // 先量一次：DesiredSize 只有在 Measure 之后才是当前文字的真实尺寸。
+                _text.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                double tw = _text.DesiredSize.Width, th = _text.DesiredSize.Height;
+                if (tw > 0 && th > 0)
+                {
+                    double need = Math.Sqrt(tw * tw + th * th) + 6;
+                    if (need > d) d = need;
+                }
+            }
+
+            _ringTrack.Width = d; _ringTrack.Height = d;
+            _ringTrack.StrokeThickness = thick;
+            _ringProgress.Width = d; _ringProgress.Height = d;
+            _ringProgress.StrokeThickness = thick;
+        }
+
+        /// <summary>
+        /// 设置进度环的占比。
+        ///
+        /// ── 弧长怎么算（WPF 的 dash 单位是"描边宽度的倍数"）──────────────────
+        ///
+        /// `Ellipse` 的周长 C = π × 直径（用 `Width`，因为描边画在**半径中线**上，
+        /// 直径取 Width 即可）。`StrokeDashArray` 的单位是**描边粗细 t**，
+        /// 所以周长折成 dash 单位是 `C / t`。要画出占比 f 的弧：
+        ///     dash = [ f × C/t , (1 − f) × C/t ]
+        /// 第一段实、第二段空 —— 配合 `StrokeDashOffset = 0` 与 −90° 旋转，
+        /// 弧就从 12 点顺时针铺开 f 圈。
+        ///
+        /// @param fraction 剩余占比 0..1；**&lt;0 = 未知**（环整组隐藏，不编假进度）
+        /// </summary>
+        private void SetRingFraction(double fraction)
+        {
+            if (fraction < 0)
+            {
+                // 未知进度（比如 Host 没给 totalMs）→ **不显示环**。
+                // 编一个 50% 出来会让用户以为计时器坏了。
+                _ringHost.Visibility = Visibility.Collapsed;
+                return;
+            }
+            _ringHost.Visibility = Visibility.Visible;
+            if (fraction > 1) fraction = 1;
+            if (fraction <= 0)
+            {
+                // 占比 0：不画进度椭圆。dash 长度为 0 时 WPF 会画出一个斑点
+                // （Round cap 让 0 长度也可见），所以直接隐藏更干净。
+                _ringProgress.Visibility = Visibility.Collapsed;
+                return;
+            }
+            _ringProgress.Visibility = Visibility.Visible;
+            if (fraction >= 1)
+            {
+                // 整圈：不设 dash（比设一个"实线段刚好等于周长"更稳，
+                // 避免浮点误差在起点留一道细缝）。
+                _ringProgress.StrokeDashArray = null;
+                return;
+            }
+            // ⚠️ 环的直径依赖环内文字的宽度（见 UpdateRingSize），所以改文字之后
+            // 必须**先重算尺寸**再算 dash —— 否则会拿上一段文字的周长去铺弧，
+            // 弧长与实际圆不符（`24:59` → `4:00:00` 时直径会变大）。
+            UpdateRingSize();
+            double t = _ringProgress.StrokeThickness;
+            double d = _ringProgress.Width;
+            if (t <= 0 || d <= 0) return;
+            double circumferenceInDashes = Math.PI * d / t;
+            DoubleCollection dash = new DoubleCollection();
+            dash.Add(fraction * circumferenceInDashes);
+            dash.Add((1.0 - fraction) * circumferenceInDashes);
+            _ringProgress.StrokeDashArray = dash;
+        }
+
+        /// <summary>
+        /// 呼吸引导（4-7-8）。
+        ///
+        /// ⚠️ 缩放**只从 1.0 缩到 <see cref="BreathMinScale"/>**（永远 ≤ 1.0）：
+        /// 窗口是 `SizeToContent`，环放大就会把窗口撑大 —— 而窗口一变大，
+        /// `ComputeTarget` 的定位与状态文字的让位都要重算，且环会溢出窗口被裁。
+        /// "呼吸"的视觉本质是**收缩再回到原样**，不需要超过原尺寸。
+        /// </summary>
+        private void ApplyBreath()
+        {
+            bool want = _breathOn && _wanted && _ringHost.Visibility == Visibility.Visible;
+            if (want == _breathing) return;      // 状态没变 → 不动（不重启动画）
+            _breathing = want;
+            try
+            {
+                if (!want)
+                {
+                    _breathScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+                    _breathScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+                    _breathScale.ScaleX = 1.0;
+                    _breathScale.ScaleY = 1.0;
+                    return;
+                }
+                DoubleAnimationUsingKeyFrames a = new DoubleAnimationUsingKeyFrames();
+                a.Duration = new Duration(TimeSpan.FromMilliseconds(BreathCycleMs));
+                a.RepeatBehavior = RepeatBehavior.Forever;
+                // 4s 吸气（缩到最小）→ 7s 屏息（保持最小）→ 8s 呼气（回到 1.0）
+                a.KeyFrames.Add(new LinearDoubleKeyFrame(BreathMinScale,
+                    KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(4000))));
+                a.KeyFrames.Add(new LinearDoubleKeyFrame(BreathMinScale,
+                    KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(11000))));
+                a.KeyFrames.Add(new LinearDoubleKeyFrame(1.0,
+                    KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(19000))));
+                _breathScale.BeginAnimation(ScaleTransform.ScaleXProperty, a);
+                _breathScale.BeginAnimation(ScaleTransform.ScaleYProperty, a);
+            }
+            catch (Exception ex) { PetLog.Warn("呼吸引导动画失败: " + PetLog.Describe(ex)); }
+        }
+
+        /// <summary>呼吸引导开关（Program 从 `settings.pomodoroBreath` 喂入）。</summary>
+        public void SetBreath(bool on)
+        {
+            if (_breathOn == on) return;
+            _breathOn = on;
+            ApplyBreath();
+        }
+
+        /// <summary>自检诊断用：注入呼吸开关（不依赖 Program）。</summary>
+        internal void DiagSetBreath(bool on) { SetBreath(on); }
 
         /// <summary>
         /// 统一入口：喂入当前该显示的文字 + 全部显隐依据。
@@ -222,10 +488,31 @@ namespace DshZhuangFangyiPet
         /// <param name="anchorRect">定位锚点矩形（通常是状态文字窗的矩形）；null = 贴本体</param>
         public void Update(string text, bool wanted, bool petVisible, int[] petRect, int[] anchorRect)
         {
-            _text.Text = text ?? "";
-            _wanted = wanted && petVisible && !string.IsNullOrEmpty(_text.Text);
+            // 旧重载：没有进度信息 → 整圈（fraction=1），环只作装饰。
+            // 保留它是因为既有调用点与自检都在用；语义与 v11 之前一致。
+            Update(text, null, 1.0, wanted, petVisible, petRect, anchorRect);
+        }
+
+        /// <summary>
+        /// v11 统一入口：环内剩余时间 + 环右侧阶段文字 + 剩余占比。
+        ///
+        /// @param ringText  环内文字（通常是 `24:59`）；null/空 = 不显示
+        /// @param phaseText 环右侧文字（`专注 · 第 2/4 轮`）；null/空 = 只显示环
+        /// @param fraction  剩余占比 0..1；**&lt;0 = 未知**（整环隐藏，不编假进度）
+        /// </summary>
+        public void Update(string ringText, string phaseText, double fraction, bool wanted,
+                           bool petVisible, int[] petRect, int[] anchorRect)
+        {
+            _text.Text = ringText ?? "";
+            _phaseText.Text = phaseText ?? "";
+            // 显示判据用**两者之一**非空：只有阶段名（没有时间）也该显示，
+            // 否则"计时器跑着但一个字都不显示"看起来就是坏了。
+            bool hasContent = !string.IsNullOrEmpty(_text.Text) || !string.IsNullOrEmpty(_phaseText.Text);
+            _wanted = wanted && petVisible && hasContent;
             _lastPetRect = petRect;
             _anchorRect = anchorRect;
+            SetRingFraction(fraction);
+            ApplyBreath();
             ApplyVisibility();
         }
 
@@ -325,11 +612,25 @@ namespace DshZhuangFangyiPet
 
         /// <summary>
         /// 自检诊断用：注入状态后重新评估显隐（不依赖真实快照）。
+        /// v11：同时把环置为"整圈"（旧断言的语义：有内容就显示）。
         /// </summary>
         internal void DiagSetState(string text, bool wanted, bool petVisible)
         {
             _text.Text = text ?? "";
             _wanted = wanted && petVisible && !string.IsNullOrEmpty(_text.Text);
+            SetRingFraction(1.0);
+        }
+
+        /// <summary>自检诊断用：注入带进度的完整状态。</summary>
+        internal void DiagSetFullState(string ringText, string phaseText, double fraction,
+                                       bool wanted, bool petVisible)
+        {
+            _text.Text = ringText ?? "";
+            _phaseText.Text = phaseText ?? "";
+            bool hasContent = !string.IsNullOrEmpty(_text.Text) || !string.IsNullOrEmpty(_phaseText.Text);
+            _wanted = wanted && petVisible && hasContent;
+            SetRingFraction(fraction);
+            ApplyBreath();
         }
 
         /// <summary>

@@ -8,6 +8,7 @@ using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 
@@ -730,6 +731,8 @@ namespace DshZhuangFangyiPet
             // 气泡正文字号同理由首帧对齐（同理：diff 会把"启动时就等于快照值"跳过）。
             try { _bubble.SetFontScale(_chatFontScale); } catch { }
             try { _pomo.SetScale(_win.Scale); } catch { }
+            // v11：输入窗也要跟主题（它此前是唯一不跟的那个，深色下是块白卡）。
+            try { if (_input != null) _input.ApplyTheme(PetTheme.ResolveIsDark(_opt.DarkOverride, _settingsTheme)); } catch { }
             try { RefreshStatusLabel(); } catch { }
             try { RefreshPomodoro(); } catch { }
 
@@ -904,7 +907,8 @@ namespace DshZhuangFangyiPet
             {
                 _breathOn = st.PomodoroBreath;
                 PetLog.Info("settings: 呼吸引导 → " + (_breathOn ? "1" : "0"));
-                // 正在跑的话立刻换显示（不必等下一帧）
+                // 正在跑的话立刻换显示（不必等下一帧）。
+                // `RefreshPomodoro` 内部会把开关再乘上"是否在专注"，所以这里只管传。
                 try { RefreshPomodoro(); } catch { }
             }
 
@@ -918,6 +922,10 @@ namespace DshZhuangFangyiPet
                 try { _bubble.ApplyTheme(darkNow); } catch (Exception ex) { PetLog.Warn("气泡换色失败: " + PetLog.Describe(ex)); }
                 try { _status.ApplyTheme(darkNow); } catch { }
                 try { _pomo.ApplyTheme(darkNow); } catch { }
+                // v11：输入窗（此前漏了 —— 深色下它是一块白卡）。
+                try { if (_input != null) _input.ApplyTheme(darkNow); } catch { }
+                // v11：右键菜单也要换色（它是**缓存的**，所以就地刷一次）。
+                try { ApplyMenuTheme(_petMenu, darkNow); } catch { }
                 changed = true;
             }
 
@@ -1335,6 +1343,10 @@ namespace DshZhuangFangyiPet
         {
             if (_http == null) return;
             _http.PostInteract("click");
+            // v11：本地反馈动画**先于**网络请求 —— 用户点一下要立刻有反应，
+            // 而 HTTP 往返（哪怕 5ms）在感知上仍是"迟了一下"。
+            // 这是纯视觉反馈，不参与任何判定（好感度/冷却全在 Host）。
+            try { _win.PlayReact("click", 0); } catch { }
             PetLog.Info("单击桌宠 → 互动 click");
         }
 
@@ -1357,6 +1369,8 @@ namespace DshZhuangFangyiPet
         {
             if (_http == null) return;
             _http.PostInteract("pat", level);
+            // v11：摸头分级 → 按得越深反应越明显（与 `PlayReact` 的分级同一口径）。
+            try { _win.PlayReact("pat", level); } catch { }
             PetLog.Info("长按摸头 → 第 " + level + " 级");
         }
 
@@ -1413,6 +1427,9 @@ namespace DshZhuangFangyiPet
         {
             if (_http == null) return;
             _http.PostInteract("fling");
+            // v11：落地反馈 —— 她"砸"在地上抖一下。撞墙时更明显一点，
+            // 因为那一下本来就是更重的落地。
+            try { _win.PlayReact("land", hitEdge ? 3 : 1); } catch { }
             PetLog.Info("抛掷落地 → 互动 fling" + (hitEdge ? "（撞到边界）" : ""));
         }
 
@@ -1616,6 +1633,8 @@ namespace DshZhuangFangyiPet
             // v3：把"聊天能不能用"告诉输入窗（不可用就把选项藏起来 ——
             // "给了入口但点了必失败"是最糟的交互）。
             try { _input.SetChatAvailability(_chatAvailable, _chatOn); } catch { }
+            // v11：输入窗可能是在深色主题下才第一次创建的 —— 建完立刻套一次当前主题。
+            try { _input.ApplyTheme(PetTheme.ResolveIsDark(_opt.DarkOverride, _settingsTheme)); } catch { }
             int x, y, w, h;
             _win.GetScreenRect(out x, out y, out w, out h);
             _win.SetSendOpen(true);
@@ -1886,6 +1905,11 @@ namespace DshZhuangFangyiPet
         /// 倒计时窗要显示的文字（null = 不显示）。纯函数，自检直接断言。
         ///
         /// 格式：`专注 24:59`；超过一轮时补上 `· 2/4`（用户要知道长休还有几轮）。
+        ///
+        /// ⚠️ v11 起界面**不再用这一整行**（改成"环内时间 + 环右侧阶段"两段，
+        /// 见 `PomodoroRingText` / `PomodoroPhaseText`）。但本函数**必须保留**：
+        /// 托盘菜单标题与日志都在用它，而且自检有一条不变式断言
+        /// "两段拼回去 == 这一行" —— 单一真相不许裂成两套口径。
         /// </summary>
         internal static string PomodoroTextFor(PetPomodoroInfo p, long nowMs)
         {
@@ -1899,6 +1923,57 @@ namespace DshZhuangFangyiPet
                        "/" + p.RoundsPerLongBreak.ToString(CultureInfo.InvariantCulture);
             }
             return label + " " + time;
+        }
+
+        /// <summary>
+        /// v11：环**内部**的文字 —— 只有剩余时间（`24:59`）。
+        ///
+        /// 环里放不下 `专注 24:59 · 第 2/4 轮`（那是 14 个字符，会把圆撑爆），
+        /// 所以把阶段名挪到环右侧（`PomodoroPhaseText`）。两段拼起来**正好**
+        /// 等于 <see cref="PomodoroTextFor"/> —— 自检钉住这条不变式，
+        /// 免得以后有人只改一边。
+        /// </summary>
+        internal static string PomodoroRingText(PetPomodoroInfo p, long nowMs)
+        {
+            if (p == null || !p.Enabled || !p.Show) return null;
+            return FormatRemaining(p.RemainingAt(nowMs));
+        }
+
+        /// <summary>
+        /// v11：环**右侧**的文字 —— 阶段名（+ 专注时的轮次）。
+        /// 与 <see cref="PomodoroTextFor"/> 的"轮次只在专注阶段显示"同一条规则。
+        /// </summary>
+        internal static string PomodoroPhaseText(PetPomodoroInfo p)
+        {
+            if (p == null || !p.Enabled || !p.Show) return null;
+            string label = PomodoroPhaseLabel(p.Phase);
+            if (p.Phase == "focus" && p.RoundsPerLongBreak > 1)
+            {
+                return label + " · 第 " + p.Round.ToString(CultureInfo.InvariantCulture) +
+                       "/" + p.RoundsPerLongBreak.ToString(CultureInfo.InvariantCulture) + " 轮";
+            }
+            return label;
+        }
+
+        /// <summary>
+        /// v11：进度环的**剩余占比**（0..1）。**&lt;0 = 未知**（环整组隐藏）。
+        ///
+        /// 为什么是"剩余"而不是"已用"：旁边的数字就是剩余时间，两者**同向**
+        /// （数字变小、环也收干）。一个往下走、一个往上走会让人读错。
+        ///
+        /// ⚠️ `TotalMs` 缺失/为 0 时返回 **-1**（未知），**不返回 1.0**：
+        /// 编一个"满环"会让用户以为计时器刚重置。旧 Host 没有 totalMs 字段，
+        /// 这正是这条分支存在的意义。
+        /// </summary>
+        internal static double PomodoroFraction(PetPomodoroInfo p, long nowMs)
+        {
+            if (p == null || !p.Enabled || !p.Show) return -1.0;
+            if (p.TotalMs <= 0) return -1.0;
+            long remain = p.RemainingAt(nowMs);
+            double f = (double)remain / (double)p.TotalMs;
+            if (f < 0) f = 0;
+            if (f > 1) f = 1;
+            return f;
         }
 
         /// <summary>倒计时窗当前是否该占位（决定状态文字要不要让位）。</summary>
@@ -1945,9 +2020,16 @@ namespace DshZhuangFangyiPet
             {
                 int x, y, w, h;
                 _win.GetScreenRect(out x, out y, out w, out h);
-                string text = PomodoroTextFor(_lastPomodoro, NowMs());
-                _pomo.Update(text, _lastPomodoro != null && _lastPomodoro.Show,
+                long now = NowMs();
+                PetPomodoroInfo p = _lastPomodoro;
+                _pomo.Update(
+                    PomodoroRingText(p, now),
+                    PomodoroPhaseText(p),
+                    PomodoroFraction(p, now),
+                    p != null && p.Show,
                     _win.IsVisible, new int[] { x, y, w, h }, null);
+                // v11：呼吸引导（只在专注阶段跑 —— 休息时让人放松，不该再被节奏牵着）。
+                _pomo.SetBreath(_breathOn && p != null && p.Running && p.Phase == "focus");
             }
             catch (Exception ex) { PetLog.Warn("番茄钟窗刷新失败: " + PetLog.Describe(ex)); }
         }
@@ -2096,11 +2178,73 @@ namespace DshZhuangFangyiPet
             // 且好感度档位会随互动变化，右键是最自然的"看看现在怎么样"的时机。
             RefreshInteractMenu();
             if (_petMenu == null) _petMenu = BuildPetMenu();
+            // v11：菜单是**缓存**的，主题变化时它不会自己变 —— 每次打开都套一次
+            // 当前主题（`ApplyMenuTheme` 是幂等的，值没变就是重设一遍画刷）。
+            try { ApplyMenuTheme(_petMenu, PetTheme.ResolveIsDark(_opt.DarkOverride, _settingsTheme)); } catch { }
             // 好感度与「今天」两行是动态文本，每次打开都更新。
             UpdateAffectionMenuItem();
             UpdateTodayMenuItem();
             _petMenu.PlacementTarget = w;
             _petMenu.IsOpen = true;
+        }
+
+        /// <summary>
+        /// 给右键菜单套深浅色。
+        ///
+        /// ── 为什么需要 ──────────────────────────────────────────────────────
+        ///
+        /// WPF 的 `ContextMenu` 默认用**系统**配色，不跟随我们的 `theme` 设置。
+        /// 用户把主题设成深色（或系统深色）时，菜单仍是浅色 —— 在深色桌面上
+        /// 弹出一块刺眼的白板，与气泡/状态/番茄钟那几处的处理不一致。
+        ///
+        /// ── 为什么逐个设 `MenuItem.Foreground` ───────────────────────────────
+        ///
+        /// `MenuItem` **不会**可靠地从 `ContextMenu.Foreground` 继承前景色
+        /// （模板里显式绑定了 `MenuItem.Foreground` 的默认值），只设父级会出现
+        /// "浅色底 + 深色字"或反过来。所以递归铺一遍 —— 菜单很小，代价可忽略。
+        ///
+        /// 只读行（`IsEnabled=false`）由 WPF 自动降透明度，所以**同一个前景色**
+        /// 就够：它会自己变淡，不需要单独算一个"禁用色"。
+        /// </summary>
+        internal static void ApplyMenuTheme(ContextMenu menu, bool dark)
+        {
+            if (menu == null) return;
+            PetTheme.BubblePalette p = PetTheme.BubblePalette.For(dark);
+            SolidColorBrush bg = new SolidColorBrush(Color.FromArgb(p.BgA, p.BgR, p.BgG, p.BgB));
+            SolidColorBrush fg = new SolidColorBrush(Color.FromRgb(p.FgR, p.FgG, p.FgB));
+            SolidColorBrush bd = new SolidColorBrush(Color.FromArgb(p.BdA, p.BdR, p.BdG, p.BdB));
+            menu.Background = bg;
+            menu.Foreground = fg;
+            menu.BorderBrush = bd;
+            for (int i = 0; i < menu.Items.Count; i++)
+            {
+                MenuItem mi = menu.Items[i] as MenuItem;
+                if (mi == null) continue;          // Separator 等非 MenuItem 跳过
+                mi.Background = bg;
+                mi.Foreground = fg;
+                mi.BorderBrush = bd;
+                // 子菜单（「更多」/「表情预览」）也要铺到 —— 它们各自有独立的
+                // 弹出层，不跟着父级走。
+                ApplyMenuTheme(mi, dark);
+            }
+        }
+
+        /// <summary>递归铺子菜单（`MenuItem` 也是 `ItemsControl`，与 `ContextMenu` 同一套字段）。</summary>
+        internal static void ApplyMenuTheme(MenuItem item, bool dark)
+        {
+            if (item == null) return;
+            PetTheme.BubblePalette p = PetTheme.BubblePalette.For(dark);
+            SolidColorBrush bg = new SolidColorBrush(Color.FromArgb(p.BgA, p.BgR, p.BgG, p.BgB));
+            SolidColorBrush fg = new SolidColorBrush(Color.FromRgb(p.FgR, p.FgG, p.FgB));
+            SolidColorBrush bd = new SolidColorBrush(Color.FromArgb(p.BdA, p.BdR, p.BdG, p.BdB));
+            item.Background = bg;
+            item.Foreground = fg;
+            item.BorderBrush = bd;
+            for (int i = 0; i < item.Items.Count; i++)
+            {
+                MenuItem child = item.Items[i] as MenuItem;
+                if (child != null) ApplyMenuTheme(child, dark);
+            }
         }
 
         /// <summary>右键菜单顶部的"好感度"行（只读展示）。</summary>

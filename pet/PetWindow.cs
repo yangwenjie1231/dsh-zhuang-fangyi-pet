@@ -6,6 +6,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 
@@ -40,6 +41,12 @@ namespace DshZhuangFangyiPet
         /// <summary>素材缺失时用的兜底图形（纯色圆角块 + 文字），保证窗口始终可见。</summary>
         private readonly Border _fallback;
         private readonly TextBlock _fallbackText;
+
+        // ── v11：互动反馈动画 ────────────────────────────────────────────────
+        /// <summary>缩放（≤1.0 = 只缩不放，见 <see cref="PlayReact"/> 的说明）。</summary>
+        private readonly ScaleTransform _reactScale;
+        /// <summary>位移（像素级轻微上下弹）。</summary>
+        private readonly TranslateTransform _reactShift;
 
         // task-7：悬停 ✎ 发消息入口（默认隐藏；鼠标进入桌宠出现，离开后**延迟**隐藏）
         private readonly Border _sendBtn;
@@ -87,6 +94,23 @@ namespace DshZhuangFangyiPet
             // 150% DPI 下必须高质量缩放，否则糊
             RenderOptions.SetBitmapScalingMode(_image, BitmapScalingMode.HighQuality);
             RenderOptions.SetEdgeMode(_image, EdgeMode.Unspecified);
+            // v11：互动反馈动画的变换（点击/摸头时"她抖一下"）。
+            //
+            // ⚠️ 用 `RenderTransform` 而不是改 `Width/Height/Left/Top`：
+            // 前者是**布局之后**的视觉变换，不参与窗口尺寸计算 ——
+            // 「窗口尺寸 == 精灵帧尺寸」是冻结不变量（自检 `dipOk` 断言
+            // 物理像素 1:1），改尺寸会让命中测试整体错位（`HitTestDip`
+            // 用 `ActualWidth/Height` 把鼠标坐标归一化）。
+            //
+            // 轴心放在**底部中心**（0.5, 1.0）：缩放看起来像"蹲了一下"，
+            // 而不是"从中间胀大"。
+            _reactScale = new ScaleTransform(1, 1);
+            _reactShift = new TranslateTransform(0, 0);
+            TransformGroup react = new TransformGroup();
+            react.Children.Add(_reactScale);
+            react.Children.Add(_reactShift);
+            _image.RenderTransformOrigin = new Point(0.5, 1.0);
+            _image.RenderTransform = react;
             _root.Children.Add(_image);
 
             _fallbackText = new TextBlock();
@@ -330,6 +354,8 @@ namespace DshZhuangFangyiPet
             // （"调用线程无法访问此对象"），而那条异常在计时器回调里**没人接**。
             CancelFling();
             StopHoldTimer();
+            // v11：反应动画也要停（动画时钟挂在已关闭窗口的元素上没意义）。
+            ResetReact();
             if (_source != null)
             {
                 _source.RemoveHook(WndProc);
@@ -375,6 +401,12 @@ namespace DshZhuangFangyiPet
             HideFallback();
             ApplySizeForSheet();
             ShowFrame(0);
+            // v11：换素材必须重算圆角 —— 上一条满幅图的裁剪会继续切下一张抠图
+            //（气泡那边踩过同一个坑：普通气泡的四角被贴纸的 Clip 切掉一块）。
+            // 顺序放在 ApplySizeForSheet 之后：半径按**新**显示宽度算。
+            ApplyPlatedClip();
+            // 换素材时复位互动动画：上一张图的抖动不该跟到新状态上。
+            ResetReact();
             RestartTimer();
         }
 
@@ -383,6 +415,8 @@ namespace DshZhuangFangyiPet
             _sheet = null;
             _image.Source = null;
             _image.Visibility = Visibility.Collapsed;
+            // 兜底块不是素材，不该带圆角裁剪（留着会切掉兜底 Border 的四角）。
+            ClearPlatedClip();
             _fallbackText.Text = text;
             _fallback.Visibility = Visibility.Visible;
             _timer.Stop();
@@ -442,6 +476,322 @@ namespace DshZhuangFangyiPet
             CroppedBitmap c = _sheet.Frame(index);
             if (c == null) return;
             _image.Source = c;
+        }
+
+        // ------------------------------------------------------------------
+        // v11：满幅素材的圆角（把"硬边方块"变成"有意的卡片"）
+        // ------------------------------------------------------------------
+
+        /// <summary>
+        /// 按当前素材重算圆角裁剪。
+        ///
+        /// 判据与理由见 `SpriteSheet.IsPlated`（满幅背景板会让桌宠显示成一个
+        /// 直角方块 —— `thinking-starry-formula.png` 的完全透明像素是 0.0%）。
+        ///
+        /// ⚠️ **非满幅素材绝不裁**：`happy-heart-eyes`(中位透明 0.100)、
+        /// `error-sunglasses`(0.090) 都有多帧三个甚至四个实心角 —— 它们是抠图，
+        /// 无条件裁圆角会切到她的头发/发饰。
+        ///
+        /// ⚠️ 窗口是**复用**的：每次换素材都要先清裁剪，否则上一张满幅图的
+        /// 圆角会继续切下一张（气泡那边踩过）。
+        /// </summary>
+        private void ApplyPlatedClip()
+        {
+            try
+            {
+                if (_sheet == null || !_sheet.IsPlated)
+                {
+                    ClearPlatedClip();
+                    return;
+                }
+                _image.SizeChanged -= OnImageSizeChanged;
+                _image.SizeChanged += OnImageSizeChanged;
+                UpdatePlatedClip();
+            }
+            catch (Exception ex) { PetLog.Warn("满幅圆角裁剪失败: " + PetLog.Describe(ex)); }
+        }
+
+        private void ClearPlatedClip()
+        {
+            try
+            {
+                _image.SizeChanged -= OnImageSizeChanged;
+                _image.Clip = null;
+            }
+            catch { }
+        }
+
+        private void OnImageSizeChanged(object sender, SizeChangedEventArgs e)
+        {
+            // 只在满幅模式下重刷（与气泡的 OnChromeSizeChanged 同一道闸）。
+            if (_sheet != null && _sheet.IsPlated) UpdatePlatedClip();
+        }
+
+        /// <summary>
+        /// 按**图片实际渲染尺寸**刷新圆角矩形。
+        ///
+        /// ⚠️ 尺寸源必须是 `_image.ActualWidth/Height`，不能拿 `ActualWidth`
+        /// （窗口）—— 气泡那边实测过：窗口 `ActualWidth` 会把投影的外扩量算进去，
+        /// 用 134.7 去裁 119.3 的图，圆角落在图片**外面**，四角仍是直角。
+        /// 本体窗没有投影，但同一个坑没必要再踩一次。
+        /// </summary>
+        private void UpdatePlatedClip()
+        {
+            if (_sheet == null || !_sheet.IsPlated) return;
+            double w = _image.ActualWidth, h = _image.ActualHeight;
+            if (w <= 0 || h <= 0)
+            {
+                Size want = _image.DesiredSize;
+                w = want.Width; h = want.Height;
+            }
+            if (w <= 0 || h <= 0) return;   // 还没排布，等 SizeChanged
+
+            double r = SpriteSheet.PlatedCornerRadiusDip(w);
+            // 圆角不能超过短边的一半，否则会画成诡异形状（气泡那边同一条保护）。
+            double limit = Math.Min(w, h) / 2;
+            if (r > limit) r = limit;
+            _image.Clip = new RectangleGeometry(new Rect(0, 0, w, h), r, r);
+        }
+
+        /// <summary>
+        /// 自检诊断用：当前是否挂着圆角裁剪。
+        /// </summary>
+        internal bool DiagHasPlatedClip
+        {
+            get
+            {
+                RectangleGeometry rg = _image == null ? null : _image.Clip as RectangleGeometry;
+                return rg != null && rg.RadiusX > 0.5;
+            }
+        }
+
+        /// <summary>自检诊断用：当前圆角半径（0 = 没裁）。</summary>
+        internal double DiagPlatedRadius
+        {
+            get
+            {
+                RectangleGeometry rg = _image == null ? null : _image.Clip as RectangleGeometry;
+                return rg == null ? 0 : rg.RadiusX;
+            }
+        }
+
+        /// <summary>自检诊断用：当前素材是否被判为满幅背景板。</summary>
+        internal bool DiagSheetIsPlated { get { return _sheet != null && _sheet.IsPlated; } }
+
+        /// <summary>自检诊断用：当前素材文件名（null = 没素材）。定位"素材被谁换掉了"用。</summary>
+        internal string DiagSheetFile { get { return _sheet == null ? "(null)" : _sheet.File; } }
+
+        /// <summary>自检诊断用：图片元素当前是否可见 + 尺寸（圆角裁剪依赖它）。</summary>
+        internal string DiagImageState
+        {
+            get
+            {
+                return "vis=" + (_image == null ? "?" : _image.Visibility.ToString()) +
+                       " actual=" + (_image == null ? 0 : _image.ActualWidth).ToString("0.#") +
+                       "x" + (_image == null ? 0 : _image.ActualHeight).ToString("0.#") +
+                       " desired=" + (_image == null ? 0 : _image.DesiredSize.Width).ToString("0.#") +
+                       "x" + (_image == null ? 0 : _image.DesiredSize.Height).ToString("0.#");
+            }
+        }
+
+        /// <summary>离屏截图用：窗口内容根元素（`--shots` 直接渲染它，不必真显示窗口）。</summary>
+        internal FrameworkElement DiagRoot { get { return _root; } }
+
+        /// <summary>
+        /// 自检诊断用：直接塞一张条带并走**真实的**换素材路径。
+        ///
+        /// ⚠️ 为什么需要它：要验证的核心 bug 是「窗口复用 → 上一张满幅图的圆角
+        /// 继续切下一张抠图」，而那必须**连续换两次素材**才能暴露。走
+        /// `SetState`/`ReloadSprite` 需要真实的 store 与两张不同状态的图，
+        /// 在无头自检里既慢又脆。这里直接把 `_sheet` 换成给定条带，然后调用
+        /// 与生产路径**同一个** `ApplyPlatedClip()` —— 测的仍是运行路径。
+        /// </summary>
+        internal void DiagForceSheet(SpriteSheet sh)
+        {
+            _sheet = sh;
+            _frame = 0;
+            if (sh != null)
+            {
+                // ⚠️ 必须**先撤兜底块**，否则 `_image` 还是 Collapsed 状态：
+                // 一个 Collapsed 元素的 `ActualWidth`/`DesiredSize` 都是 0，
+                // 于是 `UpdatePlatedClip` 会早退、圆角永远落不下来。
+                // 生产路径里 `ReloadSprite` 的顺序正是
+                // `HideFallback()` → `ApplySizeForSheet()` → `ApplyPlatedClip()`，
+                // 这里必须照做，否则测的就不是运行路径（第一版就漏了这步，
+                // 于是断言报"裁剪=False"，而那是**测试脚手架**的问题，不是实现的）。
+                HideFallback();
+                CroppedBitmap c = sh.Frame(0);
+                if (c != null) _image.Source = c;
+                ApplySizeForSheet();
+            }
+            ApplyPlatedClip();
+        }
+
+        /// <summary>
+        /// 自检诊断用：某个 DIP 点是否算"可点"（直接复用运行路径的
+        /// `HitTestDip`，不是副本 —— 副本会让"改坏真实逻辑、自检仍绿"）。
+        /// </summary>
+        internal bool DiagHitTestDip(double x, double y)
+        {
+            return HitTestDip(new Point(x, y));
+        }
+
+        /// <summary>
+        /// 自检诊断用：`InClippedCorner` 的纯几何入口（不依赖窗口是否已排布）。
+        /// 自检拿它验证"圆角切掉区不可点"，与 `HitTestDip` 用的是同一函数。
+        /// </summary>
+        internal static bool DiagInClippedCorner(double px, double py, double w, double h)
+        {
+            if (w <= 0 || h <= 0) return false;
+            double r = SpriteSheet.PlatedCornerRadiusDip(w);
+            double limit = Math.Min(w, h) / 2;
+            if (r > limit) r = limit;
+            if (r <= 0) return false;
+            bool nearLeft = px < r;
+            bool nearRight = px > w - r;
+            if (!nearLeft && !nearRight) return false;
+            bool nearTop = py < r;
+            bool nearBottom = py > h - r;
+            if (!nearTop && !nearBottom) return false;
+            double cx = nearLeft ? r : w - r;
+            double cy = nearTop ? r : h - r;
+            double dx = px - cx, dy = py - cy;
+            return (dx * dx + dy * dy) > (r * r);
+        }
+
+        // ------------------------------------------------------------------
+        // v11：互动反馈动画（点击 / 摸头 / 抛掷落地）
+        // ------------------------------------------------------------------
+
+        /// <summary>
+        /// 反应动画的时长（ms）。260ms 的取法：短到"点一下就回"，
+        /// 长到能被眼睛捕捉（150ms 以下在 60Hz 屏上只有 ~9 帧，几乎看不见）。
+        /// </summary>
+        internal const int ReactMs = 260;
+
+        /// <summary>
+        /// 单次反应的最大缩放**下压**量（1.0 - 该值 = 最小缩放）。
+        /// 分级用：level 越高压得越深。
+        /// </summary>
+        internal const double ReactMaxSquash = 0.14;
+
+        /// <summary>位移幅度占帧高的比例（上限）。</summary>
+        internal const double ReactMaxShiftRatio = 0.08;
+
+        /// <summary>
+        /// 播一次"她抖了一下"。
+        ///
+        /// ── 两条硬约束（都不是审美，是会出错的）────────────────────────────
+        ///
+        /// ① **缩放只许 ≤ 1.0（只缩不放）**。本体的精灵帧是**满幅**的
+        ///    （实测 `idle-smile.png` 的内容包围盒 = 整帧 256×256），
+        ///    窗口尺寸又**恰好等于帧尺寸**（冻结不变量）—— 放大一点点，
+        ///    图就会超出窗口被裁掉（表现为"边缘缺一块"）。
+        ///    所以这里只做"压扁 + 回弹到 1.0"，永远不越界。
+        ///
+        /// ② **不做横向压扁**（ScaleX ≠ ScaleY）：那需要图在水平方向有留白，
+        ///    而这些素材没有（`working-writing.png` 内容占帧 100%）。均匀缩放才安全。
+        ///
+        /// @param kind  反应种类：'click' | 'pat' | 'land'
+        /// @param level 长按级数（1..3，仅 'pat' 用）；0/1 = 最轻
+        /// </summary>
+        public void PlayReact(string kind, int level)
+        {
+            try
+            {
+                // 抛掷飞行期间不播：飞行本身就是反馈，而且它每 16ms 写 Left/Top，
+                // 再叠一个变换只会看起来像在抽搐。
+                if (_flinging) return;
+                if (_sheet == null) return;
+
+                double depth = ReactMaxSquash;
+                if (kind == "pat")
+                {
+                    // 摸头分级：越往上按得越深（1 级 0.6×、2 级 0.8×、3 级 1.0×）
+                    double mul = level <= 1 ? 0.6 : (level == 2 ? 0.8 : 1.0);
+                    depth *= mul;
+                }
+                else if (kind == "land")
+                {
+                    // 落地：飞了那么远，落地该比点击更明显
+                    depth *= 1.0;
+                }
+                else
+                {
+                    depth *= 0.7;      // 点击最轻（它也是最高频的）
+                }
+
+                double minScale = 1.0 - depth;
+                double h = _image.ActualHeight > 0 ? _image.ActualHeight : ActualHeight;
+                double shift = h * ReactMaxShiftRatio * (kind == "land" ? 1.0 : 0.5);
+
+                // 复位后再起动画（连续点击时不能叠加，否则会越缩越小）。
+                ResetReact();
+
+                // 缩放：1 → min → 1（用 KeyFrames 精确控制，C#5 安全）
+                DoubleAnimationUsingKeyFrames sc = new DoubleAnimationUsingKeyFrames();
+                sc.Duration = new Duration(TimeSpan.FromMilliseconds(ReactMs));
+                sc.FillBehavior = FillBehavior.Stop;
+                sc.KeyFrames.Add(new LinearDoubleKeyFrame(minScale,
+                    KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(ReactMs * 0.35))));
+                sc.KeyFrames.Add(new LinearDoubleKeyFrame(1.0,
+                    KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(ReactMs))));
+                _reactScale.BeginAnimation(ScaleTransform.ScaleXProperty, sc);
+                _reactScale.BeginAnimation(ScaleTransform.ScaleYProperty, sc);
+
+                // 位移：0 → -shift → 0（先被"压下去"再弹回）
+                DoubleAnimationUsingKeyFrames tr = new DoubleAnimationUsingKeyFrames();
+                tr.Duration = new Duration(TimeSpan.FromMilliseconds(ReactMs));
+                tr.FillBehavior = FillBehavior.Stop;
+                tr.KeyFrames.Add(new LinearDoubleKeyFrame(-shift,
+                    KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(ReactMs * 0.35))));
+                tr.KeyFrames.Add(new LinearDoubleKeyFrame(0.0,
+                    KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(ReactMs))));
+                _reactShift.BeginAnimation(TranslateTransform.YProperty, tr);
+
+                _reactPlaying = true;
+            }
+            catch (Exception ex) { PetLog.Warn("反应动画失败: " + PetLog.Describe(ex)); }
+        }
+
+        /// <summary>动画是否正在播（自检诊断用）。</summary>
+        private bool _reactPlaying;
+
+        /// <summary>自检诊断用：动画是否正在播。</summary>
+        internal bool DiagReactPlaying { get { return _reactPlaying; } }
+
+        /// <summary>自检诊断用：当前缩放值（静止时应当是 1.0）。</summary>
+        internal double DiagReactScaleX { get { return _reactScale == null ? 1.0 : _reactScale.ScaleX; } }
+        internal double DiagReactScaleY { get { return _reactScale == null ? 1.0 : _reactScale.ScaleY; } }
+        /// <summary>自检诊断用：当前 Y 位移。</summary>
+        internal double DiagReactShiftY { get { return _reactShift == null ? 0.0 : _reactShift.Y; } }
+
+        /// <summary>
+        /// 清掉进行中的动画并复位到单位变换。
+        ///
+        /// `BeginAnimation(prop, null)` 是**必须的**：只设 `ScaleX = 1` 的话，
+        /// 动画仍然持有该属性的动画时钟（`FillBehavior.Stop` 只是让它在结束后
+        /// 回到基准值，动画对象本身还在），下一次设基准值会被动画覆盖。
+        /// </summary>
+        internal void ResetReact()
+        {
+            try
+            {
+                if (_reactScale != null)
+                {
+                    _reactScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+                    _reactScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+                    _reactScale.ScaleX = 1.0;
+                    _reactScale.ScaleY = 1.0;
+                }
+                if (_reactShift != null)
+                {
+                    _reactShift.BeginAnimation(TranslateTransform.YProperty, null);
+                    _reactShift.Y = 0.0;
+                }
+                _reactPlaying = false;
+            }
+            catch { }
         }
 
         // ------------------------------------------------------------------
@@ -534,6 +884,9 @@ namespace DshZhuangFangyiPet
             scale = PetOptions.ClampScale(scale);   // task-6：0.3~3.0，settings/滚轮共用
             _opt.Scale = scale;
             if (_sheet != null) ApplySizeForSheet();
+            // v11：圆角半径按**显示宽度**算，缩放后必须重算（否则 0.5× 时
+            // 一个 90px 的小图还挂着 20px 圆角，看起来是个圆球）。
+            ApplyPlatedClip();
             ReclampPosition(false);
             UpdateSendBtnVisibility(IsMouseOver);   // task-7：✎ 尺寸随 scale 即时重算
         }
@@ -685,6 +1038,13 @@ namespace DshZhuangFangyiPet
         private bool HitTestDip(Point p)
         {            // ✎ 按钮区永远算实体（桌宠透明角落是 HTTRANSPARENT，按钮必须点得到）
             if (IsOverSendButton(p)) return true;
+            // v11：满幅素材被裁掉的圆角**不算实体**。
+            //
+            // 不挡的话会出现"看得见桌面、点得着"的隐形可点角 —— 视觉上那里是
+            // 空的（被 Clip 切掉了），鼠标却落在她身上（alpha 掩码仍是不透明的
+            // 方形素材）。这是最容易漏的一处：裁剪是**渲染**层的，命中测试是
+            // 另一条路径，两边必须显式对齐。
+            if (_sheet != null && _sheet.IsPlated && InClippedCorner(p)) return false;
             // 逐像素 alpha 命中：**与 clickThrough 无关**。
             // 透明处必须穿透（鼠标落到身后的桌面图标/窗口），否则桌宠会挡住一整块矩形。
             if (_sheet == null)
@@ -696,6 +1056,21 @@ namespace DshZhuangFangyiPet
             double v = ActualHeight <= 0 ? 0 : p.Y / ActualHeight;
             // 容错半径：150% DPI 下给 2 物理像素 ≈ 1.33 DIP
             return _sheet.HitTest(_frame, u, v, 2);
+        }
+
+        /// <summary>
+        /// 点是否落在被圆角裁掉的四个角里。
+        ///
+        /// 只负责取当前尺寸，几何判定转发给 `DiagInClippedCorner` ——
+        /// **单一实现**。这个项目吃过"两处各写一份算术、改坏真实逻辑自检仍绿"
+        /// 的亏（状态文字与气泡定位都踩过），所以宁可让运行路径调一个名字带
+        /// `Diag` 的纯函数，也不复制一份。
+        /// </summary>
+        private bool InClippedCorner(Point p)
+        {
+            double w = _image.ActualWidth, h = _image.ActualHeight;
+            if (w <= 0 || h <= 0) { w = ActualWidth; h = ActualHeight; }
+            return DiagInClippedCorner(p.X, p.Y, w, h);
         }
 
         private void OnMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -721,6 +1096,9 @@ namespace DshZhuangFangyiPet
 
             _dragging = true;
             _dragOffsetDip = p;
+            // v11：拖动开始时复位反应动画 —— 她正在被拖，残留的"抖一下"
+            // 会与拖动叠在一起（看起来像抽搐）。
+            ResetReact();
             // v9：记下按下时的**屏幕坐标与时刻**，用来区分"点击"与"拖动"。
             // 判据是"位移够小 **且** 时间够短"，两个都要 —— 只看位移的话，
             // 慢慢拖 3 像素也会被当成点击；只看时间的话，快速拖一大段也是"点击"。
@@ -953,6 +1331,7 @@ namespace DshZhuangFangyiPet
 
             _flinging = true;
             StopHoldTimer();       // 飞行期间不该再有摸头计时
+            ResetReact();          // 飞行期间不做抖动（与拖动同理）
             _flingTimer = new DispatcherTimer(DispatcherPriority.Render);
             _flingTimer.Interval = TimeSpan.FromMilliseconds(PetGesture.FlingStepMs);
             _flingTimer.Tick += OnFlingTick;
