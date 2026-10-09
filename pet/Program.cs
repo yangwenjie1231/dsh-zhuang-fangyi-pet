@@ -2260,13 +2260,36 @@ namespace DshZhuangFangyiPet
             RefreshInteractMenu();
             if (_petMenu == null) _petMenu = BuildPetMenu();
             // v11：菜单是**缓存**的，主题变化时它不会自己变 —— 每次打开都套一次
-            // 当前主题（`ApplyMenuTheme` 是幂等的，值没变就是重设一遍画刷）。
-            try { ApplyMenuTheme(_petMenu, PetTheme.ResolveIsDark(_opt.DarkOverride, _settingsTheme)); } catch { }
+            // 当前主题。v13.3 起连"现代外观"一起套，见 `SkinMenu`。
+            try { SkinMenu(_petMenu, PetTheme.ResolveIsDark(_opt.DarkOverride, _settingsTheme)); } catch { }
             // 好感度与「今天」两行是动态文本，每次打开都更新。
             UpdateAffectionMenuItem();
             UpdateTodayMenuItem();
             _petMenu.PlacementTarget = w;
             _petMenu.IsOpen = true;
+        }
+
+        /// <summary>
+        /// 给右键菜单套"当前主题 + 现代外观"（**唯一**的装配入口）。
+        ///
+        /// ⚠️ 为什么抽成方法（而不是把两行写在 `OnPetContextMenu` 里）：
+        /// 自检要验证"菜单真的换了模板"，而 `OnPetContextMenu` 需要一个真实
+        /// 的 `PetWindow` 才能跑。第一版自检直接调 `PetMenuSkin.Apply` ——
+        /// 于是**把产品里这一行删掉，自检照样全绿**（断言测的是我手动调的那次）。
+        /// 这与 v13 `DispatchRelease`、v12 `ResolveRelease` 是同一个教训：
+        /// **装配逻辑必须有一个自检能走的入口**。
+        ///
+        /// 顺序：先 `ApplyMenuTheme`（配色属性），再 `PetMenuSkin.Apply`（换模板）。
+        /// 前者设的属性默认模板**根本不吃**（见 `PetMenuSkin` 文件头），
+        /// 真正决定观感的是后者；但前者仍要留着 —— 它是"跟主题"这条断言的
+        /// 直接对象，且深/浅色的画刷由它铺到每个子项。
+        /// 两者都幂等，每次打开重设一遍是安全的。
+        /// </summary>
+        internal static void SkinMenu(ContextMenu menu, bool dark)
+        {
+            if (menu == null) return;
+            ApplyMenuTheme(menu, dark);
+            PetMenuSkin.Apply(menu, PetTheme.BubblePalette.For(dark));
         }
 
         /// <summary>

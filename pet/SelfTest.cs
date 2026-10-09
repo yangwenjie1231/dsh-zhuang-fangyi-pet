@@ -4571,6 +4571,149 @@ namespace DshZhuangFangyiPet
                           "菜单底=" + (mb == null ? "null" : mb.Color.ToString()) +
                           " 子项字=" + (sb == null ? "null" : sb.Color.ToString()));
                 }
+
+                // ── (11b) ⭐⭐⭐⭐ v13.3 右键菜单的**现代外观** ──
+                //
+                // 用户原话："不能用个现代一点的UI吗"（附了截图）。
+                //
+                // ⚠️ 判据必须**渲染取像素**，不能只读属性：
+                // `Template != null` 这种断言在"模板换上了但渲染成空白"时**照样通过**
+                // —— 而空白菜单正是换模板最容易出的错（漏了 `IsItemsHost`、
+                // `ContentPresenter` 绑错源都会这样）。`PetInput` 的下拉框踩过
+                // 同一个坑：`Background` 属性是对的、界面却是白的。
+                {
+                    System.Windows.Controls.ContextMenu menu =
+                        new System.Windows.Controls.ContextMenu();
+                    System.Windows.Controls.MenuItem a = new System.Windows.Controls.MenuItem();
+                    a.Header = "更多(_M)";                    // 带助记符，验证被剥掉
+                    System.Windows.Controls.MenuItem a1 = new System.Windows.Controls.MenuItem();
+                    a1.Header = "投喂";
+                    System.Windows.Controls.MenuItem a2 = new System.Windows.Controls.MenuItem();
+                    a2.Header = "夸奖";
+                    a.Items.Add(a1);
+                    a.Items.Add(new System.Windows.Controls.Separator());
+                    a.Items.Add(a2);
+                    menu.Items.Add(a);
+
+                    System.Windows.Controls.MenuItem ro = new System.Windows.Controls.MenuItem();
+                    ro.Header = "好感度：88 · 亲近";
+                    ro.IsEnabled = false;                     // 只读行
+                    menu.Items.Add(ro);
+
+                    System.Windows.Controls.MenuItem ck = new System.Windows.Controls.MenuItem();
+                    ck.Header = "点击穿透（透明处穿透）";
+                    ck.IsCheckable = true;
+                    ck.IsChecked = true;
+                    menu.Items.Add(ck);
+
+                    // ⚠️ 走**产品同一条装配入口**（`PetApp.SkinMenu`），
+                    // 不是直接调 `PetMenuSkin.Apply`。第一版我直接调后者，
+                    // 于是"把产品里那一行删掉"自检**照样全绿** ——
+                    // 断言测的是我手动调的那一次，不是产品。
+                    PetApp.SkinMenu(menu, false);
+
+                    // ① 换模板真的生效。
+                    //
+                    // ⚠️ 判据必须是**差分**，不能是"Template != null"。
+                    // 我第一版写的是 `a.Template != new MenuItem().Template` ——
+                    // 而 `new MenuItem()` 还没套 Style，它的 `Template` 是 **null**，
+                    // 于是这条退化成 `a.Template != null`：**默认模板也是非 null**
+                    // → 恒真。回滚 R5（把模板换回默认）照样全绿，是条假断言。
+                    //
+                    // 正确做法：另建一个**不套皮肤**的菜单当基准，两者必须不同。
+                    System.Windows.Controls.ContextMenu plain =
+                        new System.Windows.Controls.ContextMenu();
+                    System.Windows.Controls.MenuItem pa = new System.Windows.Controls.MenuItem();
+                    pa.Header = "更多";
+                    plain.Items.Add(pa);
+                    // 触发默认 Style 的套用（否则 Template 还是 null，比不出东西）
+                    plain.Measure(new System.Windows.Size(double.PositiveInfinity, double.PositiveInfinity));
+                    pa.Measure(new System.Windows.Size(double.PositiveInfinity, double.PositiveInfinity));
+                    bool templateDiffers = a.Template != null && a.Template != pa.Template;
+                    bool menuTemplateDiffers = menu.Template != null && menu.Template != plain.Template;
+                    // ② 圆角：模板里真的写了 CornerRadius（默认模板是直角）
+                    bool rounded = PetMenuSkin.MenuCornerRadius > 0 && PetMenuSkin.ItemCornerRadius > 0;
+                    // ③ 助记符被剥掉（显示层），且**原文本里的功能词还在**
+                    string stripped = PetMenuSkin.StripMnemonic("更多(_M)");
+                    string strippedCn = PetMenuSkin.StripMnemonic("打开 DSH 窗口（_D）");
+                    string strippedNum = PetMenuSkin.StripMnemonic("预览(_2)");
+                    string kept = PetMenuSkin.StripMnemonic("投喂");
+                    bool mnemonicOk = stripped == "更多" && strippedCn == "打开 DSH 窗口" &&
+                                      strippedNum == "预览" && kept == "投喂";
+                    Check(templateDiffers && menuTemplateDiffers && rounded && mnemonicOk,
+                          "⭐⭐ 菜单换成自定义模板（**与默认模板真的不同**）+ 圆角 + 剥掉助记符",
+                          "项模板不同=" + templateDiffers + " 菜单模板不同=" + menuTemplateDiffers +
+                          " 圆角=" + PetMenuSkin.MenuCornerRadius +
+                          "/" + PetMenuSkin.ItemCornerRadius +
+                          " 「更多(_M)」→「" + stripped + "」 「（_D）」→「" + strippedCn + "」");
+
+                    // ④ ⭐⭐⭐ **渲染差分**：新皮肤与默认模板渲染出来的像素必须不同。
+                    //
+                    // ⚠️ 为什么必须差分（回滚 R1 抓到）：我原来只验"菜单渲染出了内容"
+                    // （亮度 > 0）—— 而**默认模板当然也渲染得出内容**，
+                    // 所以把皮肤整段删掉，那条断言**照样全绿**。
+                    // 真正要证明的是"看起来不一样了"，那就得**两个都渲染、比像素**。
+                    //
+                    // 做法：同一份菜单内容，一份走 `PetApp.SkinMenu`、一份不套，
+                    // 各自渲染成位图，数**不同的像素**。
+                    System.Windows.Controls.ContextMenu plain2 = BuildSampleMenu();
+                    System.Windows.Controls.ContextMenu skinned = BuildSampleMenu();
+                    PetApp.SkinMenu(skinned, false);
+                    int diffPx = CountDifferentPixels(plain2, skinned);
+                    bool visuallyDifferent = diffPx > 200;   // 只差几个抗锯齿像素不算
+
+                    // ⑤ 浅色底必须比深色底亮（真的跟主题，而不是"换了个模板但颜色死了"）
+                    double menuLum = MeasureBrightness(skinned);
+                    System.Windows.Controls.ContextMenu dark = BuildSampleMenu();
+                    PetApp.SkinMenu(dark, true);   // 同样走产品入口
+                    double darkLum = MeasureBrightness(dark);
+                    bool themeOk = menuLum > 0 && darkLum > 0 && darkLum < menuLum - 0.2;
+                    Check(visuallyDifferent && themeOk,
+                          "⭐⭐⭐ 新皮肤与默认模板**渲染结果确实不同**，且深浅色分明",
+                          "不同像素=" + diffPx + "（>200 才算真的换了外观；" +
+                          "把皮肤删掉时这里会≈0）" +
+                          " 浅色亮度=" + menuLum.ToString("0.00") +
+                          " 深色亮度=" + darkLum.ToString("0.00"));
+
+                    // ⑥ ⭐⭐⭐ 菜单项**真的渲染出了文字**（不是只有圆角空框）
+                    //
+                    // 这是换模板最阴的失败模式：`ContentPresenter` 绑错源
+                    // （比如漏了 `ContentSource='Header'`）→ 框画出来了、
+                    // 文字一个都没有，而所有"属性断言"照样全绿。
+                    //
+                    // ⚠️ 判据**只能用暗像素数**，不能用 `MeasureBrightness`：
+                    // 后者刻意只取**上 1/3 行**（避开文字、只量底色），而菜单项
+                    // 未悬停时底色是 `Transparent` → 那一条带里没有不透明像素 →
+                    // 它返回 -1。我第一版就是拿它当判据，于是**产品是对的却报红**。
+                    // 教训：一个"为量底色而设计"的工具，不能拿来量"有没有文字"。
+                    //
+                    // ⚠️ 被测项必须是**叶子项且不带勾选/箭头**：
+                    // 我第一版拿「更多(_M)」测（它是子菜单头），而**箭头本身**
+                    // 就有 31 个暗像素 —— 于是把 `ContentSource` 改坏（文字全没了）
+                    // 仍然"通过"。判据必须只由**文字**贡献。
+                    System.Windows.Controls.ContextMenu textMenu =
+                        new System.Windows.Controls.ContextMenu();
+                    System.Windows.Controls.MenuItem leaf = new System.Windows.Controls.MenuItem();
+                    leaf.Header = "打开 DSH 窗口";
+                    textMenu.Items.Add(leaf);
+                    PetApp.SkinMenu(textMenu, false);
+                    int darkPixels = CountDarkPixels(leaf, 0.55);
+                    Check(darkPixels > 60,
+                          "⭐⭐⭐ 菜单项**真的画出了文字**（叶子项，无箭头/勾选干扰）",
+                          "暗像素=" + darkPixels + "（>60 才算有字；" +
+                          "ContentPresenter 绑错源时只剩 0 左右）");
+
+                    // ⑦ ⭐⭐ 子菜单也要换模板。
+                    //
+                    // ⚠️ 子菜单有**自己独立的弹出层**，不跟着父级走 ——
+                    // 这正是 `ApplyMenuTheme` 当年必须递归的原因。
+                    // 只给顶层换模板的话，展开「更多」看到的还是**旧样式**
+                    // （用户第一眼就会点开它，所以这条必须钉住）。
+                    bool subTemplated = a1.Template == a.Template && a2.Template == a.Template;
+                    Check(subTemplated,
+                          "⭐⭐ 子菜单项也换了模板（子菜单有独立弹出层，不跟着父级走）",
+                          "父项模板与子项模板同一个=" + subTemplated);
+                }
                 // ── (12) 离屏截图：把每个窗口渲染成 PNG，供人眼确认 ──
                 //
                 // `RenderTargetBitmap` 渲染的是**已排布的元素**，不需要窗口真的显示
@@ -4710,6 +4853,150 @@ namespace DshZhuangFangyiPet
         }
 
         /// <summary>
+        /// 渲染 <paramref name="el"/> 并数出**暗像素**个数（亮度 &lt; 阈值）。
+        ///
+        /// 用途：验证"文字真的画出来了"。换模板最阴的失败模式是
+        /// `ContentPresenter` 绑错源 —— 圆角空框画出来了、一个字都没有，
+        /// 而 `Template != null` 这类属性断言**照样全绿**。
+        /// 文字是深色、底色是浅色，所以"暗像素数"能区分"有字"与"空框"。
+        /// </summary>
+        private static int CountDarkPixels(System.Windows.FrameworkElement el, double threshold)
+        {
+            if (el == null) return 0;
+            try
+            {
+                el.Measure(new System.Windows.Size(double.PositiveInfinity, double.PositiveInfinity));
+                int w = (int)Math.Ceiling(el.ActualWidth > 0 ? el.ActualWidth : el.DesiredSize.Width);
+                int h = (int)Math.Ceiling(el.ActualHeight > 0 ? el.ActualHeight : el.DesiredSize.Height);
+                if (w <= 0 || h <= 0) return 0;
+                el.Arrange(new System.Windows.Rect(0, 0, w, h));
+                el.UpdateLayout();
+                RenderTargetBitmap rtb = new RenderTargetBitmap(w, h, 96, 96,
+                    System.Windows.Media.PixelFormats.Pbgra32);
+                rtb.Render(el);
+                rtb.Freeze();
+                int stride = w * 4;
+                byte[] px = new byte[stride * h];
+                rtb.CopyPixels(px, stride, 0);
+                int n = 0;
+                for (int y = 0; y < h; y++)
+                {
+                    for (int x = 0; x < w; x++)
+                    {
+                        int o = y * stride + x * 4;
+                        if (px[o + 3] < 8) continue;   // 透明处不算
+                        double lum = (px[o + 2] * 0.299 + px[o + 1] * 0.587 + px[o] * 0.114) / 255.0;
+                        if (lum < threshold) n++;
+                    }
+                }
+                return n;
+            }
+            catch (Exception ex)
+            {
+                PetLog.Warn("数暗像素失败: " + PetLog.Describe(ex));
+                return 0;
+            }
+        }
+
+        /// <summary>
+        /// 造一份**有代表性的**右键菜单样本（子菜单 / 只读行 / 勾选项 / 分隔线）。
+        ///
+        /// 用途：让"新皮肤 vs 默认模板"的**渲染差分**断言有东西可比。
+        /// 内容与真实菜单同形，但不依赖 `PetApp` 的运行时状态（无 Host 也能跑）。
+        /// </summary>
+        private static System.Windows.Controls.ContextMenu BuildSampleMenu()
+        {
+            System.Windows.Controls.ContextMenu m = new System.Windows.Controls.ContextMenu();
+            System.Windows.Controls.MenuItem more = new System.Windows.Controls.MenuItem();
+            more.Header = "更多(_M)";
+            System.Windows.Controls.MenuItem f1 = new System.Windows.Controls.MenuItem();
+            f1.Header = "投喂";
+            System.Windows.Controls.MenuItem f2 = new System.Windows.Controls.MenuItem();
+            f2.Header = "夸奖";
+            more.Items.Add(f1);
+            more.Items.Add(f2);
+            m.Items.Add(more);
+
+            System.Windows.Controls.MenuItem ro = new System.Windows.Controls.MenuItem();
+            ro.Header = "好感度：88 · 亲近（下一档 150）";
+            ro.IsEnabled = false;
+            m.Items.Add(ro);
+            m.Items.Add(new System.Windows.Controls.Separator());
+
+            System.Windows.Controls.MenuItem ck = new System.Windows.Controls.MenuItem();
+            ck.Header = "点击穿透（透明处穿透）";
+            ck.IsCheckable = true;
+            ck.IsChecked = true;
+            m.Items.Add(ck);
+            System.Windows.Controls.MenuItem q = new System.Windows.Controls.MenuItem();
+            q.Header = "退出桌宠(_X)";
+            m.Items.Add(q);
+            return m;
+        }
+
+        /// <summary>
+        /// 把两个元素各渲染一遍，返回**像素不同的个数**。
+        ///
+        /// ⚠️ 为什么需要它（回滚 R1 抓到）：只验"渲染出了内容"是**假断言** ——
+        /// 默认模板当然也渲染得出内容，所以把整个皮肤删掉它照样全绿。
+        /// 要证明"外观真的变了"，只能**两个都渲染、逐像素比**。
+        /// 尺寸不同时按较小者比（换模板会改变内边距，尺寸本来就该变）。
+        /// </summary>
+        private static int CountDifferentPixels(System.Windows.FrameworkElement x,
+                                                System.Windows.FrameworkElement y)
+        {
+            if (x == null || y == null) return 0;
+            try
+            {
+                byte[][] bufs = new byte[2][];
+                int[] ws = new int[2];
+                int[] hs = new int[2];
+                System.Windows.FrameworkElement[] els = new System.Windows.FrameworkElement[] { x, y };
+                for (int i = 0; i < 2; i++)
+                {
+                    System.Windows.FrameworkElement el = els[i];
+                    el.Measure(new System.Windows.Size(double.PositiveInfinity, double.PositiveInfinity));
+                    int w = (int)Math.Ceiling(el.DesiredSize.Width);
+                    int h = (int)Math.Ceiling(el.DesiredSize.Height);
+                    if (w <= 0) w = 1;
+                    if (h <= 0) h = 1;
+                    el.Arrange(new System.Windows.Rect(0, 0, w, h));
+                    el.UpdateLayout();
+                    RenderTargetBitmap rtb = new RenderTargetBitmap(w, h, 96, 96,
+                        System.Windows.Media.PixelFormats.Pbgra32);
+                    rtb.Render(el);
+                    rtb.Freeze();
+                    int stride = w * 4;
+                    byte[] px = new byte[stride * h];
+                    rtb.CopyPixels(px, stride, 0);
+                    bufs[i] = px; ws[i] = w; hs[i] = h;
+                }
+                int cw = Math.Min(ws[0], ws[1]);
+                int ch = Math.Min(hs[0], hs[1]);
+                int n = 0;
+                for (int yy = 0; yy < ch; yy++)
+                {
+                    for (int xx = 0; xx < cw; xx++)
+                    {
+                        int o0 = yy * ws[0] * 4 + xx * 4;
+                        int o1 = yy * ws[1] * 4 + xx * 4;
+                        int d = Math.Abs(bufs[0][o0] - bufs[1][o1]) +
+                                Math.Abs(bufs[0][o0 + 1] - bufs[1][o1 + 1]) +
+                                Math.Abs(bufs[0][o0 + 2] - bufs[1][o1 + 2]) +
+                                Math.Abs(bufs[0][o0 + 3] - bufs[1][o1 + 3]);
+                        if (d > 24) n++;   // 忽略抗锯齿级噪声
+                    }
+                }
+                return n;
+            }
+            catch (Exception ex)
+            {
+                PetLog.Warn("像素差分失败: " + PetLog.Describe(ex));
+                return 0;
+            }
+        }
+
+        /// <summary>
         /// 把 v11 的每个视觉改动渲染成 PNG（`--shots &lt;dir&gt;`）。
         ///
         /// 每张图都是**运行路径的真实渲染**（同一个 `PetWindow`/`PetPomodoro`），
@@ -4821,6 +5108,70 @@ namespace DshZhuangFangyiPet
                 finally { try { if (win3 != null) win3.ForceClose(); } catch { } }
                 Pump(80);
             }
+
+            // ---- 4b. v13.3 右键菜单：浅色 / 深色各一张 ----
+            //
+            // ⚠️ 为什么要截图：断言只能证明"画出了字、圆角参数大于 0"，
+            // **证明不了"看起来现代"** —— 而用户提的就是观感问题。
+            // 所以这里把真实菜单渲染成 PNG，让人眼确认（也留给以后对比）。
+            try
+            {
+                for (int i = 0; i < 2; i++)
+                {
+                    bool dark = i == 1;
+                    System.Windows.Controls.ContextMenu mm =
+                        new System.Windows.Controls.ContextMenu();
+                    System.Windows.Controls.MenuItem more =
+                        new System.Windows.Controls.MenuItem();
+                    more.Header = "更多(_M)";
+                    System.Windows.Controls.MenuItem f1 = new System.Windows.Controls.MenuItem();
+                    f1.Header = "投喂";
+                    System.Windows.Controls.MenuItem f2 = new System.Windows.Controls.MenuItem();
+                    f2.Header = "夸奖";
+                    System.Windows.Controls.MenuItem f3 = new System.Windows.Controls.MenuItem();
+                    f3.Header = "表情包…(_G)";
+                    more.Items.Add(f1); more.Items.Add(f2);
+                    more.Items.Add(new System.Windows.Controls.Separator());
+                    more.Items.Add(f3);
+                    mm.Items.Add(more);
+
+                    System.Windows.Controls.MenuItem aff = new System.Windows.Controls.MenuItem();
+                    aff.Header = "好感度：88 · 亲近（下一档 150）";
+                    aff.IsEnabled = false;
+                    mm.Items.Add(aff);
+                    mm.Items.Add(new System.Windows.Controls.Separator());
+
+                    System.Windows.Controls.MenuItem dsh = new System.Windows.Controls.MenuItem();
+                    dsh.Header = "打开 DSH 窗口(_D)";
+                    mm.Items.Add(dsh);
+                    System.Windows.Controls.MenuItem hid = new System.Windows.Controls.MenuItem();
+                    hid.Header = "隐藏(_H)";
+                    mm.Items.Add(hid);
+                    mm.Items.Add(new System.Windows.Controls.Separator());
+
+                    System.Windows.Controls.MenuItem ct = new System.Windows.Controls.MenuItem();
+                    ct.Header = "点击穿透（透明处穿透）";
+                    ct.IsCheckable = true;
+                    ct.IsChecked = true;
+                    mm.Items.Add(ct);
+                    System.Windows.Controls.MenuItem rst = new System.Windows.Controls.MenuItem();
+                    rst.Header = "重置位置(_R)";
+                    mm.Items.Add(rst);
+                    mm.Items.Add(new System.Windows.Controls.Separator());
+                    System.Windows.Controls.MenuItem qt = new System.Windows.Controls.MenuItem();
+                    qt.Header = "退出桌宠(_X)";
+                    mm.Items.Add(qt);
+
+                    // 走产品装配入口（与真实右键同一条路径）
+                    PetApp.SkinMenu(mm, dark);
+                    Pump(60);
+                    SaveShot(mm, Path.Combine(outDir, dark ? "08-menu-dark.png" : "09-menu-light.png"), 0, 0);
+                    count++;
+                }
+                PetLog.Info("截图 08/09 右键菜单：深色 / 浅色");
+            }
+            catch (Exception ex) { PetLog.Warn("菜单截图失败: " + PetLog.Describe(ex)); }
+            Pump(60);
 
             // ---- 5. 番茄钟进度环：四个占比 ----
             PetPomodoro pomo = null;
