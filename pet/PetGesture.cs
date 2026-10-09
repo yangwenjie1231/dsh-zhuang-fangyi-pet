@@ -230,8 +230,25 @@ namespace DshZhuangFangyiPet
         /// 一直按住就能一直刷反应的话，"按住"会变成刷好感的路子。
         /// </summary>
         internal const int PatMaxMs = 4000;
-        /// <summary>摸头每升一级的间隔（ms）。</summary>
-        internal const int PatStepMs = 600;
+        /// <summary>
+        /// 摸头每升一级的间隔（ms）。
+        ///
+        /// ⚠️ v13.1：**600 → 1200**。用户反馈"摸头的逐级反应太快了"。
+        ///
+        /// 原先 600ms 一级，三级在 **1.8 秒**内全部走完 —— 按住之后还没来得及
+        /// 看清第 1 级，就已经跳到第 3 级了，然后就静止到 `PatMaxMs` 上限。
+        /// 那不像"一级一级地摸"，像"按下去就被连戳三下"。
+        ///
+        /// 1200ms 的取法：三级铺开到约 **2.9 秒**（见 `PatLevel`），
+        /// 每一级都留得下"看清反应 → 期待下一级"的时间，
+        /// 同时仍在 `PatMaxMs`(4000) 之内 —— 若步长大于 1/3 的窗口，
+        /// 第 3 级就永远到不了了。
+        ///
+        /// ⚠️ 这个约束是**结构性**的，不是审美：
+        /// `PatMaxMs` 必须 ≥ `PatMinMs + (PatMaxLevels-1) × PatStepMs`，
+        /// 否则最后一级永远触发不了（自检有一条专门断言它，见 `SelfTest`）。
+        /// </summary>
+        internal const int PatStepMs = 1200;
         /// <summary>一次按下最多升到几级。</summary>
         internal const int PatMaxLevels = 3;
 

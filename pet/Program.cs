@@ -342,6 +342,10 @@ namespace DshZhuangFangyiPet
             _win.ClickInvoked = delegate { OnPetClicked(); };
             // v10：长按摸头（分级）与抛掷（飞完才上报一次）。
             _win.PatInvoked = OnPetPat;
+            // v13.1：摸头松手 → 平滑弹回（纯动画收尾，**不上报互动**）。
+            _win.PatEndInvoked = OnPetPatEnd;
+            // v13.1：松手兜底 → 瞬时戳一下（与"按住加深"分开，见方法说明）。
+            _win.PatBackstopInvoked = OnPetPatBackstop;
             _win.FlingFinished = OnPetFlingFinished;
             _win.SendButtonClicked = OnSendButtonClicked;  // task-7：✎ → 打开输入窗
             // 悬停事实 → 状态文字（`hint` 用）。与 ✎ 同一时机，不另起一套判定。
@@ -1412,8 +1416,42 @@ namespace DshZhuangFangyiPet
         {
             if (_http == null) return;
             _http.PostInteract("pat", level);
-            // v11：摸头分级 → 按得越深反应越明显（与 `PlayReact` 的分级同一口径）。
-            try { _win.PlayReact("pat", level); } catch { }
+            // v13.1：摸头分级改用**持续压扁 + 逐级加深**（`PlayPatHold`），
+            // 不再用 `PlayReact`。
+            //
+            // ⚠️ 为什么必须换（用户："摸头的逐级反应太快了" + "记得加上过渡动画"）：
+            // `PlayReact` 是"戳一下 → 弹回 1.0"的瞬时动画，每升一级都要**先弹回
+            // 原尺寸**，于是 1/2/3 级看起来是**三次一模一样的戳** ——
+            // 用户看到的是"被连戳三下"，而不是"越摸越深"。
+            // `PlayPatHold` 从当前值起算、只加深、按住不回弹，级与级之间才是连的。
+            try { _win.PlayPatHold(level); } catch { }
+            PetLog.Info("长按摸头 → 第 " + level + " 级");
+        }
+
+        /// <summary>
+        /// v13.1：摸头**松手** → 平滑弹回原尺寸。
+        ///
+        /// 与 `OnPetPat` 配对：按下的过程由 `PlayPatHold` 一路加深，
+        /// 松手必须由这里收尾 —— 否则她会**一直保持着被按扁的样子**
+        /// （`PlayPatHold` 用的是 `FillBehavior.HoldEnd`，动画结束即停在深度上）。
+        /// </summary>
+        private void OnPetPatEnd()
+        {
+            try { _win.EndPatHold(); } catch { }
+        }
+
+        /// <summary>
+        /// v13.1：摸头**松手兜底** → 瞬时戳一下（`PlayPatPoke`）。
+        ///
+        /// ⚠️ 为什么不能复用 `OnPetPat`（按住加深）：这条路径上按下期间
+        /// **没有播过动画**，而 `OnMouseLeftButtonUp` 的 `finally` 会紧接着
+        /// `EndPatHold` —— 按住动画刚起就被按当前值（仍是 1.0）收掉，
+        /// 结果是**她完全不动**。旧代码在这条路径上是看得到的。
+        /// </summary>
+        private void OnPetPatBackstop(int level)
+        {
+            if (_http != null) _http.PostInteract("pat", level);
+            try { _win.PlayPatPoke(level); } catch { }
             PetLog.Info("长按摸头 → 第 " + level + " 级");
         }
 

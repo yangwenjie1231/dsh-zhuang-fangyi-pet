@@ -708,9 +708,12 @@ namespace DshZhuangFangyiPet
                 double depth = ReactMaxSquash;
                 if (kind == "pat")
                 {
-                    // 摸头分级：越往上按得越深（1 级 0.6×、2 级 0.8×、3 级 1.0×）
-                    double mul = level <= 1 ? 0.6 : (level == 2 ? 0.8 : 1.0);
-                    depth *= mul;
+                    // ⚠️ v13.1：摸头分级**已经搬走**到 `PlayPatHold`/`PlayPatPoke`
+                    // （见那两个方法的说明）。这里**转发**过去，不再留第二套
+                    // 分级实现 —— 留着的下场是"产品走 A、自检测 B"：
+                    // 本次改动前，`PlayReact("pat")` 已**只剩自检在调**。
+                    PlayPatPoke(level);
+                    return;
                 }
                 else if (kind == "land")
                 {
@@ -755,6 +758,237 @@ namespace DshZhuangFangyiPet
             catch (Exception ex) { PetLog.Warn("反应动画失败: " + PetLog.Describe(ex)); }
         }
 
+        /// <summary>
+        /// 按住摸头的**持续压扁**（v13.1，用户："摸头的逐级反应太快了"+
+        /// "记得加上过渡动画"）。
+        ///
+        /// ── 为什么不能复用 `PlayReact` ────────────────────────────────────────
+        ///
+        /// `PlayReact` 是"戳一下 → 弹回"的**瞬时**动画：它先 `ResetReact()`
+        /// 回到 1.0，再压到最深、再弹回 1.0。用来做**分级**时有个致命问题：
+        /// 每升一级都要**先弹回原尺寸**，于是 1/2/3 级看起来是**三次一模一样的戳**
+        /// —— 用户根本看不出"越摸越深"，只看到"被连戳了三下"。
+        ///
+        /// 所以摸头需要的是另一种动画：**按住期间持续压着，逐级平滑加深，
+        /// 松手才弹回**。这正是"过渡动画"要解决的问题 ——
+        /// 不是给每一级配个动画，而是让级与级之间**连起来**。
+        ///
+        /// ── 实现要点 ─────────────────────────────────────────────────────────
+        ///
+        /// · **从当前值起算**（`From = 当前 scale`），不是从 1.0 起算 ——
+        ///   这是"平滑过渡"的全部秘密。从 1.0 起算就会看到每一级都弹回去一次。
+        /// · **只加深、不回浅**：抖动导致的浅目标不许让她回弹。
+        /// · `FillBehavior.HoldEnd`：动画结束后**保持在目标深度**（按住的状态），
+        ///   而不是像 `PlayReact` 那样回到 1.0。
+        ///
+        /// ⚠️ 仍然只缩不放（scale ≤ 1.0）：本体的精灵帧是满幅的，放大一点点
+        /// 就会超出窗口被裁掉（见 `PlayReact` 的说明，那是冻结约束）。
+        /// </summary>
+        /// <param name="level">长按级数（1..3）。越往上按得越深。</param>
+        public void PlayPatHold(int level)
+        {
+            try
+            {
+                if (_flinging) return;      // 飞行期间不播（与 PlayReact 同一条）
+                if (_sheet == null) return;
+
+                // 级数 → 目标深度。比 PlayReact 的 0.6/0.8/1.0 **更浅的起点**
+                // (0.5) 是刻意的：按住是"持续压着"，起点太深会让第 1 级就很重，
+                // 后面两级反而没有加深的余地。
+                double mul = PatDepthMul(level);
+                double targetScale = 1.0 - ReactMaxSquash * mul;
+
+                double h = _image.ActualHeight > 0 ? _image.ActualHeight : ActualHeight;
+                double targetShift = -(h * ReactMaxShiftRatio * 0.5 * mul);
+
+                // ⚠️ 从**当前**值起算 —— 见方法头"平滑过渡的全部秘密"。
+                double fromScale = _reactScale.ScaleX;
+                double fromShift = _reactShift.Y;
+                if (double.IsNaN(fromScale) || fromScale > 1.0) fromScale = 1.0;
+                if (double.IsNaN(fromShift)) fromShift = 0.0;
+
+                // 按住期间只加深、不回浅（抖动给出的浅目标不该让手弹回来）。
+                if (_patHolding)
+                {
+                    if (targetScale > fromScale) targetScale = fromScale;
+                    if (targetShift > fromShift) targetShift = fromShift;
+                }
+
+                DoubleAnimation sc = new DoubleAnimation();
+                sc.From = fromScale;
+                sc.To = targetScale;
+                sc.Duration = new Duration(TimeSpan.FromMilliseconds(PatPressMs));
+                sc.FillBehavior = FillBehavior.HoldEnd;   // 按住 → 停在目标深度
+                _reactScale.BeginAnimation(ScaleTransform.ScaleXProperty, sc);
+                _reactScale.BeginAnimation(ScaleTransform.ScaleYProperty, sc);
+
+                DoubleAnimation tr = new DoubleAnimation();
+                tr.From = fromShift;
+                tr.To = targetShift;
+                tr.Duration = new Duration(TimeSpan.FromMilliseconds(PatPressMs));
+                tr.FillBehavior = FillBehavior.HoldEnd;
+                _reactShift.BeginAnimation(TranslateTransform.YProperty, tr);
+
+                _patHolding = true;
+                _patDepth = 1.0 - targetScale;
+                _reactPlaying = true;
+            }
+            catch (Exception ex) { PetLog.Warn("摸头过渡动画失败: " + PetLog.Describe(ex)); }
+        }
+
+        /// <summary>
+        /// 摸头级数 → 深度系数（**唯一**的分级表）。
+        ///
+        /// 两个入口共用它：`PlayPatHold`（按住时持续加深）与 `PlayPatPoke`
+        /// （松手兜底时补一次瞬时反应）。分两张表的话，
+        /// "1 级看起来多重"会按走哪条路径而不一样 —— 那正是 v12/v13
+        /// 反复踩的"两份判据互相掩护"。
+        /// </summary>
+        internal static double PatDepthMul(int level)
+        {
+            return level <= 1 ? 0.5 : (level == 2 ? 0.75 : 1.0);
+        }
+
+        /// <summary>
+        /// 摸头**瞬时**反应（v13.1）：压到该级深度再弹回，用于松手兜底。
+        ///
+        /// ── 为什么需要它（这是我本轮差点漏掉的一条真实路径）──────────────
+        ///
+        /// `PlayPatHold` + `EndPatHold` 是**配对**的：按住 → 加深 → 松手弹回。
+        /// 但"松手兜底"（计时器没走成、松手时才补报第 1 级）里，
+        /// 按下阶段**根本没播过动画**，而 `finally` 会紧接着调 `EndPatHold` ——
+        /// 于是 `PlayPatHold` 刚起一个 1.0→0.95 的动画，同一轮就被 `EndPatHold`
+        /// 按当前值（还是 1.0）收掉 → **动画变成 1.0→1.0，用户什么都看不到**。
+        ///
+        /// 旧代码在这条路径上是**看得到**反应的（`PlayReact` 的瞬时戳），
+        /// 所以直接换成 `PlayPatHold` 会是一次**静默的功能退化**：
+        /// 手势照旧上报、好感照旧增加，只是她不动了。
+        ///
+        /// 所以兜底路径用这个"一次性戳"：压到该级深度再弹回，
+        /// 与按住路径共用 `PatDepthMul`（同一口径），但不进入"按住"状态。
+        /// </summary>
+        public void PlayPatPoke(int level)
+        {
+            try
+            {
+                if (_flinging) return;
+                if (_sheet == null) return;
+
+                double mul = PatDepthMul(level);
+                double minScale = 1.0 - ReactMaxSquash * mul;
+                double h = _image.ActualHeight > 0 ? _image.ActualHeight : ActualHeight;
+                double shift = h * ReactMaxShiftRatio * 0.5 * mul;
+
+                // 入口计数（自检判"走的是瞬时戳还是按住"的唯一可靠判据）。
+                _pokeCount++;
+
+                // 一次性动画：先复位（避免与上一次叠加越缩越小），再压 → 弹回。
+                ResetReact();
+
+                DoubleAnimationUsingKeyFrames sc = new DoubleAnimationUsingKeyFrames();
+                sc.Duration = new Duration(TimeSpan.FromMilliseconds(ReactMs));
+                sc.FillBehavior = FillBehavior.Stop;
+                sc.KeyFrames.Add(new LinearDoubleKeyFrame(minScale,
+                    KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(ReactMs * 0.35))));
+                sc.KeyFrames.Add(new LinearDoubleKeyFrame(1.0,
+                    KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(ReactMs))));
+                _reactScale.BeginAnimation(ScaleTransform.ScaleXProperty, sc);
+                _reactScale.BeginAnimation(ScaleTransform.ScaleYProperty, sc);
+
+                DoubleAnimationUsingKeyFrames tr = new DoubleAnimationUsingKeyFrames();
+                tr.Duration = new Duration(TimeSpan.FromMilliseconds(ReactMs));
+                tr.FillBehavior = FillBehavior.Stop;
+                tr.KeyFrames.Add(new LinearDoubleKeyFrame(-shift,
+                    KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(ReactMs * 0.35))));
+                tr.KeyFrames.Add(new LinearDoubleKeyFrame(0.0,
+                    KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(ReactMs))));
+                _reactShift.BeginAnimation(TranslateTransform.YProperty, tr);
+
+                _reactPlaying = true;
+            }
+            catch (Exception ex) { PetLog.Warn("摸头瞬时反应失败: " + PetLog.Describe(ex)); }
+        }
+
+        /// <summary>
+        /// 结束"按住"：平滑弹回原尺寸（v13.1）。
+        ///
+        /// `FillBehavior.Stop` + 基准值 1.0：动画结束后自动回到单位变换，
+        /// 不需要 `Completed` 回调去清理（回调在窗口已关闭时还会跑，容易出岔子）。
+        /// </summary>
+        public void EndPatHold()
+        {
+            if (!_patHolding) return;
+            _patHolding = false;
+            try
+            {
+                double fromScale = _reactScale.ScaleX;
+                double fromShift = _reactShift.Y;
+                if (double.IsNaN(fromScale) || fromScale > 1.0) fromScale = 1.0;
+                if (double.IsNaN(fromShift)) fromShift = 0.0;
+
+                DoubleAnimation sc = new DoubleAnimation();
+                sc.From = fromScale;
+                sc.To = 1.0;
+                sc.Duration = new Duration(TimeSpan.FromMilliseconds(PatReleaseMs));
+                sc.FillBehavior = FillBehavior.Stop;   // 结束后由基准值 1.0 接管
+                _reactScale.BeginAnimation(ScaleTransform.ScaleXProperty, sc);
+                _reactScale.BeginAnimation(ScaleTransform.ScaleYProperty, sc);
+
+                DoubleAnimation tr = new DoubleAnimation();
+                tr.From = fromShift;
+                tr.To = 0.0;
+                tr.Duration = new Duration(TimeSpan.FromMilliseconds(PatReleaseMs));
+                tr.FillBehavior = FillBehavior.Stop;
+                _reactShift.BeginAnimation(TranslateTransform.YProperty, tr);
+
+                _patDepth = 0.0;
+                _reactPlaying = true;
+            }
+            catch { }
+        }
+
+        /// <summary>按住摸头进行中（松手要据此弹回）。</summary>
+        private bool _patHolding;
+        /// <summary>本次按住已达到的深度（诊断用）。</summary>
+        private double _patDepth;
+
+        /// <summary>逐级加深的过渡时长（ms）。比瞬时动画(260)略短，让加深跟手。</summary>
+        internal const int PatPressMs = 220;
+        /// <summary>松手弹回的时长（ms）。比加深略长，收尾更柔和。</summary>
+        internal const int PatReleaseMs = 300;
+
+        /// <summary>自检诊断用：是否处于"按住"状态。</summary>
+        internal bool DiagPatHolding { get { return _patHolding; } }
+        /// <summary>自检诊断用：当前按住的深度（1.0 - scale）。</summary>
+        internal double DiagPatDepth { get { return _patDepth; } }
+
+        /// <summary>
+        /// 自检诊断用：`PlayPatPoke` 被调用了几次。
+        ///
+        /// ⚠️ 为什么需要计数（回滚验证 R7/R10 都因此变绿过）：
+        /// 我原先用"动画深度"间接判"走的是哪条路"，而深度是**结果** ——
+        /// 两条路都能压出同样的深度，判据分不开。
+        /// 计数直接看**入口**，才真正区分"瞬时戳"与"按住"。
+        /// </summary>
+        internal int DiagPokeCount { get { return _pokeCount; } }
+        private int _pokeCount;
+
+        /// <summary>
+        /// 自检用：驱动**真实的松手分发**（`DispatchRelease` 薄壳）。
+        ///
+        /// ⚠️ 存在的理由（回滚验证 R10 抓到过）：分发原先长在
+        /// `OnMouseLeftButtonUp` 里，无头自检造不出鼠标事件 → 兜底走哪条路
+        /// **没有任何断言能发现**。有了它，"兜底必须用瞬时戳"才测得到。
+        /// </summary>
+        internal void DiagDispatchRelease(string action, int patLevel)
+        {
+            ReleaseAction a = ReleaseAction.None;
+            if (action == "click") a = ReleaseAction.Click;
+            else if (action == "fling") a = ReleaseAction.Fling;
+            else if (action == "pat") a = ReleaseAction.Pat;
+            DispatchRelease(a, patLevel, 0.0);
+        }
+
         /// <summary>动画是否正在播（自检诊断用）。</summary>
         private bool _reactPlaying;
 
@@ -790,6 +1024,11 @@ namespace DshZhuangFangyiPet
                     _reactShift.BeginAnimation(TranslateTransform.YProperty, null);
                     _reactShift.Y = 0.0;
                 }
+                // v13.1：按住状态一并清掉。不清的话，下一次按下会以为
+                // "还在按住"→ 走"只加深不回浅"的分支 → 目标被夹到当前值，
+                // 她**再也不会压下去**（拖动/抛掷/点击后残留就是这种表现）。
+                _patHolding = false;
+                _patDepth = 0.0;
                 _reactPlaying = false;
             }
             catch { }
@@ -1309,6 +1548,31 @@ namespace DshZhuangFangyiPet
             return (int)(ClockMs() - _pressClockMs);
         }
 
+        /// <summary>
+        /// 长按检查的间隔（ms）。
+        ///
+        /// 取 `PatStepMs` 的**八分之一**（1200ms → 150ms，下限 120ms）。
+        ///
+        /// ⚠️ v13.1：原先取"一半"（步长 600ms 时是 300ms）。那时够用；
+        /// 但步长拉到 1200ms 之后，"一半"变成 600ms，于是每一级都最多
+        /// **晚 600ms** 才报（第 2 级 1550ms 的门槛要到 1800ms 才被发现）——
+        /// 手感上就是"我按住不动，她过一会儿才反应"。
+        ///
+        /// 检查本身只是几次整数运算，150ms 一次的开销可以忽略；
+        /// 换来的是"每一级都在该到的时刻附近到"。
+        /// 取 1/8 而不是更细：更细没有额外收益（人眼分辨不出 <100ms 的差异），
+        /// 只是白白多醒几次。
+        ///
+        /// ⚠️ 抽成方法（而不是写在 `StartHoldTimer` 里）是为了让自检能断言
+        /// **真实的那个值** —— 抄一份到断言里的话，改坏了照样全绿。
+        /// </summary>
+        internal static int HoldTickIntervalMs()
+        {
+            int step = PetGesture.PatStepMs / 8;
+            if (step < 120) step = 120;
+            return step;
+        }
+
         /// <summary>起长按计时器（每次按下）。</summary>
         private void StartHoldTimer()
         {
@@ -1316,9 +1580,7 @@ namespace DshZhuangFangyiPet
             // v10：用户关掉了长按摸头 → 根本不起计时器（见 LongPressEnabled 的说明）。
             if (!_longPressEnabled) return;
             _holdTimer = new DispatcherTimer(DispatcherPriority.Input);
-            // 检查间隔取 PatStepMs 的一半：间隔等于步长时，抖动会让某一级
-            // 被跳过（用户按住 1.2 秒只看到 1 级）。半速检查让每一级都稳。
-            _holdTimer.Interval = TimeSpan.FromMilliseconds(Math.Max(120, PetGesture.PatStepMs / 2));
+            _holdTimer.Interval = TimeSpan.FromMilliseconds(HoldTickIntervalMs());
             _holdTimer.Tick += OnHoldTick;
             _holdTimer.Start();
         }
@@ -1809,6 +2071,11 @@ namespace DshZhuangFangyiPet
             if (!_dragging) return;
             if (e.LeftButton != MouseButtonState.Pressed)
             {
+                // v13.1：这条路径**绕过** `OnMouseLeftButtonUp`（鼠标在窗口外松开、
+                // 或捕获丢失时，抬起事件根本不来，只能由移动事件发现"键已经不在了"）。
+                // 摸头的压扁动画在这里也必须收尾，否则她会一直扁着 ——
+                // 用户看到的是"她卡住了"，而不是"松手没反应"。
+                try { PatEndInvoked(); } catch { }
                 EndDrag();
                 return;
             }
@@ -1900,6 +2167,41 @@ namespace DshZhuangFangyiPet
             EndDrag();
             e.Handled = true;
 
+            // ⚠️ v13.1：摸头按住的收尾放在 `finally` 里，**不是**放在 Pat 分支里。
+            //
+            // 三个理由，每一个都是会出错的具体路径：
+            // ① 松手兜底（下面的 Pat 分支）会调 `PatInvoked` → `PlayPatHold`，
+            //    也就是说"手已经抬起来了，却又开始一次按住"。收尾必须排在它**之后**，
+            //    否则动画刚起就被收掉、或者反过来她一直扁着。
+            // ② Click / Fling 两个分支都是 `return`，收尾写在后面就永远不执行。
+            // ③ 用户可能"按住摸到 1 级 → 又拖走了"，那一按的 action 是 Drag，
+            //    但压扁动画已经在播了。
+            try
+            {
+                DispatchRelease(action, patLevel, speed);
+            }
+            finally
+            {
+                // `EndPatHold` 自己判"没在按住就直接返回"，所以无条件调用是安全的。
+                try { PatEndInvoked(); } catch { }
+            }
+        }
+
+        /// <summary>
+        /// 松手后的动作分发（v13.1 抽出，**事件处理器与自检同一条路径**）。
+        ///
+        /// ⚠️ 为什么必须抽出来（回滚验证 R10 抓到过）：
+        /// 原先这段逻辑**长在 `OnMouseLeftButtonUp` 里面**，而无头自检
+        /// 造不出真的鼠标抬起事件 —— 于是"兜底走的是瞬时戳还是按住"
+        /// **没有任何断言能发现**。我把兜底改回 `PatInvoked`（按住路径），
+        /// 自检**照样全绿**，而真机上那次反应会**完全看不见**
+        /// （动画刚起就被 `finally` 的 `EndPatHold` 按 1.0 收掉）。
+        ///
+        /// 这与 v12 的 `ResolveRelease`、v13 的 `HoldTickCore` 是同一个教训：
+        /// **判据/分发长在事件处理器里 = 无法被自检覆盖**。
+        /// </summary>
+        private void DispatchRelease(ReleaseAction action, int patLevel, double speed)
+        {
             if (action == ReleaseAction.Click)
             {
                 try { ClickInvoked(); } catch { }
@@ -1924,7 +2226,7 @@ namespace DshZhuangFangyiPet
             // 原先摸头**完全**由长按计时器驱动（`OnHoldTick`），而松手路径
             // 只处理 Click 与 Fling —— **没有 Pat 分支**。于是只要计时器没走成
             // （被漂移掐死、UI 线程被卡、消息循环刚好忙），`Classify` 明确判出
-            // `Pat`，却**没有任何人响应它**，用户松开手指什么都没有。
+            // `Pat`，却**没有任何人响应**，用户松开手指什么都没有。
             //
             // 这不是理论风险：`d6c5bbe` 加的引导气泡在教"按住"，
             // 而用户报"手势没法正常触发"里最先被验证的就是这条。
@@ -1934,7 +2236,13 @@ namespace DshZhuangFangyiPet
             if (action == ReleaseAction.Pat)
             {
                 PetLog.Info("长按摸头 → 第 " + patLevel + " 级（松手兜底：计时器未上报）");
-                try { PatInvoked(patLevel); } catch { }
+                // ⚠️ v13.1：兜底走 `PatBackstopInvoked`（瞬时戳），**不是**
+                // `PatInvoked`（按住加深）。差别是实打实的：
+                // 按下阶段根本没播过动画，而 `finally` 会立刻 `EndPatHold` ——
+                // 走"按住"那条路的话，动画刚起就被按当前值（还是 1.0）收掉
+                // → **用户什么都看不到**。旧代码在这条路径上是看得到的，
+                // 所以这是防一次静默退化。
+                try { PatBackstopInvoked(patLevel); } catch { }
             }
         }
 
@@ -1968,6 +2276,25 @@ namespace DshZhuangFangyiPet
         public Action FocusDshRequested = delegate { };
         /// <summary>task-6：双击本体（行为由 snapshot.settings.doubleClick 决定，Program 装配）。</summary>
         public Action DoubleClickInvoked = delegate { };
+        /// <summary>
+        /// v13.1：摸头**松手**（`PlayPatHold` 的配对收尾）。
+        ///
+        /// 与 `PatInvoked` 是两件事，**必须分开**：
+        /// · `PatInvoked` = "摸到了第几级" → 上报互动（有冷却、有日上限、只报一次）
+        /// · `PatEndInvoked` = "手抬起来了" → **纯动画收尾**（不上报、不计次）
+        ///
+        /// 合在一起的话，松手会被当成一次新的互动上报 ——
+        /// 而 `pat` 与 `pet-head` 共用冷却与递减（见 Host 的 `interactions.js`），
+        /// 一次按住就会把冷却刷两遍。
+        /// </summary>
+        public Action PatEndInvoked = delegate { };
+        /// <summary>
+        /// v13.1：摸头**松手兜底**（计时器没走成、松手时才补报）→ 瞬时戳一下。
+        ///
+        /// 与 `PatInvoked` 分开是必须的：那条路径按下期间没播过动画，
+        /// 用"按住加深"会被随后的 `EndPatHold` 立刻收掉（见 `PlayPatPoke`）。
+        /// </summary>
+        public Action<int> PatBackstopInvoked = delegate { };
         /// <summary>
         /// v9：**单击**本体（与拖动区分开）。
         ///

@@ -948,17 +948,49 @@ namespace DshZhuangFangyiPet
                   "⭐⭐ 坏坐标 → 什么都不做；坏速度不影响长按（长按不看速度）",
                   "NaN/±Inf/负时长 → Drag；坏速度+按住不动 → 仍是 Pat");
 
-            // (5) 长按分级：350ms 起第 1 级，每 600ms 一级，封顶 3 级
+            // (5) 长按分级：350ms 起第 1 级，每 PatStepMs 一级，封顶 3 级
+            //
+            // ⚠️ v13.1：步长 600 → 1200（用户："摸头的逐级反应太快了"）。
+            // 门槛随之变成 350 / 1550 / 2750。**不要**在这里写死 950/1550 ——
+            // 写死的话，以后调步长就要再来改一遍这些数字，而漏改一处就会
+            // 变成一条"永远绿"的假断言（它只验证我抄的数字对不对）。
+            // 所以边界值一律由常量**算**出来。
+            int lv1 = PetGesture.PatMinMs;                                  // 350
+            int lv2 = PetGesture.PatMinMs + PetGesture.PatStepMs;           // 1550
+            int lv3 = PetGesture.PatMinMs + PetGesture.PatStepMs * 2;       // 2750
             bool levelOk =
                 PetGesture.PatLevel(0) == 0 &&
-                PetGesture.PatLevel(349) == 0 &&
-                PetGesture.PatLevel(350) == 1 &&
-                PetGesture.PatLevel(949) == 1 &&
-                PetGesture.PatLevel(950) == 2 &&
-                PetGesture.PatLevel(1550) == 3 &&
+                PetGesture.PatLevel(lv1 - 1) == 0 &&
+                PetGesture.PatLevel(lv1) == 1 &&
+                PetGesture.PatLevel(lv2 - 1) == 1 &&
+                PetGesture.PatLevel(lv2) == 2 &&
+                PetGesture.PatLevel(lv3) == 3 &&
                 PetGesture.PatLevel(99999) == 3;
-            Check(levelOk, "长按分级：350ms 起 1 级、每 600ms 升一级、封顶 3 级",
-                  "0/349→0；350/949→1；950→2；1550+→3");
+            Check(levelOk, "长按分级：350ms 起 1 级、每 " + PetGesture.PatStepMs + "ms 升一级、封顶 3 级",
+                  "0/" + (lv1 - 1) + "→0；" + lv1 + "/" + (lv2 - 1) + "→1；" + lv2 + "→2；" + lv3 + "+→3");
+
+            // (5b) ⭐⭐ v13.1：**节奏窗口必须容得下最后一级**。
+            //
+            // `PatMaxMs` 是"再久也不升级"的上限，而第 3 级的门槛是
+            // `PatMinMs + 2×PatStepMs`。两者一旦倒挂（步长太大 / 上限太小），
+            // 第 3 级就**永远到不了** —— 而且不会有任何报错，只是"三级反应
+            // 从来没见过"。用户这次要我把步长调慢，正是最容易踩到它的改动：
+            // 1200×2+350 = 2750，离 4000 只剩 1.25 秒余量，再调大就危险了。
+            int needMs = PetGesture.PatMinMs + PetGesture.PatStepMs * (PetGesture.PatMaxLevels - 1);
+            Check(needMs <= PetGesture.PatMaxMs,
+                  "⭐⭐ 节奏窗口容得下最后一级（PatMaxMs ≥ 第 3 级门槛）",
+                  "需要 " + needMs + "ms ≤ 上限 " + PetGesture.PatMaxMs + "ms（余量 " +
+                  (PetGesture.PatMaxMs - needMs) + "ms）");
+
+            // (5c) ⭐⭐ v13.1：三级之间**不能挤在一起**（这正是用户报的问题）。
+            //
+            // 这条断言防的是"把步长又调回去"：600ms 一级时三级在 1.55 秒内
+            // 全部走完，人眼还没看清第 1 级就已经是第 3 级了。
+            // 1.0 秒是下限取法：低于它，三级仍然是一个连续动作而不是三次反应。
+            Check(PetGesture.PatStepMs >= 1000,
+                  "⭐⭐ 每一级之间留得下「看清反应」的时间（用户报过'逐级反应太快'）",
+                  "步长 " + PetGesture.PatStepMs + "ms ≥ 1000ms；三级铺开 " +
+                  (PetGesture.PatStepMs * 2) + "ms");
 
             // (6) ⭐⭐ 抛掷轨迹**绝不飞出工作区**（这类动画最典型的缺陷）
             FlingPlan p = PetGesture.PlanFling(500, 400, 3000, 0, 0, 0, 800, 600);
@@ -3052,8 +3084,11 @@ namespace DshZhuangFangyiPet
                 w.DiagMoveAt(30, 0, 950);                  // 抖出去
                 w.DiagMoveAt(0, 0, 1000);                  // 稳回来
                 int lvlAfterShake = w.DiagPatLevelReported;
-                // 重新静满：从 1000ms 起算，第 2 级要到 PatMinMs+PatStepMs=950ms → 1950ms
-                bool reTick = w.DiagHoldTick(1950);
+                // 重新静满：从 1000ms 起算，第 2 级要到 PatMinMs+PatStepMs=1550ms → 2550ms
+                // ⚠️ v13.1：这个值必须跟着 PatStepMs 走（600 时是 1950），
+                // 写死的话调步长就会变成一条假断言。
+                int reTickAt = 1000 + PetGesture.PatMinMs + PetGesture.PatStepMs;
+                bool reTick = w.DiagHoldTick(reTickAt);
                 Check(firstTick && lvlAfterShake == 1 && reTick && w.DiagPatLevelReported == 2,
                       "⭐⭐⭐ 接线：抖动不重置已报级数（重新静满只升到第 2 级，不能刷级）",
                       "首报=" + firstTick + " 抖动后级别=" + lvlAfterShake +
@@ -4001,6 +4036,233 @@ namespace DshZhuangFangyiPet
                           "摸头分级：级数越高压得越深（3 级 vs 单击）",
                           "摸头3级 最深 scale=" + patDeep.ToString("0.###") +
                           " 单击 最深 scale=" + clickShallow.ToString("0.###"));
+                    anim.ResetReact();
+
+                    // ── (5b) ⭐⭐⭐⭐ v13.1 摸头过渡动画：**按住不回弹、逐级加深、松手才弹回** ──
+                    //
+                    // 用户报"摸头的逐级反应太快了"并明确要求"加上过渡动画"。
+                    // 这两件事是同一个缺陷的两面：原先每升一级都调 `PlayReact`，
+                    // 而它**先 `ResetReact()` 弹回 1.0** —— 于是 1/2/3 级看起来
+                    // 是三次一模一样的戳，用户既看不出"越摸越深"，也来不及看清
+                    // 每一级（三级挤在 1.55 秒里）。
+                    //
+                    // 回滚验证要点：把 `PlayPatHold` 换回 `PlayReact` 那种
+                    // "先复位再压"的写法，下面"按住期间不回弹"那条必须变红。
+                    anim.ResetReact();
+                    anim.PlayPatHold(1);
+                    Pump(PetWindow.PatPressMs + 40);
+                    double afterLv1 = anim.DiagReactScaleX;
+                    bool holding1 = anim.DiagPatHolding;
+
+                    // 升到 3 级：**从当前值继续加深**，中途不得弹回 1.0
+                    anim.PlayPatHold(3);
+                    // ⚠️ 起点取**当前**值（≈0.93），不能初始化成 1.0 ——
+                    // 那样 `s > shallowest` 永远不成立，这条断言就变成"永远绿"
+                    // （实测踩过：初始化 1.0 时最浅恒等于 1.0，看起来像"每级都弹回了"，
+                    //  实际是断言自己写坏了）。
+                    double shallowest = anim.DiagReactScaleX;
+                    int pressSlice = Math.Max(8, PetWindow.PatPressMs / 8);
+                    for (int i = 0; i < 8; i++)
+                    {
+                        Pump(pressSlice);
+                        double s = anim.DiagReactScaleX;
+                        if (s > shallowest) shallowest = s;   // 记录"最浅"的一帧
+                    }
+                    double afterLv3 = anim.DiagReactScaleX;
+
+                    // 核心断言①：逐级加深（3 级比 1 级更深）
+                    bool deeper = afterLv3 < afterLv1 - 0.005;
+                    // 核心断言②：按住期间**从不回弹**到 1.0
+                    // （回弹的话 shallowest 会接近 1.0；从当前值起算则始终 < 1.0）
+                    bool neverBounces = shallowest < 1.0 - 0.005;
+                    Check(holding1 && deeper && neverBounces,
+                          "⭐⭐⭐⭐ 摸头过渡动画：按住逐级加深、**中途不回弹**、结束时停在深度上",
+                          "1级后 scale=" + afterLv1.ToString("0.###") +
+                          " → 3级后 scale=" + afterLv3.ToString("0.###") +
+                          " 按住期间最浅 scale=" + shallowest.ToString("0.###") +
+                          "（若≈1.0 说明每级都弹回了 = 三次一样的戳）");
+
+                    // 核心断言③：松手**平滑弹回**（而不是"啪"地跳回去）
+                    anim.EndPatHold();
+                    bool released = !anim.DiagPatHolding;
+                    // 中途必须还在回来的路上（0 < 深度 < 松手时的深度）
+                    Pump(PetWindow.PatReleaseMs / 2);
+                    double midRelease = anim.DiagReactScaleX;
+                    bool midWayBack = midRelease > afterLv3 && midRelease < 1.0;
+                    Pump(PetWindow.PatReleaseMs + 60);
+                    bool settled = Math.Abs(anim.DiagReactScaleX - 1.0) < 0.02 &&
+                                   Math.Abs(anim.DiagReactShiftY) < 0.02;
+                    Check(released && midWayBack && settled,
+                          "⭐⭐⭐ 摸头松手：平滑弹回（中途在路上，最终归位 1.0）",
+                          "松手后中途 scale=" + midRelease.ToString("0.###") +
+                          "（应介于 " + afterLv3.ToString("0.###") + " 与 1.0 之间）" +
+                          " 最终 scale=" + anim.DiagReactScaleX.ToString("0.###"));
+
+                    // 核心断言④：只缩不放 —— 按住全程 scale ≤ 1.0（冻结约束）
+                    Check(afterLv3 <= 1.0001 && shallowest <= 1.0001 && midRelease <= 1.0001,
+                          "⭐⭐ 摸头过渡动画同样**只缩不放**（满幅素材不得溢出窗口）",
+                          "1级=" + afterLv1.ToString("0.###") + " 3级=" + afterLv3.ToString("0.###") +
+                          " 松手中途=" + midRelease.ToString("0.###"));
+
+                    // 核心断言⑤：`ResetReact` 必须清掉"按住"状态。
+                    // 不清的话，下一次按下会走"只加深不回浅"的分支 → 目标被夹到
+                    // 当前值 → 她**再也不会压下去**（拖动/抛掷后残留就是这种表现）。
+                    //
+                    // ⚠️ 必须先**真的进入按住**再复位。回滚验证 R5 抓到过：
+                    // 我原来直接 `ResetReact()` 就查 `!DiagPatHolding` ——
+                    // 而前一条断言末尾的 `EndPatHold()` 早就把标志清掉了，
+                    // 于是"复位清标志"这条**永远为真**，回滚照样全绿。
+                    anim.ResetReact();
+                    anim.PlayPatHold(1);
+                    Pump(PetWindow.PatPressMs + 40);
+                    bool holdingBeforeReset = anim.DiagPatHolding;
+                    anim.ResetReact();
+                    bool clearedByReset = !anim.DiagPatHolding;
+                    anim.PlayPatHold(3);
+                    Pump(PetWindow.PatPressMs + 40);
+                    bool pressAfterReset = anim.DiagReactScaleX < 1.0 - 0.005;
+                    Check(holdingBeforeReset && clearedByReset && pressAfterReset,
+                          "⭐⭐ 复位清掉按住状态（否则下次按下永远压不下去）",
+                          "复位前按住中=" + holdingBeforeReset +
+                          " 复位后按住中=" + anim.DiagPatHolding +
+                          " 复位后再按 scale=" + anim.DiagReactScaleX.ToString("0.###"));
+
+                    // 核心断言⑥：按住期间**只加深、不回浅**。
+                    //
+                    // 手抖时 `HoldTickCore` 可能给出**更低**的级数，若照着它压回去，
+                    // 她会在一按之内忽深忽浅地抖。回滚验证 R4 抓到过：
+                    // 我原来只测 1→3（一路加深），"不回浅"的保护**从来没被触发**。
+                    anim.ResetReact();
+                    anim.PlayPatHold(3);
+                    Pump(PetWindow.PatPressMs + 40);
+                    double deepScale = anim.DiagReactScaleX;
+                    anim.PlayPatHold(1);      // 抖动 → 浅目标
+                    Pump(PetWindow.PatPressMs + 40);
+                    double afterShallowAsk = anim.DiagReactScaleX;
+                    Check(afterShallowAsk <= deepScale + 0.005,
+                          "⭐⭐ 按住期间只加深不回浅（抖动给出浅目标时不许弹回来）",
+                          "3级深=" + deepScale.ToString("0.###") +
+                          " → 再来个1级目标后=" + afterShallowAsk.ToString("0.###") +
+                          "（不得变浅）");
+                    anim.EndPatHold();
+                    Pump(PetWindow.PatReleaseMs + 40);
+
+                    // 核心断言⑦：**没按住时松手是安全的空操作**（不能把 scale 弄坏）。
+                    // `OnMouseLeftButtonUp` 的 finally 是无条件调用的。
+                    anim.ResetReact();
+                    anim.EndPatHold();
+                    Pump(PetWindow.PatReleaseMs + 40);
+                    bool idleSafe = Math.Abs(anim.DiagReactScaleX - 1.0) < 0.02 &&
+                                    !anim.DiagPatHolding;
+                    Check(idleSafe, "未按住时松手 = 安全空操作（松手路径是无条件调用的）",
+                          "scale=" + anim.DiagReactScaleX.ToString("0.###") +
+                          " 按住中=" + anim.DiagPatHolding);
+
+                    // 核心断言⑧：`PlayReact("pat")` 必须**转发**到瞬时戳那套，
+                    // 不许自己再写一份分级。
+                    //
+                    // ⚠️ 回滚验证 R7 抓到过：我在 `PlayReact("pat")` 里**又写了一套**
+                    // 0.6/0.8/1.0 的分级（平行拷贝），自检**照样全绿** ——
+                    // 因为上面所有断言都直接调摸头那套，没有一条碰 `PlayReact`。
+                    // 这正是 v12 犯过的"断言测拷贝、产品走原件"。
+                    //
+                    // ⚠️ 判据用**入口计数**而不是动画深度：深度是结果，
+                    // 平行拷贝也能压出一样的深度（我第一版用深度判，回滚照样绿）。
+                    // 计数直接看"到底走了哪个入口"。
+                    int pokeBefore = anim.DiagPokeCount;
+                    anim.ResetReact();
+                    anim.PlayReact("pat", 3);
+                    bool forwardedToPoke = anim.DiagPokeCount == pokeBefore + 1;
+                    Check(forwardedToPoke,
+                          "⭐⭐⭐ PlayReact(\"pat\") 转发到瞬时戳（不留第二套分级实现）",
+                          "戳计数 " + pokeBefore + " → " + anim.DiagPokeCount +
+                          "（平行拷贝时不变）");
+
+                    // 核心断言⑨：**松手兜底**必须走瞬时戳，且真的看得见。
+                    //
+                    // ⚠️ 这是我本轮差点漏掉的一条真实路径（自检先于用户发现）：
+                    // 兜底时按下阶段没播过动画，若照搬"按住加深"，
+                    // `finally` 里的 `EndPatHold` 会立刻把它按当前值（1.0）收掉
+                    // → 动画退化成 1.0→1.0 → **她完全不动**，而互动照旧上报。
+                    // 手势"有效但没反应"是最难查的一类 bug。
+                    //
+                    // 判据：戳完必须**看不到按住状态**（它是一次性的），
+                    // 但动画期间**真的离开过 1.0**（看得见）。
+                    anim.ResetReact();
+                    anim.PlayPatPoke(1);
+                    bool pokeNotHolding = !anim.DiagPatHolding;
+                    double pokeDeep = SampleMinScale(anim, PetWindow.ReactMs + 40);
+                    bool pokeVisible = pokeDeep < 1.0 - 0.005;
+                    bool pokeSettled = Math.Abs(anim.DiagReactScaleX - 1.0) < 0.02;
+                    Check(pokeNotHolding && pokeVisible && pokeSettled,
+                          "⭐⭐⭐ 松手兜底：瞬时戳一下（看得见，且不进入按住状态）",
+                          "按住中=" + pokeNotHolding + " 最深 scale=" + pokeDeep.ToString("0.###") +
+                          " 结束 scale=" + anim.DiagReactScaleX.ToString("0.###"));
+
+                    // 核心断言⑩：兜底戳**紧接着**收尾也不会被吃掉。
+                    // 这正是产品里的真实顺序：`PatBackstopInvoked` 之后
+                    // `finally` 立刻 `EndPatHold`。
+                    anim.ResetReact();
+                    anim.PlayPatPoke(2);
+                    anim.EndPatHold();          // 同一轮立刻收尾（产品就是这样）
+                    double pokeAfterEnd = SampleMinScale(anim, PetWindow.ReactMs + 40);
+                    Check(pokeAfterEnd < 1.0 - 0.005,
+                          "⭐⭐⭐ 兜底戳后立刻收尾，反应仍然看得见（防静默退化）",
+                          "最深 scale=" + pokeAfterEnd.ToString("0.###") +
+                          "（若≈1.0 说明被 EndPatHold 吃掉了 = 她不动）");
+
+                    // 核心断言⑪：分级表是**同一张**（按住与兜底不得各写一套）。
+                    Check(PetWindow.PatDepthMul(1) < PetWindow.PatDepthMul(2) &&
+                          PetWindow.PatDepthMul(2) < PetWindow.PatDepthMul(3),
+                          "⭐⭐ 摸头分级表单调递增（1<2<3 级越摸越深）",
+                          "1级=" + PetWindow.PatDepthMul(1).ToString("0.##") +
+                          " 2级=" + PetWindow.PatDepthMul(2).ToString("0.##") +
+                          " 3级=" + PetWindow.PatDepthMul(3).ToString("0.##"));
+
+                    // 核心断言⑫：检查间隔必须**跟得上**步长（每级最多晚一点）
+                    int tickMs = PetWindow.HoldTickIntervalMs();
+                    Check(tickMs <= PetGesture.PatStepMs / 4,
+                          "⭐⭐ 长按检查间隔跟得上步长（否则每级都要多等一会儿才报）",
+                          "间隔 " + tickMs + "ms ≤ 步长 " + PetGesture.PatStepMs + "ms 的 1/4");
+                    anim.ResetReact();
+
+                    // ── (5c) ⭐⭐⭐⭐ v13.1 松手**兜底**必须走真实的 `DispatchRelease` ──
+                    //
+                    // ⚠️ 这条断言是回滚验证 R10 逼出来的：我原来只直接调
+                    // `PlayPatPoke` 验证"戳看得见"，而**分发本身**（兜底到底调
+                    // 哪个回调）长在 `OnMouseLeftButtonUp` 里，无头自检碰不到。
+                    // 于是我把兜底改回"按住"路径，自检**全绿** ——
+                    // 而真机上那次反应完全看不见（刚起就被 `EndPatHold` 收掉）。
+                    //
+                    // ⚠️ 判据为什么用"两个回调各自计数"（而不是 `DiagPokeCount`）：
+                    // 自检是**直接 new PetWindow**，`Program` 的装配没挂上，
+                    // 所以 `PatBackstopInvoked` 还是默认空委托 —— 我第一版
+                    // 直接数 `DiagPokeCount`，计数纹丝不动，**产品是对的却报红**。
+                    // 改成"接管两个回调、看哪个被调用"：这正好是
+                    // `DispatchRelease` **自己**的职责（路由），测得更准。
+                    int backstopGot = 0;
+                    int holdGot = 0;
+                    anim.PatBackstopInvoked = delegate(int lv) { backstopGot = lv; };
+                    anim.PatInvoked = delegate(int lv) { holdGot = lv; };
+                    anim.DiagDispatchRelease("pat", 1);
+                    bool routedToBackstop = backstopGot == 1 && holdGot == 0;
+                    Check(routedToBackstop,
+                          "⭐⭐⭐⭐ 松手兜底路由到瞬时戳回调（不是按住回调）",
+                          "兜底回调收到=" + backstopGot + " 按住回调收到=" + holdGot +
+                          "（改回按住路径时两者互换 → 真机上她不动）");
+
+                    // 产品顺序：分发之后**立刻**收尾（`finally` 里的 `EndPatHold`）。
+                    // 这里补上"戳 + 立刻收尾"仍然看得见 —— 那是 R10 的真实后果。
+                    anim.ResetReact();
+                    anim.PlayPatPoke(1);
+                    anim.EndPatHold();
+                    double backstopVisible = SampleMinScale(anim, PetWindow.ReactMs + 40);
+                    Check(backstopVisible < 1.0 - 0.005,
+                          "⭐⭐⭐ 兜底戳 + 立刻收尾仍看得见（防「手势有效但没反应」）",
+                          "最深 scale=" + backstopVisible.ToString("0.###") +
+                          "（走按住路径时会被 EndPatHold 收成 1.0）");
+                    anim.PatBackstopInvoked = delegate { };
+                    anim.PatInvoked = delegate { };
                     anim.ResetReact();
                 }
                 finally
