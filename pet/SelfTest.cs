@@ -3942,6 +3942,89 @@ namespace DshZhuangFangyiPet
                           "⭐⭐ 换素材清掉上一张的圆角（抠图绝不被切角）",
                           cutDetail);
 
+                    // ── (3a) ⭐⭐⭐⭐ v13.2 换素材的**交叉淡出**（用户："切换的时候
+                    //      就一下子消失，又出现一个新的，能不能有点过渡"）──
+                    //
+                    // 核心判据是"**中间不空白**"：换的那一瞬间，
+                    // 新图必须**立刻**可见，同时旧图作为残影还在淡出。
+                    // 全程至少有一张图看得见 —— 这正是"硬切"与"过渡"的区别。
+                    //
+                    // ⚠️ 回滚验证要点：把 `BeginSpriteCrossFade()` 去掉（回到硬切），
+                    // 下面"残影在淡出"那条必须变红；只留下"新图可见"会**照样全绿**
+                    //（硬切时新图当然也是立刻可见的）—— 所以两条要一起断言。
+                    win.ResetReact();
+                    win.DiagForceSheet(full);          // 先有一张"当前图"
+                    Pump(60);
+                    win.DiagForceSheet(cut);           // 换素材 → 应当交叉淡出
+                    // 换完立刻取（不 Pump）：这一刻新图必须已经可见
+                    bool newVisibleAtOnce = win.DiagImageSourcePresent;
+                    bool ghostFading = win.DiagGhostFading;
+                    bool ghostHasSource = win.DiagGhostSource != null;
+                    bool ghostNotHitTest = !win.DiagGhostHitTestVisible;
+                    string fadeDetail =
+                        "换后新图可见=" + newVisibleAtOnce + "（必须 true，否则中间空白）" +
+                        " 残影在淡出=" + ghostFading + " 残影有图=" + ghostHasSource +
+                        " 残影不抢鼠标=" + ghostNotHitTest;
+                    Check(newVisibleAtOnce && ghostFading && ghostHasSource && ghostNotHitTest,
+                          "⭐⭐⭐⭐ 换素材是**交叉淡出**：新图立刻可见 + 旧图留作残影淡出",
+                          fadeDetail);
+
+                    // 淡出结束后残影必须**彻底清掉**（不攥着旧图、不残留半透明层）
+                    Pump(PetWindow.SpriteFadeMs + 120);
+                    bool ghostCleared = win.DiagGhostSource == null &&
+                                        Math.Abs(win.DiagGhostOpacity) < 0.02 &&
+                                        !win.DiagGhostFading;
+                    Check(ghostCleared,
+                          "⭐⭐ 淡出结束后残影清空（不残留旧图 / 不挡住新图）",
+                          "残影图=" + (win.DiagGhostSource == null ? "null" : "有") +
+                          " 不透明度=" + win.DiagGhostOpacity.ToString("0.###") +
+                          " 淡出中=" + win.DiagGhostFading);
+
+                    // 残影的圆角必须**按自己的尺寸**算（换素材时窗口尺寸会变，
+                    // 实测 working-writing 是 266×256、其余 256×256）
+                    win.DiagForceSheet(full);          // 满幅 → 残影应有圆角
+                    Pump(60);
+                    win.DiagForceSheet(cut);
+                    bool ghostClippedForPlated = win.DiagGhostHasClip;
+                    Pump(PetWindow.SpriteFadeMs + 120);
+                    win.DiagForceSheet(cut);           // 抠图 → 残影**不该**有圆角
+                    Pump(60);
+                    win.DiagForceSheet(full);
+                    bool ghostNotClippedForCut = !win.DiagGhostHasClip;
+                    Check(ghostClippedForPlated && ghostNotClippedForCut,
+                          "⭐⭐ 残影的圆角跟着**旧图**走（满幅裁、抠图不裁）",
+                          "满幅残影有裁剪=" + ghostClippedForPlated +
+                          " 抠图残影有裁剪=" + ghostNotClippedForCut);
+                    Pump(PetWindow.SpriteFadeMs + 120);
+
+                    // 连续快速换素材（状态抖动）：**过期回调不得提前掐断新残影**。
+                    //
+                    // ⚠️ 判据为什么用**清除计数**而不是最终状态（回滚验证 R5 抓到）：
+                    // 我原来只看"最后残影有没有清干净"，而有没有代次保护、
+                    // 最终**都是清干净的** → 判据不区分 → R5 必然 GREEN。
+                    // 真正要防的是"过期的 `Completed` 提前把新一代残影清掉"
+                    // （用户看到残影淡到一半突然没了）—— 那是**清了几次**的差别。
+                    // 一次抖动里只该清 1 次（最后那次的 Completed）。
+                    win.DiagForceSheet(full);
+                    Pump(30);
+                    win.DiagForceSheet(cut);
+                    Pump(30);
+                    win.DiagForceSheet(full);
+                    Pump(30);
+                    win.DiagForceSheet(cut);
+                    int clearsBefore = win.DiagGhostClearedCount;
+                    bool burstFading = win.DiagGhostFading;
+                    Pump(PetWindow.SpriteFadeMs + 200);
+                    int clearsAfter = win.DiagGhostClearedCount - clearsBefore;
+                    bool burstSettled = win.DiagGhostSource == null &&
+                                        Math.Abs(win.DiagGhostOpacity) < 0.02;
+                    Check(burstFading && burstSettled && clearsAfter == 1,
+                          "⭐⭐ 连续换素材：过期回调不掐断新残影（一次抖动只清 1 次）",
+                          "抖动中在淡出=" + burstFading +
+                          " 结束后清除次数=" + clearsAfter + "（应为 1；" +
+                          "过期回调也生效时会 >1，残影会淡到一半消失）" +
+                          " 残影图=" + (win.DiagGhostSource == null ? "null" : "有"));
+
                     // ── (3b) 真实素材：`thinking` 必须是满幅、`idle` 必须不是 ──
                 //
                 // 合成素材只证明"判据能区分两端"；**用户看到的方块是真实素材**，
@@ -4083,26 +4166,39 @@ namespace DshZhuangFangyiPet
                           "（若≈1.0 说明每级都弹回了 = 三次一样的戳）");
 
                     // 核心断言③：松手**平滑弹回**（而不是"啪"地跳回去）
+                    //
+                    // ⚠️ 判据必须**确定性**，不能卡时间点采样。
+                    // v13.1 我原来用 `Pump(PatReleaseMs/2)` 取动画中点，而 `Pump`
+                    // 是墙钟计时 —— 调度器一忙，150ms 的泵可能实际跑 400ms，
+                    // 动画早已结束并归位 1.0 → 断言**偶发变红**（实测 300/1，
+                    // 重跑两次又全绿）。会随机变红的断言比没有断言更糟：
+                    // 它会训练人忽略红色。
+                    //
+                    // 现在改判两件确定性的事：
+                    //  ① 松手瞬间**挂着动画时钟**（`HasAnimatedProperties`）——
+                    //     证明真的起了"弹回"动画，而不是瞬间赋值跳回去；
+                    //  ② 松手瞬间**还停在深处**（没被直接置成 1.0）。
                     anim.EndPatHold();
                     bool released = !anim.DiagPatHolding;
-                    // 中途必须还在回来的路上（0 < 深度 < 松手时的深度）
-                    Pump(PetWindow.PatReleaseMs / 2);
-                    double midRelease = anim.DiagReactScaleX;
-                    bool midWayBack = midRelease > afterLv3 && midRelease < 1.0;
-                    Pump(PetWindow.PatReleaseMs + 60);
+                    bool releaseAnimating = anim.DiagReactAnimating;
+                    double atRelease = anim.DiagReactScaleX;
+                    bool notSnapped = atRelease < 1.0 - 0.005;
+                    // 跑完整个动画后必须归位
+                    Pump(PetWindow.PatReleaseMs + 120);
                     bool settled = Math.Abs(anim.DiagReactScaleX - 1.0) < 0.02 &&
                                    Math.Abs(anim.DiagReactShiftY) < 0.02;
-                    Check(released && midWayBack && settled,
-                          "⭐⭐⭐ 摸头松手：平滑弹回（中途在路上，最终归位 1.0）",
-                          "松手后中途 scale=" + midRelease.ToString("0.###") +
-                          "（应介于 " + afterLv3.ToString("0.###") + " 与 1.0 之间）" +
+                    Check(released && releaseAnimating && notSnapped && settled,
+                          "⭐⭐⭐ 摸头松手：起弹回动画（非瞬跳），最终归位 1.0",
+                          "松手=" + released + " 挂着动画=" + releaseAnimating +
+                          " 松手瞬间 scale=" + atRelease.ToString("0.###") +
+                          "（必须 <1.0，瞬跳会是 1.0）" +
                           " 最终 scale=" + anim.DiagReactScaleX.ToString("0.###"));
 
                     // 核心断言④：只缩不放 —— 按住全程 scale ≤ 1.0（冻结约束）
-                    Check(afterLv3 <= 1.0001 && shallowest <= 1.0001 && midRelease <= 1.0001,
+                    Check(afterLv3 <= 1.0001 && shallowest <= 1.0001 && atRelease <= 1.0001,
                           "⭐⭐ 摸头过渡动画同样**只缩不放**（满幅素材不得溢出窗口）",
                           "1级=" + afterLv1.ToString("0.###") + " 3级=" + afterLv3.ToString("0.###") +
-                          " 松手中途=" + midRelease.ToString("0.###"));
+                          " 松手瞬间=" + atRelease.ToString("0.###"));
 
                     // 核心断言⑤：`ResetReact` 必须清掉"按住"状态。
                     // 不清的话，下一次按下会走"只加深不回浅"的分支 → 目标被夹到

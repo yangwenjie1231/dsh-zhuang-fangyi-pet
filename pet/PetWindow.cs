@@ -114,6 +114,35 @@ namespace DshZhuangFangyiPet
             _image.RenderTransform = react;
             _root.Children.Add(_image);
 
+            // v13.2：**残影层**（换素材的过渡）。
+            //
+            // 用户："切换的时候就一下子消失，又出现一个新的，能不能有点过渡"。
+            // 原先是硬切（直接换 `_image.Source`）—— 旧图瞬间没了、新图瞬间出现。
+            //
+            // 所以这里加一层：换素材时把**旧图**放上来淡出，新图同时在下面
+            // 立刻可见。全程两张都在，**中间不出现空白**。
+            //
+            // ⚠️ 为什么不是"先淡出再淡入"：那正是用户抱怨的那个现象
+            // （中间有一段什么都没有）。交叉淡出才是"过渡"。
+            //
+            // 放在 `_image` **之后** → z 序在新图之上（残影盖着新图淡走），
+            // 但在 `_fallback` / `_sendBtn` 之前 → 不会盖住兜底块与 ✎ 按钮。
+            _ghost = new Image();
+            _ghost.Stretch = Stretch.Fill;
+            _ghost.HorizontalAlignment = HorizontalAlignment.Stretch;
+            _ghost.VerticalAlignment = VerticalAlignment.Stretch;
+            _ghost.IsHitTestVisible = false;      // 纯视觉层，绝不抢鼠标
+            _ghost.Opacity = 0;
+            RenderOptions.SetBitmapScalingMode(_ghost, BitmapScalingMode.HighQuality);
+            // 与 `_image` **共用同一个变换实例**：反应动画（点击/摸头的抖动）
+            // 播放期间换素材时，残影与新图必须一起抖，否则会看到两层错位。
+            _ghost.RenderTransformOrigin = new Point(0.5, 1.0);
+            _ghost.RenderTransform = react;
+            // 残影的圆角按**它自己**的尺寸算（见 `UpdateGhostClip` 的说明：
+            // 换素材时窗口尺寸会变，照抄旧 Clip 会切错位置）。
+            _ghost.SizeChanged += OnGhostSizeChanged;
+            _root.Children.Add(_ghost);
+
             _fallbackText = new TextBlock();
             _fallbackText.Text = "庄方宜\n(素材加载中)";
             _fallbackText.Foreground = Brushes.White;
@@ -379,6 +408,9 @@ namespace DshZhuangFangyiPet
         {
             string want = _state;
 
+            // v13.2：换素材前先把**当前这张**留成残影（见 `_ghost` 的说明）。
+            BeginSpriteCrossFade();
+
             // 契约 §4：清单若已给出 frameWidth/frameHeight，先把窗口摆到目标尺寸再解码，
             // 避免「先兜底尺寸、解码后再跳一下」的首帧闪动。
             int dw, dh;
@@ -410,6 +442,154 @@ namespace DshZhuangFangyiPet
             ResetReact();
             RestartTimer();
         }
+
+        // ------------------------------------------------------------------
+        // v13.2：换素材的交叉淡出
+        // ------------------------------------------------------------------
+
+        /// <summary>残影层（上一张素材）。见构造函数里的说明。</summary>
+        private Image _ghost;
+
+        /// <summary>交叉淡出的时长（ms）。</summary>
+        ///
+        /// 180 的取法：与气泡的 `FadeIn`(180) 同一量级 —— 短到"切换跟手"，
+        /// 长到眼睛能看出是渐变而不是硬切。再长（>300ms）会显得拖沓，
+        /// 状态频繁切换时（idle↔thinking）还会叠着看不清。
+        internal const int SpriteFadeMs = 180;
+
+        /// <summary>残影淡出的**代次**：防止旧动画的 `Completed` 清掉新残影。</summary>
+        private int _ghostGen;
+
+        /// <summary>残影是否要圆角（= 旧图是不是满幅卡片）。</summary>
+        private bool _ghostPlated;
+
+        private void OnGhostSizeChanged(object sender, SizeChangedEventArgs e)
+        {
+            if (_ghostPlated) UpdateGhostClip();
+        }
+
+        /// <summary>
+        /// 按**残影自己的**渲染尺寸刷新圆角（与 `UpdatePlatedClip` 同一套做法）。
+        ///
+        /// ⚠️ 为什么不直接抄 `_image.Clip`：`Clip` 是**元素局部坐标**里的几何，
+        /// 而残影铺满的是换素材**之后**的窗口尺寸。实测 `working-writing` 是
+        /// 266×256、其余是 256×256 —— 尺寸一变，照抄的矩形就对不上，
+        /// 圆角会切在错的位置（切不到角，或切进画面里）。
+        /// </summary>
+        private void UpdateGhostClip()
+        {
+            try
+            {
+                if (_ghost == null) return;
+                if (!_ghostPlated) { _ghost.Clip = null; return; }
+                double w = _ghost.ActualWidth, h = _ghost.ActualHeight;
+                if (w <= 0 || h <= 0)
+                {
+                    Size want = _ghost.DesiredSize;
+                    w = want.Width; h = want.Height;
+                }
+                if (w <= 0 || h <= 0) return;   // 还没排布，等 SizeChanged
+                double r = SpriteSheet.PlatedCornerRadiusDip(w);
+                double limit = Math.Min(w, h) / 2;
+                if (r > limit) r = limit;
+                _ghost.Clip = new RectangleGeometry(new Rect(0, 0, w, h), r, r);
+            }
+            catch { }
+        }
+
+        /// <summary>诊断用：残影是否挂着圆角裁剪。</summary>
+        internal bool DiagGhostHasClip
+        {
+            get
+            {
+                RectangleGeometry rg = _ghost == null ? null : _ghost.Clip as RectangleGeometry;
+                return rg != null && rg.RadiusX > 0.5;
+            }
+        }
+
+        /// <summary>是否正在淡出（诊断用；`Completed` 后归 false）。</summary>
+        private bool _ghostFading;
+
+        /// <summary>残影被**真正清除**过几次（诊断用；过期回调不算）。</summary>
+        private int _ghostClearedCount;
+
+        /// <summary>
+        /// 诊断用：残影被真正清除过几次。
+        ///
+        /// 一次"换素材抖动"里应当只清 **1** 次（最后那次动画的 `Completed`）。
+        /// 若过期的 `Completed` 也生效，就会提前多清一次 ——
+        /// 用户看到的是"残影淡到一半突然没了"。
+        /// </summary>
+        internal int DiagGhostClearedCount { get { return _ghostClearedCount; } }
+
+        /// <summary>
+        /// 把当前显示的图留成残影并淡出（v13.2）。
+        ///
+        /// ⚠️ 连续快速换素材（状态抖动）时必须**重启**而不是叠加：
+        /// 残影只有一层，新的换素材直接把它换成"刚刚那张"并重新计时，
+        /// 更早的残影丢弃 —— 否则会攒出一串越拖越久的旧图。
+        /// </summary>
+        private void BeginSpriteCrossFade()
+        {
+            try
+            {
+                if (_ghost == null) return;
+                // 没有可淡出的旧图（首次加载 / 兜底态）→ 不需要过渡。
+                if (_image == null || _image.Source == null) return;
+
+                // 代次 +1：上一次淡出的 `Completed` 会看到自己过期而直接返回，
+                // 不会把这一张刚设好的残影清掉（这是我第一版会踩的竞态）。
+                _ghostGen++;
+                int gen = _ghostGen;
+
+                _ghost.BeginAnimation(OpacityProperty, null);
+                _ghost.Source = _image.Source;
+                // 圆角裁剪要**跟着残影走**：旧图若是满幅卡片，淡出时四角仍应是圆的；
+                // 旧图若是抠图，则不能带裁剪（否则会切到她的头发）。
+                // ⚠️ 这里记的是**布尔**（旧图要不要圆角），不是 `_image.Clip` 那个
+                // 几何 —— 几何是局部坐标的，而残影铺满的是**新**窗口尺寸，
+                // 两者对不上就会切错位置（见 `UpdateGhostClip`）。
+                _ghostPlated = (_sheet != null && _sheet.IsPlated);
+                UpdateGhostClip();
+                _ghost.Opacity = 1.0;
+
+                DoubleAnimation a = new DoubleAnimation(1.0, 0.0,
+                    TimeSpan.FromMilliseconds(SpriteFadeMs));
+                a.FillBehavior = FillBehavior.HoldEnd;
+                a.Completed += delegate(object s2, EventArgs e2)
+                {
+                    if (gen != _ghostGen) return;   // 已被更新的换素材接管
+                    try
+                    {
+                        _ghost.BeginAnimation(OpacityProperty, null);
+                        _ghost.Opacity = 0;
+                        _ghost.Source = null;       // 清掉，别攥着旧图不放
+                        _ghost.Clip = null;
+                        _ghostPlated = false;
+                        // ⚠️ 只有**真正执行了清除**才 +1（过期回调在上面就 return 了）。
+                        // 自检靠它区分"过期回调被挡住"与"过期回调也生效了" ——
+                        // 只看最终状态是区分不出来的（两者最终都是清空的）。
+                        _ghostClearedCount++;
+                    }
+                    catch { }
+                    _ghostFading = false;
+                };
+                _ghost.BeginAnimation(OpacityProperty, a);
+                _ghostFading = true;
+            }
+            catch (Exception ex) { PetLog.Warn("换素材过渡失败: " + PetLog.Describe(ex)); }
+        }
+
+        /// <summary>诊断用：残影当前挂着的图（null = 没有残影）。</summary>
+        internal object DiagGhostSource { get { return _ghost == null ? null : _ghost.Source; } }
+        /// <summary>诊断用：残影不透明度。</summary>
+        internal double DiagGhostOpacity { get { return _ghost == null ? 0.0 : _ghost.Opacity; } }
+        /// <summary>诊断用：残影是否在淡出中。</summary>
+        internal bool DiagGhostFading { get { return _ghostFading; } }
+        /// <summary>诊断用：残影是否参与命中测试（必须为 false）。</summary>
+        internal bool DiagGhostHitTestVisible { get { return _ghost != null && _ghost.IsHitTestVisible; } }
+        /// <summary>诊断用：新图是否已可见（换素材后必须立刻为 true，不能有空白）。</summary>
+        internal bool DiagImageSourcePresent { get { return _image != null && _image.Source != null; } }
 
         private void ShowFallback(string text)
         {
@@ -609,6 +789,9 @@ namespace DshZhuangFangyiPet
         /// </summary>
         internal void DiagForceSheet(SpriteSheet sh)
         {
+            // v13.2：过渡也是"真实换素材路径"的一部分，这里必须一起走 ——
+            // 否则自检测不到它（"断言测拷贝、产品走原件"是这个项目踩过三次的坑）。
+            BeginSpriteCrossFade();
             _sheet = sh;
             _frame = 0;
             if (sh != null)
@@ -994,6 +1177,23 @@ namespace DshZhuangFangyiPet
 
         /// <summary>自检诊断用：动画是否正在播。</summary>
         internal bool DiagReactPlaying { get { return _reactPlaying; } }
+
+        /// <summary>
+        /// 自检诊断用：缩放上是否挂着**活动的动画时钟**。
+        ///
+        /// ⚠️ 为什么需要它（v13.1 的断言在这里翻过车）：验证"松手是平滑弹回"
+        /// 时我靠 `Pump(150)` 取动画中点，而 `Pump` 是**墙钟**计时 ——
+        /// 调度器一忙，150ms 的泵可能实际跑了 400ms，动画早结束并归位到 1.0，
+        /// 于是断言**偶发变红**（实测出现过一次 300/1，重跑两次又全绿）。
+        /// 一个会随机变红的断言比没有断言更糟：它会训练人忽略红色。
+        ///
+        /// `HasAnimatedProperties` 是**确定性**的：动画一挂上就为 true，
+        /// 不需要卡时间点去采样。
+        /// </summary>
+        internal bool DiagReactAnimating
+        {
+            get { return _reactScale != null && _reactScale.HasAnimatedProperties; }
+        }
 
         /// <summary>自检诊断用：当前缩放值（静止时应当是 1.0）。</summary>
         internal double DiagReactScaleX { get { return _reactScale == null ? 1.0 : _reactScale.ScaleX; } }
