@@ -219,6 +219,9 @@ window.__ModuleLoader__.load({
         flingEnabledHint: '快速甩动她会飞出去再落地；慢慢拖仍然只是挪位置',
         longPress: '按住摸头',
         longPressHint: '按住不动会逐级反应；松手即停',
+        gestureSensitivity: '手势灵敏度',
+        gestureSensitivityHint: '点不中 / 按不住就调大（高 DPI 鼠标常见）',
+        noteGesture: '手势容差按"屏幕像素"判定，而手抖落成多少像素 = 手抖距离 × 鼠标硬件 DPI × 系统指针增益。系统指针增益桌宠能自己读（并自动补偿），但**鼠标硬件 DPI 没有接口可读** —— 所以「我 DPI 开得高」那一半只能靠这个滑杆补。调大的代价：慢慢拖动一小段距离时，也可能被当成点击。',
         hoverReact: '鼠标停在她身上时看你一眼',
         hoverReactHint: '默认关闭 —— 这是唯一她会主动找你的互动',
         // ── v10：「今天」页签 ──────────────────────────────────────────────
@@ -472,6 +475,9 @@ window.__ModuleLoader__.load({
         flingEnabledHint: 'Flick her and she flies and lands; a slow drag still just moves her',
         longPress: 'Pet by holding',
         longPressHint: 'Hold still for a graded reaction; release to stop',
+        gestureSensitivity: 'Gesture sensitivity',
+        gestureSensitivityHint: 'Raise this if taps/holds miss (common with high-DPI mice)',
+        noteGesture: 'Gesture tolerance is judged in screen pixels, while hand tremor in pixels = tremor distance × mouse hardware DPI × system pointer gain. The pet can read the system pointer gain itself (and compensates automatically), but mouse hardware DPI has no readable API — so the "my DPI is high" half can only be covered by this slider. The tradeoff: dragging a short distance slowly may also register as a tap.',
         hoverReact: 'Glance up when the cursor rests on her',
         hoverReactHint: 'Off by default — the only interaction she starts herself',
         // ── v10: Today tab ────────────────────────────────────────────────
@@ -736,6 +742,15 @@ window.__ModuleLoader__.load({
         // 抛掷与长按摸头**默认开**：只有用户主动做手势才触发，不是骚扰。
         flingEnabled: true,
         longPress: true,
+        /**
+         * 手势灵敏度倍率（1.0 = 基准）。
+         *
+         * 用户点名："我鼠标DPI平时开的比较高，所以很多手势触发不了，怎么回事"。
+         * 容差是绝对物理像素，而手抖落成多少像素 = 手抖物理距离 × 硬件 DPI ×
+         * 指针增益 —— exe 能自动读**指针增益**，但**硬件 DPI 没有 API**，
+         * 所以必须给用户一个自己拧的旋钮。默认 1.0 = 与之前完全一致。
+         */
+        gestureSensitivity: 1,
         // 悬停反应**默认关**：这是唯一"她主动找你"的互动，默认开就是骚扰。
         hoverReact: false,
         // ── 语音（v3）───────────────────────────────────────────────────────
@@ -801,6 +816,12 @@ window.__ModuleLoader__.load({
       // 气泡正文字号倍率：与 Host 同范围同口径（0.5~3.0）。
       if (Number.isFinite(input.chatFontScale)) {
         out.chatFontScale = Math.min(3, Math.max(0.5, input.chatFontScale))
+      }
+      // v13 手势灵敏度：与 Host 同范围（1.0~3.0）。
+      // ⚠️ 下限是 1.0 而不是 0.5 —— **容差绝不许比基准更小**，
+      // 那会让手势更难触发，与本功能的目的正好相反。
+      if (Number.isFinite(input.gestureSensitivity)) {
+        out.gestureSensitivity = Math.min(3, Math.max(1, input.gestureSensitivity))
       }
       for (const k of ['clickThrough', 'topmost', 'bubble', 'bubbleImages',
         'hint', 'statusAlways', 'notifyComplete', 'attentionReminder',
@@ -2259,7 +2280,8 @@ window.__ModuleLoader__.load({
          *
          * 位置在「活跃度」**之后**：那一张是这一页的主卡（"她什么时候活跃"
          * 是这一页存在的理由），手势是它的补充。 */
-        card('behavior', { key: 'gGesture', title: t('groupGesture'), open: true, lead: t('gestureLead') }, [
+        card('behavior', { key: 'gGesture', title: t('groupGesture'), open: true, lead: t('gestureLead'),
+          noteLabel: t('noteLabel'), note: t('noteGesture') }, [
           h(Toggle, {
             key: 'longPress',
             label: t('longPress'),
@@ -2280,6 +2302,20 @@ window.__ModuleLoader__.load({
             hint: t('hoverReactHint'),
             value: settings.hoverReact,
             onChange: v => set({ hoverReact: v })
+          }),
+          // v13：手势灵敏度。放在三个开关**之后** —— 它是一个"调参"，
+          // 而开关是"要不要这个功能"；用户报"手势触发不了"时，
+          // 前面的开关都开着、只有这一项要往上调。
+          h(Slider, {
+            key: 'gestureSensitivity',
+            label: t('gestureSensitivity'),
+            hint: t('gestureSensitivityHint'),
+            value: settings.gestureSensitivity ?? 1,
+            min: 1,
+            max: 3,
+            step: 0.1,
+            suffix: '×',
+            onChange: v => set({ gestureSensitivity: v })
           }),
           // v10：手势提示只有**一次**（10 秒气泡），很容易错过 ——
           // 而"错过之后再也看不到"正是用户报的那个问题。所以给一个

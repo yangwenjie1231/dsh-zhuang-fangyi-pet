@@ -168,6 +168,73 @@ namespace DshZhuangFangyiPet
             return dip * GetDpiForWindowSafe(hwnd) / 96.0;
         }
 
+        // ---- 鼠标指针增益（v13）------------------------------------------------
+        //
+        // ⚠️⚠️ **为什么桌宠要读"鼠标速度"**（用户 2026-10-09："我鼠标DPI平时开的
+        // 比较高，所以很多手势触发不了，怎么回事"）。
+        //
+        // 手势容差是**屏幕物理像素**（`ClickMaxMovePx`=4 / `PatMaxMovePx`=6），
+        // 而它要吸收的量是"按住鼠标时手抖了多少**像素**"：
+        //
+        //     手抖像素 = 手抖的物理距离 × 鼠标硬件 DPI × **指针增益**
+        //
+        // 前两项读不到（没有 API），但第三项**可以**读 —— 而且它恰恰是用户
+        // 会主动调大的那一半。增益 1.5 意味着同一只手、同样的抖动，落到屏幕上
+        // 的像素多了 50%：**4px 的容差实际只剩 2.7px**。容差本该是"手抖"的
+        // 尺度，却写成了绝对像素，于是输入越灵敏、手势越难触发 —— 完全反直觉，
+        // 而且没有任何报错，只是"点了没反应"。
+        //
+        // 实测（本机）：`SPI_GETMOUSESPEED = 12` → 增益 1.5×；
+        // `SPI_GETMOUSE = [0,0,0]` → 加速关闭（线性，好）。
+        // 于是 4px 容差在这台机器上等于 2.7px，单击自然大面积失败。
+        public const uint SPI_GETMOUSESPEED = 0x0070;
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool SystemParametersInfo(uint uiAction, uint uiParam,
+                                                        out int pvParam, uint fWinIni);
+
+        private static bool _gainProbed;
+        private static double _gain = 1.0;
+
+        /// <summary>
+        /// 指针增益（1.0 = 系统默认速度）。读不到 → 1.0（= 不放大，安全侧）。
+        ///
+        /// 进程内缓存一次：这个值只有用户在系统设置里改鼠标速度才会变，
+        /// 而每次鼠标移动都去问一次系统是没有必要的开销。
+        /// </summary>
+        public static double GetPointerGainSafe()
+        {
+            if (_gainProbed) return _gain;
+            _gainProbed = true;
+            try
+            {
+                int speed;
+                if (SystemParametersInfo(SPI_GETMOUSESPEED, 0, out speed, 0))
+                {
+                    double g = SpeedToGain(speed);
+                    if (g > 0) _gain = g;
+                }
+            }
+            catch { }
+            return _gain;
+        }
+
+        /// <summary>
+        /// 系统"鼠标速度"档位（1..20）→ 指针增益倍率。
+        ///
+        /// 这是 Windows 的固定换算表（10 = 1.0×，12 = 1.5×，20 = 3.5×）。
+        /// 写成显式表而不是公式：这张表在 Windows 各版本间是**固定**的，
+        /// 而"猜一个公式"很容易在某个档位上偏掉（用户报的就是"手势不灵"，
+        /// 容差算错只会让它更难查）。档位越界 → 1.0。
+        /// </summary>
+        public static double SpeedToGain(int speed)
+        {
+            if (speed < 1 || speed > 20) return 1.0;
+            int[] num = { 1, 1, 1, 1, 3, 1, 5, 3, 7, 1, 5, 3, 7, 2, 9, 5, 11, 3, 13, 7 };
+            int[] den = { 32, 16, 8, 4, 8, 2, 8, 4, 8, 1, 4, 2, 4, 1, 4, 2, 4, 1, 4, 2 };
+            return (double)num[speed - 1] / den[speed - 1];
+        }
+
         // ------------------------------------------------------------------
         // 多屏工作区
         // ------------------------------------------------------------------

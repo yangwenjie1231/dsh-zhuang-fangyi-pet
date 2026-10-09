@@ -316,6 +316,15 @@ namespace DshZhuangFangyiPet
             }
 
             _win = new PetWindow(_opt, _http, _store);
+            // v13：**启动时就把容差算好**，不等第一次快照。
+            //
+            // 为什么必须在这里：容差默认是"增益 1.0"，而本机实测系统增益是
+            // 1.5 —— 若等快照到达才设，中间那几百毫秒里用户点的每一下都还是
+            // 用偏小的容差判定的。更要紧的是：快照里 `gestureSensitivity`
+            // 没变时走的是"值没变不动"分支，**永远不会调用** ApplyGestureTolerance，
+            // 于是自动检测到的指针增益就白读了（这正是 v10 那四个开关踩过的
+            // "设置页是装饰品"同一个坑，我这次先把它堵上）。
+            ApplyGestureTolerance();
             _win.PetContextMenuRequested = OnPetContextMenu;
             _win.FocusDshRequested = OnFocusDsh;
             _win.PositionReported = OnPositionReported;
@@ -903,6 +912,16 @@ namespace DshZhuangFangyiPet
                 _hoverReactOn = st.HoverReact;
                 PetLog.Info("settings: 悬停反应 → " + (_hoverReactOn ? "1" : "0"));
             }
+            // ── 契约 §2 v13：手势灵敏度 ──────────────────────────────────
+            //
+            // 与上面几个开关同一条纪律：逐字段 diff（值没变不动）。
+            // 变了就**重新算容差**并打一行日志 —— 用户报"手势不灵"时，
+            // 日志里必须能直接看到他当时的容差是多少。
+            if (st.HasGestureSensitivity && Math.Abs(st.GestureSensitivity - _gestureSens) > 0.001)
+            {
+                _gestureSens = st.GestureSensitivity;
+                ApplyGestureTolerance();
+            }
             if (st.HasPomodoroBreath && st.PomodoroBreath != _breathOn)
             {
                 _breathOn = st.PomodoroBreath;
@@ -1332,6 +1351,30 @@ namespace DshZhuangFangyiPet
         private bool _hoverReactOn = PetSettingsInfo.DefaultHoverReact();
         /// <summary>专注期呼吸引导。默认关。</summary>
         private bool _breathOn = PetSettingsInfo.DefaultPomodoroBreath();
+        /// <summary>v13：手势灵敏度倍率（来自 `settings.gestureSensitivity`）。</summary>
+        private double _gestureSens = PetSettingsInfo.DefaultGestureSensitivity();
+
+        /// <summary>
+        /// v13：把"指针增益 × 用户灵敏度"算成容差并交给窗口。
+        ///
+        /// 指针增益（`SPI_GETMOUSESPEED`）**在启动时读一次**即可：它只在用户
+        /// 改系统鼠标速度时变化，而那种情况下重开会话/重启桌宠是自然行为。
+        /// 每次鼠标移动都去读系统设置是没有必要的开销（拖动时 125~500 次/秒）。
+        ///
+        /// 日志里打出增益与最终容差 —— 下次再报"手势不灵"，这一行就是答案。
+        /// </summary>
+        private void ApplyGestureTolerance()
+        {
+            try
+            {
+                double gain = PetNative.GetPointerGainSafe();
+                _win.SetGestureTolerance(gain, _gestureSens);
+                PetLog.Info("手势容差 → " + _win.DiagTolerance.Describe() +
+                            "（系统指针增益 " + gain.ToString("0.###", CultureInfo.InvariantCulture) +
+                            " × 灵敏度 " + _gestureSens.ToString("0.##", CultureInfo.InvariantCulture) + "）");
+            }
+            catch (Exception ex) { PetLog.Warn("手势容差设置失败: " + PetLog.Describe(ex)); }
+        }
 
         /// <summary>
         /// 单击桌宠 → 记一次互动。

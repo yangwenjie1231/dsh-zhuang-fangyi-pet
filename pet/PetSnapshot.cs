@@ -93,6 +93,15 @@ namespace DshZhuangFangyiPet
         /// <summary>契约 §2 v10：专注时显示呼吸引导。旧快照缺省 = false。</summary>
         public bool HasPomodoroBreath; public bool PomodoroBreath;
 
+        /// <summary>
+        /// 契约 §2 v13：**手势灵敏度倍率**（1.0 = 基准）。
+        ///
+        /// 旧快照缺省 = 1.0（不动现状）。用户点名"我鼠标DPI平时开的比较高，
+        /// 所以很多手势触发不了" —— 指针增益 exe 能自动读，但**鼠标硬件 DPI
+        /// 没有 API**，只能由用户自己拧这个旋钮补上另一半。
+        /// </summary>
+        public bool HasGestureSensitivity; public double GestureSensitivity;
+
         /// <summary>非法/缺省值一律回落 focus-dsh（task-6 验收点）。</summary>
         public static string NormalizeDoubleClick(string v)
         {
@@ -131,6 +140,23 @@ namespace DshZhuangFangyiPet
         public static bool DefaultFlingEnabled() { return true; }
         public static bool DefaultHoverReact() { return false; }
         public static bool DefaultPomodoroBreath() { return false; }
+
+        /// <summary>
+        /// v13：手势灵敏度倍率默认值。
+        ///
+        /// **1.0 = 与 v12 完全一致** —— 新功能不许悄悄改变现有用户的手感。
+        /// 自动读到的指针增益会另乘上去（见 `GestureTolerance.FromGain`）。
+        /// </summary>
+        public static double DefaultGestureSensitivity() { return 1.0; }
+
+        /// <summary>v13：灵敏度合法范围（与宿主 `settings.js` 的 GESTURE_SENS_* 一致）。</summary>
+        public static double ClampGestureSensitivity(double v)
+        {
+            if (double.IsNaN(v) || double.IsInfinity(v)) return DefaultGestureSensitivity();
+            if (v < 1.0) return 1.0;
+            if (v > 3.0) return 3.0;
+            return v;
+        }
     }
 
     /// <summary>
@@ -566,6 +592,14 @@ namespace DshZhuangFangyiPet
                 {
                     si.HasPomodoroBreath = true;
                     si.PomodoroBreath = st.Bool("pomodoroBreath", PetSettingsInfo.DefaultPomodoroBreath());
+                }
+                // ── 契约 §2 v13：手势灵敏度（缺省 1.0 = 不动现状）──────────────
+                if (st.Get("gestureSensitivity") != null &&
+                    st.Get("gestureSensitivity").Kind == PetJson.JVal.TNum)
+                {
+                    si.HasGestureSensitivity = true;
+                    si.GestureSensitivity = PetSettingsInfo.ClampGestureSensitivity(
+                        st.Num("gestureSensitivity", PetSettingsInfo.DefaultGestureSensitivity()));
                 }
                 s.Settings = si;
             }

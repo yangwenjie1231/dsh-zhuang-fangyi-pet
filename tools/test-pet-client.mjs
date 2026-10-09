@@ -2702,7 +2702,8 @@ ok('⭐⭐ 悬停反应默认关（唯一"她主动找你"的互动，默认开�
 ok('⭐ 新设置字段能穿过归一化（否则"界面能改、发不出去"）', () => {
   const n = normalizePet({
     hoverReact: true, flingEnabled: false, longPress: false,
-    pomodoroBreath: true, pomodoroGoalCount: 12, pomodoroPreset: 'deep'
+    pomodoroBreath: true, pomodoroGoalCount: 12, pomodoroPreset: 'deep',
+    gestureSensitivity: 2.5
   })
   assert.equal(n.hoverReact, true)
   assert.equal(n.flingEnabled, false)
@@ -2710,6 +2711,37 @@ ok('⭐ 新设置字段能穿过归一化（否则"界面能改、发不出去"�
   assert.equal(n.pomodoroBreath, true)
   assert.equal(n.pomodoroGoalCount, 12)
   assert.equal(n.pomodoroPreset, 'deep')
+  assert.equal(n.gestureSensitivity, 2.5, 'v13 手势灵敏度必须能穿过归一化')
+})
+
+ok('⭐⭐⭐ v13 手势灵敏度：默认 1.0，且**下限就是 1.0**（容差绝不许更小）', () => {
+  // 用户报"我鼠标DPI平时开的比较高，所以很多手势触发不了"。
+  // 这个旋钮是用来**放大**容差的，所以：
+  //   · 默认必须是 1.0 —— 不许悄悄改变现有用户的手感；
+  //   · 下限必须是 1.0 —— 调小 = 容差更小 = 手势更难触发，与目的相反。
+  //     （与 statusFontScale 那种 0.5~3.0 的双向范围**不同**，别照抄。）
+  assert.equal(normalizePet({}).gestureSensitivity, 1, '默认应为 1.0')
+  assert.equal(normalizePet({ gestureSensitivity: 0.5 }).gestureSensitivity, 1,
+    '低于 1.0 必须被夹回 1.0（容差绝不许比基准更小）')
+  assert.equal(normalizePet({ gestureSensitivity: 0 }).gestureSensitivity, 1)
+  assert.equal(normalizePet({ gestureSensitivity: -3 }).gestureSensitivity, 1)
+  assert.equal(normalizePet({ gestureSensitivity: 99 }).gestureSensitivity, 3, '上限 3.0')
+  assert.equal(normalizePet({ gestureSensitivity: 3 }).gestureSensitivity, 3)
+  assert.equal(normalizePet({ gestureSensitivity: 'x' }).gestureSensitivity, 1, '坏值回落 1.0')
+  assert.equal(normalizePet({ gestureSensitivity: NaN }).gestureSensitivity, 1, 'NaN 回落 1.0')
+})
+
+ok('⭐⭐ 手势灵敏度滑杆在设置页里，且范围是 1~3（与宿主同口径）', () => {
+  const tree = renderSectionTree({}, 'behavior')
+  const text = collectStrings(tree).join('|')
+  assert.ok(text.includes('手势灵敏度'), '缺「手势灵敏度」这一项')
+  // 滑杆的 min/max 必须与宿主 GESTURE_SENS_MIN/MAX 一致 ——
+  // 不一致会出现"界面能选到宿主会夹掉的值"（预设那次踩过同样的坑）。
+  const sliders = collectByType(tree, 'Slider')
+  const s = sliders.find(n => String(n.props.label ?? '').includes('手势灵敏度'))
+  assert.ok(s, '没找到手势灵敏度的滑杆')
+  assert.equal(s.props.min, 1, '滑杆下限必须是 1（不许比基准更小）')
+  assert.equal(s.props.max, 3, '滑杆上限必须是 3')
 })
 
 ok('⭐ 目标数夹在 0..30（0 = 不设目标是**合法值**）', () => {

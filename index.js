@@ -2119,6 +2119,17 @@ export function apply (ctx, config) {
       flingEnabled: s.flingEnabled,
       hoverReact: s.hoverReact,
       pomodoroBreath: s.pomodoroBreath,
+      /**
+       * v13 手势灵敏度（用户："我鼠标DPI平时开的比较高，所以很多手势触发不了"）。
+       *
+       * 容差是**屏幕物理像素**（点击 4px / 摸头 6px），而要吸收的是"手抖了多少
+       * 像素" = 手抖物理距离 × 鼠标硬件 DPI × 指针增益。exe 能读**指针增益**
+       * （`SPI_GETMOUSESPEED`）并自动补偿，但**硬件 DPI 读不到** ——
+       * 所以自动检测只能修一半，剩下那一半必须由用户自己拧。
+       *
+       * 默认 1.0 = 与 v12 完全一致，不改变任何现有用户的手感。
+       */
+      gestureSensitivity: s.gestureSensitivity,
       // 语音总开关（默认关：桌宠突然开口是强打扰，用户主动打开才生效）。
       voice: s.voice
     }

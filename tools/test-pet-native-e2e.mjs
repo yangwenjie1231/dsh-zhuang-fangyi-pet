@@ -112,7 +112,14 @@ fs.writeFileSync(path.join(tmpHome, 'zhuang-fangyi-pet', 'settings.json'), JSON.
   voice: true,
   // 番茄钟开着，验证快照里带块。
   pomodoro: true,
-  pomodoroCountdown: true
+  pomodoroCountdown: true,
+  // v13：手势灵敏度**显式设成非默认值**。
+  //
+  // ⚠️ 为什么要在这里写（而不是靠默认值）：v10 那四个开关踩过的坑 ——
+  // 设置页能改、`settings.json` 里也有，但 `exeSettings()` **根本没发给 exe**，
+  // 于是开关全是装饰品（用户报"手势没法正常触发"的原因之一）。
+  // 写一个非默认值(2.0)，才能证明"这个键真的穿过了宿主 → 快照 → exe"。
+  gestureSensitivity: 2
 }, null, 2), 'utf8')
 
 const { apply } = await import(`file://${path.join(ROOT, 'index.js').replace(/\\/g, '/')}`)
@@ -377,6 +384,63 @@ await ok('⭐ exe 日志里出现"番茄钟 → 首次收到块"（证明它真�
   }
   assert.ok(text.includes('番茄钟 → 首次收到块'),
     `exe 没收到/没解析番茄钟块。日志尾部：\n${text.slice(-800)}`)
+})
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * 3b. v13：手势灵敏度必须**真的送到 exe**
+ *
+ * 这一组是 v10 教训的直接产物：那四个手势开关在 `settings.js` 里有、
+ * 设置页能改、`settings.json` 里也存着，但 `exeSettings()` **根本没发给 exe** ——
+ * 于是它们全是装饰品，而用户看到的只是"手势没法正常触发"。
+ * 所以"设置里有这个键"**不等于**"exe 拿得到它"，必须端到端断言。
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+section('3b. v13 手势灵敏度：设置 → 快照 → exe 的容差')
+
+await ok('⭐⭐⭐ 宿主快照的 settings 带 gestureSensitivity（漏了它就是装饰品）', async () => {
+  const args = spawnedArgs.argv
+  const token = args[args.indexOf('--token') + 1]
+  const res = await fetch(`http://127.0.0.1:${port}/api/zhuang-fangyi/pet/state`, {
+    headers: { authorization: `Bearer ${token}` }
+  })
+  assert.equal(res.status, 200)
+  const snap = await res.json()
+  assert.ok(snap.settings, '快照里没有 settings 块')
+  // 设置文件里写的是 2 —— 必须是 2，不能是默认的 1。
+  // （若 `exeSettings()` 漏掉这个键，这里会拿到 undefined 或 1。）
+  assert.equal(snap.settings.gestureSensitivity, 2,
+    `快照里的 gestureSensitivity 是 ${snap.settings.gestureSensitivity}，应为设置文件里的 2` +
+    '（宿主 exeSettings() 漏发了这个键 → 设置页的滑杆是装饰品）')
+})
+
+await ok('⭐⭐⭐⭐ exe 日志里出现"手势容差 →"且数值随灵敏度放大（真接线）', async () => {
+  const deadline = Date.now() + 15000
+  let text = ''
+  while (Date.now() < deadline) {
+    text = readOurLog()
+    if (text.includes('手势容差 →')) break
+    await sleep(300)
+  }
+  assert.ok(text.includes('手势容差 →'),
+    `exe 没打印"手势容差 →"，说明它没读/没应用灵敏度。日志尾部：\n${text.slice(-800)}`)
+  // ⚠️ 必须取 **sens=2 那一行**，不能取第一次出现的：
+  // exe 启动时会先用默认灵敏度打一行（sens=1 → 6/9px），快照到达后才打第二行
+  //（sens=2 → 12/18px）。我第一版用 `text.match(...)` 只拿**第一处**匹配，
+  // 于是断言永远看到启动那行 → 明明接线是好的却报红。断言写错，不是产品错。
+  const all = [...text.matchAll(/手势容差 → gain=([\d.]+) sens=([\d.]+) click<=([\d.]+)px pat<=([\d.]+)px/g)]
+  assert.ok(all.length > 0,
+    `日志里的容差格式不认识：${(text.match(/手势容差[^\n]*/) ?? [''])[0]}`)
+  const hit = all.find(x => Number(x[2]) === 2)
+  assert.ok(hit,
+    `没有找到 sens=2 的那一行（说明设置没生效到 exe）。实际有：` +
+    all.map(x => `sens=${x[2]}`).join(', '))
+  const gain = Number(hit[1]); const click = Number(hit[3]); const pat = Number(hit[4])
+  assert.ok(gain > 0, `指针增益是 ${gain}，应为正数`)
+  // 灵敏度 2.0 → 容差至少是基准的 2 倍（还要乘系统指针增益，所以 ≥2 倍）。
+  // 基准是 click 4px / pat 6px，所以这里至少要 ≥8px / ≥12px。
+  assert.ok(click >= 8, `click 容差是 ${click}px，灵敏度 2.0 下应 ≥8px（基准 4px × 2）`)
+  assert.ok(pat >= 12, `pat 容差是 ${pat}px，灵敏度 2.0 下应 ≥12px（基准 6px × 2）`)
+  assert.ok(pat > click, `pat 容差(${pat}) 必须大于 click 容差(${click})，否则 4~6px 漂移又会掐死摸头`)
 })
 
 /* ══════════════════════════════════════════════════════════════════════════

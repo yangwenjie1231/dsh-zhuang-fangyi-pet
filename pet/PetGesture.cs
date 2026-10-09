@@ -94,6 +94,122 @@ namespace DshZhuangFangyiPet
         public double Speed;
     }
 
+    /// <summary>
+    /// 一次手势判定实际使用的容差（v13）。**全部是屏幕物理像素**。
+    ///
+    /// ── 为什么需要这个类型（用户 2026-10-09 报的真 bug）───────────────────
+    ///
+    /// 用户原话："我鼠标DPI平时开的比较高，所以很多手势触发不了，怎么回事"。
+    ///
+    /// 根因：容差原先写死成**绝对物理像素**（点击 4px / 摸头 6px），
+    /// 而它要吸收的量是"按住鼠标时手抖了多少**像素**"：
+    ///
+    ///     手抖像素 = 手抖的物理距离 × 鼠标硬件 DPI × **指针增益**
+    ///
+    /// 硬件 DPI 读不到，但**指针增益可以读**（`SPI_GETMOUSESPEED`）——
+    /// 而且它正是用户会主动调大的那一半。增益 1.5 时，同一只手、同样的抖动，
+    /// 落到屏幕上多 50%：**4px 的容差实际只剩 2.7px**。
+    ///
+    /// 于是出现一个完全反直觉的结果：**鼠标越灵敏，手势越难触发**。
+    /// 而且它不报错、不崩溃，只是"点了没反应" —— 实测日志里 54 次按下-抬起
+    /// 只有 4 次被认成单击、2 次摸头，其余全部落进 `Drag`。
+    ///
+    /// 修法：把容差从"像素"改写成"**手**"的尺度 —— 系统默认速度下的像素数
+    /// 乘以指针增益。这样同一只手在 1.0× 与 1.5× 下做出同样的动作，
+    /// 判定结果**一致**。
+    ///
+    /// ⚠️ 下限是常量本身（**绝不让容差变小**）：低增益下不能反而更难点击。
+    /// 上限是防止某个荒唐的系统读数把容差放大到"真拖动也被当成点击"。
+    /// </summary>
+    internal sealed class GestureTolerance
+    {
+        /// <summary>单击允许的最大位移（px）。</summary>
+        public double ClickMaxPx;
+        /// <summary>摸头/按住不动允许的最大位移（px）。</summary>
+        public double PatMaxPx;
+        /// <summary>抛掷的最低速度（px/s）。</summary>
+        public double FlingMinSpeedPx;
+        /// <summary>算出这套容差的指针增益（诊断用）。</summary>
+        public double Gain;
+        /// <summary>用户手动追加的灵敏度倍率（诊断用）。</summary>
+        public double Sensitivity;
+
+        /// <summary>容差上限：超过它就"真拖动也能算点击"了，宁可保守。</summary>
+        public const double ClickCapPx = 24.0;
+        public const double PatCapPx = 36.0;
+
+        /// <summary>系统默认速度（1.0×）下的容差 —— 与 v12 及之前**完全一致**。</summary>
+        public static GestureTolerance Default()
+        {
+            return _def;
+        }
+
+        /// <summary>
+        /// 缓存默认容差：旧签名的 `IsClick`/`IsPatMove` 每次鼠标移动都会调它
+        /// （拖动时 125~500 次/秒），不能每次 new 一个对象。
+        /// 本类型的字段构造后不再修改，共享是安全的。
+        /// </summary>
+        private static readonly GestureTolerance _def = FromGain(1.0, 1.0);
+
+        /// <summary>
+        /// 由**指针增益 × 用户灵敏度**推出容差。
+        ///
+        /// ── 为什么是两个因子（而不是只读系统增益）──────────────────────────
+        ///
+        /// 增益只能修"系统那一半"。真正决定手抖落成多少像素的是：
+        ///
+        ///     手抖像素 = 手抖的物理距离 × **鼠标硬件 DPI** × 指针增益
+        ///
+        /// 而**硬件 DPI 没有任何 API 能读到** —— 用户说的"我鼠标 DPI 平时开的
+        /// 比较高"恰好就在这个读不到因子里。所以自动检测**不可能**独自修好它，
+        /// 必须给用户一个能自己拧的旋钮（`gestureSensitivity`）。
+        /// 只做自动检测的话，我只是把"完全没救"换成了"救一半"。
+        ///
+        /// 坏数据（NaN / Inf / ≤0）→ 该因子按 1.0 处理（= 不放大，安全侧）：
+        /// 容差算大只会让拖动被误判成点击，算小则让手势失灵 —— 但两者都不如
+        /// "退回已知正确的默认值"安全。
+        /// </summary>
+        public static GestureTolerance FromGain(double gain, double sensitivity)
+        {
+            GestureTolerance t = new GestureTolerance();
+            if (double.IsNaN(gain) || double.IsInfinity(gain) || gain <= 0) gain = 1.0;
+            if (double.IsNaN(sensitivity) || double.IsInfinity(sensitivity) || sensitivity <= 0)
+                sensitivity = 1.0;
+
+            double k = gain * sensitivity;
+            t.Gain = gain;
+            t.Sensitivity = sensitivity;
+            t.ClickMaxPx = Scale(PetGesture.ClickMaxMovePx, k, ClickCapPx);
+            t.PatMaxPx = Scale(PetGesture.PatMaxMovePx, k, PatCapPx);
+            // ⚠️ 抛掷阈值**同向放大**：高增益下同一个"甩"的手部动作会产生更大的
+            // 屏幕速度，阈值不跟着走就会"轻轻一碰就飞出去"（与容差同一条道理）。
+            t.FlingMinSpeedPx = Scale(PetGesture.FlingMinSpeed, k, double.PositiveInfinity);
+            return t;
+        }
+
+        /// <summary>base × k，下限 base（**绝不更小**：低增益不能反而更难触发）、上限 cap。</summary>
+        private static double Scale(double basePx, double k, double capPx)
+        {
+            double v = basePx * k;
+            if (v < basePx) v = basePx;
+            if (v > capPx) v = capPx;
+            return v;
+        }
+
+        /// <summary>诊断用的一行摘要（日志里要能一眼看出"这次判定用的什么容差"）。</summary>
+        public string Describe()
+        {
+            return "gain=" + Fmt(Gain) + " sens=" + Fmt(Sensitivity) +
+                   " click<=" + Fmt(ClickMaxPx) + "px pat<=" + Fmt(PatMaxPx) +
+                   "px fling>=" + Fmt(FlingMinSpeedPx) + "px/s";
+        }
+
+        private static string Fmt(double v)
+        {
+            return v.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+        }
+    }
+
     internal static class PetGesture
     {
         // ── 阈值（**唯一真相**，PetWindow 的常量引用这里）──────────────────
@@ -162,10 +278,22 @@ namespace DshZhuangFangyiPet
         /// </summary>
         internal static bool IsClick(double dx, double dy, int elapsedMs)
         {
+            return IsClick(dx, dy, elapsedMs, GestureTolerance.Default());
+        }
+
+        /// <summary>
+        /// 同上，但用**指定的容差**（v13：容差随指针增益放大）。
+        ///
+        /// 保留上面那个三参数重载是为了**不破坏既有语义与断言**：
+        /// 它等价于"系统默认速度"（增益 1.0），也就是 v12 的行为。
+        /// </summary>
+        internal static bool IsClick(double dx, double dy, int elapsedMs, GestureTolerance tol)
+        {
+            if (tol == null) tol = GestureTolerance.Default();
             if (elapsedMs < 0 || elapsedMs > ClickMaxMs) return false;
             if (double.IsNaN(dx) || double.IsNaN(dy)) return false;
             if (double.IsInfinity(dx) || double.IsInfinity(dy)) return false;
-            return Math.Sqrt(dx * dx + dy * dy) <= ClickMaxMovePx;
+            return Math.Sqrt(dx * dx + dy * dy) <= tol.ClickMaxPx;
         }
 
         /// <summary>
@@ -186,9 +314,22 @@ namespace DshZhuangFangyiPet
         /// </summary>
         internal static bool IsPatMove(double dx, double dy)
         {
+            return IsPatMove(dx, dy, GestureTolerance.Default());
+        }
+
+        /// <summary>
+        /// 同上，但用**指定的容差**（v13）。
+        ///
+        /// ⚠️ 这是本 bug 的**主要现场**：`PetWindow.TrackMove` 用它判"手有没有动"，
+        /// 而高指针增益下 6px 实际只剩 4px —— 用户按住她时手一抖就被记成"移动过"，
+        /// 于是长按计时器被掐死，摸头整个失灵。
+        /// </summary>
+        internal static bool IsPatMove(double dx, double dy, GestureTolerance tol)
+        {
+            if (tol == null) tol = GestureTolerance.Default();
             if (double.IsNaN(dx) || double.IsNaN(dy)) return false;
             if (double.IsInfinity(dx) || double.IsInfinity(dy)) return false;
-            return Math.Sqrt(dx * dx + dy * dy) <= PatMaxMovePx;
+            return Math.Sqrt(dx * dx + dy * dy) <= tol.PatMaxPx;
         }
 
         /// <summary>
@@ -215,10 +356,17 @@ namespace DshZhuangFangyiPet
         /// </summary>
         internal static bool ClosesGapAsClick(double dx, double dy, int elapsedMs)
         {
+            return ClosesGapAsClick(dx, dy, elapsedMs, GestureTolerance.Default());
+        }
+
+        /// <summary>同上，但用**指定的容差**（v13）。</summary>
+        internal static bool ClosesGapAsClick(double dx, double dy, int elapsedMs, GestureTolerance tol)
+        {
+            if (tol == null) tol = GestureTolerance.Default();
             if (elapsedMs <= ClickMaxMs || elapsedMs >= PatMinMs) return false;
             if (double.IsNaN(dx) || double.IsNaN(dy)) return false;
             if (double.IsInfinity(dx) || double.IsInfinity(dy)) return false;
-            return Math.Sqrt(dx * dx + dy * dy) <= PatMaxMovePx;
+            return Math.Sqrt(dx * dx + dy * dy) <= tol.PatMaxPx;
         }
 
         /// <summary>
@@ -265,6 +413,19 @@ namespace DshZhuangFangyiPet
         /// </summary>
         internal static PetGestureKind Classify(double dx, double dy, int elapsedMs, double speedPxPerSec)
         {
+            return Classify(dx, dy, elapsedMs, speedPxPerSec, GestureTolerance.Default());
+        }
+
+        /// <summary>
+        /// 同上，但用**指定的容差**（v13：容差随指针增益放大）。
+        ///
+        /// 保留四参数重载 = 增益 1.0，也就是 v12 的行为**逐位不变** ——
+        /// 既有断言（`Classify(4,0,300,0) == Click` 之类）继续有效。
+        /// </summary>
+        internal static PetGestureKind Classify(double dx, double dy, int elapsedMs,
+                                                double speedPxPerSec, GestureTolerance tol)
+        {
+            if (tol == null) tol = GestureTolerance.Default();
             // 坏数据 → 点击（见文件头约束 1：保守方向必须是"不动"）。
             // ── 坏数据 → Drag（**什么都不做**）──────────────────────────────
             //
@@ -280,7 +441,7 @@ namespace DshZhuangFangyiPet
             }
             if (elapsedMs < 0) return PetGestureKind.Drag;
 
-            if (IsClick(dx, dy, elapsedMs)) return PetGestureKind.Click;
+            if (IsClick(dx, dy, elapsedMs, tol)) return PetGestureKind.Click;
 
             // v12：300~350ms 的**空档归入单击**（见 `ClosesGapAsClick`）。
             //
@@ -289,7 +450,7 @@ namespace DshZhuangFangyiPet
             // `if (isClick || kind == PetGestureKind.Click)`。
             // 如果只在窗口里补 `isClick`，就会出现**两个互相矛盾的结论**
             // （`Classify` 说 Drag、窗口说 Click），下次谁读 `kind` 谁就错。
-            if (ClosesGapAsClick(dx, dy, elapsedMs)) return PetGestureKind.Click;
+            if (ClosesGapAsClick(dx, dy, elapsedMs, tol)) return PetGestureKind.Click;
 
             double dist = Distance(dx, dy);
 
@@ -298,16 +459,19 @@ namespace DshZhuangFangyiPet
             // ⚠️ 这一支**不看速度** —— 按住不动时速度天然是 0（甚至因为
             // 没有 MouseMove 事件而根本没有样本），拿速度去要求它，等于
             // 把"摸头"整个功能废掉。
-            if (elapsedMs >= PatMinMs && elapsedMs <= PatMaxMs && dist <= PatMaxMovePx)
+            if (elapsedMs >= PatMinMs && elapsedMs <= PatMaxMs && dist <= tol.PatMaxPx)
             {
                 return PetGestureKind.Pat;
             }
 
             // 抛掷：速度达标 **且** 按下时长够（速度估计才有意义）。
+            //
+            // v13：阈值同样乘增益 —— 高增益下同一个"甩"的手部动作会产生
+            // 更大的屏幕速度，阈值不跟着走就会"轻轻一甩就飞出去"。
             if (elapsedMs >= FlingMinElapsedMs &&
                 !double.IsNaN(speedPxPerSec) &&
                 !double.IsInfinity(speedPxPerSec) &&
-                speedPxPerSec >= FlingMinSpeed)
+                speedPxPerSec >= tol.FlingMinSpeedPx)
             {
                 return PetGestureKind.Fling;
             }

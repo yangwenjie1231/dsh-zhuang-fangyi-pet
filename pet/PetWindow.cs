@@ -1106,6 +1106,7 @@ namespace DshZhuangFangyiPet
             _pressAt = DateTime.UtcNow;
             try { _pressScreen = PointToScreen(p); } catch { _pressScreen = new Point(double.NaN, double.NaN); }
             _movedSincePress = false;
+            _holdStill = true;   // v13：新一次按下 → 手视为"还没动"
 
             // v10：手势采样与长按计时从这里开始。
             _pressClockMs = ClockMs();
@@ -1130,21 +1131,97 @@ namespace DshZhuangFangyiPet
         private bool _movedSincePress;
 
         /// <summary>
+        /// v13：**当前**这次移动之后，手是否仍在"按住不动"的容差内。
+        ///
+        /// ⚠️ 与 `_movedSincePress` 的差别是**它可恢复**，这正是修 bug 的关键。
+        /// `_movedSincePress` 一旦置位就永久为真，而 `OnHoldTick` 原先靠它
+        /// **停掉**长按计时器 —— 于是高指针增益下（用户实测 1.5×）手一抖越过
+        /// 容差，摸头就在这次按下里**永久失效**，哪怕手立刻回到原位。
+        /// 现在改成"看当前位置"：抖出去时不报级，稳回来继续报。
+        /// </summary>
+        private bool _holdStill = true;
+
+        /// <summary>
+        /// v13：本次手势判定使用的容差（随指针增益 × 用户灵敏度放大）。
+        ///
+        /// 默认 = 增益 1.0，也就是 v12 的行为**逐位不变**（旧断言继续有效）。
+        /// </summary>
+        private GestureTolerance _tolerance = GestureTolerance.Default();
+
+        /// <summary>
+        /// v13：设置容差。Program 在启动与设置变更时调用。
+        ///
+        /// `gain` 来自 `PetNative.GetPointerGainSafe()`（系统鼠标速度），
+        /// `sensitivity` 来自用户设置 `gestureSensitivity` —— 后者是必需的，
+        /// 因为**鼠标硬件 DPI 读不到**，而用户说的"我 DPI 开得高"正在那一半。
+        /// </summary>
+        public void SetGestureTolerance(double gain, double sensitivity)
+        {
+            _tolerance = GestureTolerance.FromGain(gain, sensitivity);
+        }
+
+        /// <summary>v13：当前容差（诊断/自检用）。</summary>
+        internal GestureTolerance DiagTolerance
+        {
+            get { return _tolerance; }
+        }
+
+        /// <summary>
         /// 按下之后的位移**记账**（唯一入口）。
         ///
-        /// 容差用 <see cref="PetGesture.IsPatMove"/>（6px，摸头的口径），
-        /// **不是** <see cref="ClickMaxMovePx"/>（4px）—— 见调用点那段注释里
+        /// 容差用 <see cref="PetGesture.IsPatMove"/>（摸头的口径），
+        /// **不是** <see cref="ClickMaxMovePx"/>（点击的 4px）—— 见调用点那段注释里
         /// 记的真 bug（4~6px 漂移会永久掐死长按计时器）。
+        ///
+        /// v13：容差不再是常量，而是 `_tolerance`（随指针增益 × 用户灵敏度放大）；
+        /// 并且"是否还在容差内"变成**可恢复**的 `_holdStill`。
+        ///
+        /// ⚠️ 时刻必须由调用方给（**故意没有**读真实时钟的重载）：
+        /// 自检用的是手工构造的时刻（`DiagPressAt(x, y, 0)` 从 0 开始），
+        /// 若这里偷偷读 `ClockMs()`，自检里"按下时刻 0"与"真实时刻 5e6"
+        /// 会混在一起，`PatLevel` 算出巨大负数 → 断言恒假。真实处理器与自检
+        /// 必须走**同一条**路径，所以时刻只能从外面进来。
         ///
         /// 抽成方法是为了**可测**：它原先内联在 `OnMouseMove` 里，而无头自检
         /// 造不出真的 MouseMove 事件，所以"这里用错了阈值"没有任何断言能抓
         /// （回滚验证实测：改回 4px 仍然 264 全绿）。
         /// </summary>
-        private void TrackMove(double dx, double dy)
+        /// <param name="nowMs">本次移动的时刻。</param>
+        private void TrackMove(double dx, double dy, double nowMs)
         {
-            if (_movedSincePress) return;
             if (double.IsNaN(_pressScreen.X)) return;
-            if (!PetGesture.IsPatMove(dx, dy)) _movedSincePress = true;
+            bool still = PetGesture.IsPatMove(dx, dy, _tolerance);
+
+            // ── v13：容差是**可恢复**的，而不是一次性作废 ──────────────────────
+            //
+            // ⚠️⚠️ 这里修的是用户报的那个 bug 的另一半。
+            //
+            // 原先 `_movedSincePress` 一旦置位就永久为真，`OnHoldTick` 靠它
+            // **停掉**长按计时器 —— 于是"手抖一下"等于"这次按住彻底作废"，
+            // 哪怕手立刻回到原位。高指针增益（用户实测 1.5×）下容差只剩
+            // 4px，一次正常的手抖就能触发，所以摸头大面积失灵。
+            //
+            // 现在分两种情形：
+            //   · 手**刚回到**容差内（越界 → 稳回来）：把静止计时**从这一刻**
+            //     重新起算。不重算的话，拖着桌宠走 3 秒再一停手会**立刻**跳到
+            //     第 3 级 —— 那是"拖完顺手摸一把"，不是"按住不动"的本意。
+            //   · 手一直在容差内：什么都不做，静止计时**继续累积**。
+            //     ⚠️ 这一条不能少：若每次移动都重置，500Hz 鼠标下永远攒不满
+            //     `PatMinMs`，摸头会从"偶尔不灵"变成"完全不可能触发"。
+            if (still)
+            {
+                if (!_holdStill) _pressClockMs = nowMs;
+                _holdStill = true;
+                return;
+            }
+
+            _holdStill = false;
+            // `_movedSincePress` 仍然是**一次性**的：它只用来排除"单击"，
+            // 而"这次按下动过没有"这个事实不该因为手抖回来而消失
+            //（否则拖了一大圈再松手会被算成一次打招呼）。
+            if (!_movedSincePress) _movedSincePress = true;
+            // ⚠️ `_patLevelReported` **故意不重置**：否则来回抖动就能反复刷级，
+            // "一次按住最多 3 级"这条上限会被绕过。
         }
 
         // ------------------------------------------------------------------
@@ -1254,22 +1331,46 @@ namespace DshZhuangFangyiPet
         }
 
         /// <summary>
+        /// 长按检查的**唯一实现**（真实计时器与自检共用，**不是两份拷贝**）。
+        ///
+        /// ⚠️ 为什么必须抽出来（回滚验证 R4 抓到的真问题）：
+        /// 我第一版让 `DiagHoldTick` 自己抄了一遍判定（`if (!_dragging ||
+        /// _flinging || !_holdStill) return false; ...`），于是断言测的是**拷贝**、
+        /// 产品走的是原件。回滚验证把 `OnHoldTick` 改回 `_movedSincePress`
+        /// （= 手抖一次就停表，正是要修的 bug），自检**依然 279 全绿** ——
+        /// 因为断言只驱动了那份拷贝。
+        ///
+        /// 这与 v12 的 `ResolveRelease` 是同一个教训：**两份判据可以互相掩护，
+        /// 漂移了也看不出来**。所以长按判定只能有一份。
+        /// </summary>
+        /// <returns>该上报的级数；0 = 这次不上报。</returns>
+        private int HoldTickCore(double nowMs)
+        {
+            if (!_dragging || _flinging) return 0;
+            // 此刻手不在容差内（正在拖动/抖动）→ 这一轮不报级，但计时器继续跑。
+            if (!_holdStill) return 0;
+            int level = PetGesture.PatLevel((int)(nowMs - _pressClockMs));
+            if (level <= _patLevelReported) return 0;
+            _patLevelReported = level;
+            return level;
+        }
+
+        /// <summary>
         /// 长按检查：够 <see cref="PetGesture.PatMinMs"/> 就升一级。
         ///
-        /// 只在**没移动过**（`_movedSincePress` 为 false）时才升级 —— 否则
-        /// "按住慢慢挪"会一边挪位置一边刷摸头，那是两个手势叠在一起。
+        /// ⚠️ v13 改了两处，都是为了修"高 DPI 下摸头失灵"：
+        ///
+        /// 1. 判据从 `_movedSincePress`（**一旦置位永久为真**）换成
+        ///    `_holdStill`（**可恢复**）。原先手抖一下就把计时器**停掉**，
+        ///    这次按住就彻底作废了；现在手抖只是把静止计时清零，稳回来继续。
+        /// 2. 越界时**不再 `StopHoldTimer()`** —— 停了就永远醒不过来了，
+        ///    而"手抖一下"在高增益鼠标上是常态。计时器空转的成本是每 300ms
+        ///    一次空判断，远低于"摸头再也不灵"。
         /// </summary>
         private void OnHoldTick(object sender, EventArgs e)
         {
-            if (!_dragging || _flinging || _movedSincePress)
-            {
-                // 已经不算"按住不动"了，计时器没必要继续跑。
-                if (_movedSincePress) StopHoldTimer();
-                return;
-            }
-            int level = PetGesture.PatLevel(HeldMs());
-            if (level <= _patLevelReported) return;
-            _patLevelReported = level;
+            int level = HoldTickCore(ClockMs());
+            if (level <= 0) return;
             try { PatInvoked(level); } catch { }
         }
 
@@ -1511,6 +1612,7 @@ namespace DshZhuangFangyiPet
             _dragging = true;
             _pressScreen = new Point(screenX, screenY);
             _movedSincePress = false;
+            _holdStill = true;
             _patLevelReported = 0;
             _pressClockMs = clockMs;
             ResetSamples();
@@ -1520,7 +1622,21 @@ namespace DshZhuangFangyiPet
         /// <summary>自检用：喂一次鼠标移动的位移（走 `OnMouseMove` 的同一条记账）。</summary>
         internal void DiagMoveBy(double dx, double dy)
         {
-            TrackMove(dx, dy);
+            // 传 `_pressClockMs`（而不是真实时钟）：这个重载的语义是"位移发生了，
+            // 但**不关心时刻**"。若传真实时钟，自检里"按下时刻 0"会被换成
+            // 5e6 量级的真值，`PatLevel` 立刻算出负数 → 断言恒假。
+            TrackMove(dx, dy, _pressClockMs);
+        }
+
+        /// <summary>
+        /// v13 自检用：喂一次鼠标移动，并指定**本次移动的时刻**。
+        ///
+        /// 用它与 `DiagPressAt(x, y, t)` 配对，才能断言"越界清零静止计时、
+        /// 稳回来继续报级"这条可恢复语义（见 `TrackMove` 的说明）。
+        /// </summary>
+        internal void DiagMoveAt(double dx, double dy, double nowMs)
+        {
+            TrackMove(dx, dy, nowMs);
         }
 
         /// <summary>自检用：位移是否已被记为"真的移动过"。</summary>
@@ -1529,14 +1645,27 @@ namespace DshZhuangFangyiPet
             get { return _movedSincePress; }
         }
 
-        /// <summary>自检用：模拟一次长按计时器到期（走 `OnHoldTick` 的同一条判定）。</summary>
+        /// <summary>
+        /// 自检用：模拟一次长按计时器到期（走 `HoldTickCore` 的**同一条**判定）。
+        ///
+        /// ⚠️ 这里**必须**是薄壳，不能抄一份判定 —— 见 `HoldTickCore` 的说明
+        /// （回滚验证 R4 抓到过：抄一份的后果是断言全绿而产品是坏的）。
+        /// </summary>
         internal bool DiagHoldTick(double nowMs)
         {
-            if (!_dragging || _flinging || _movedSincePress) return false;
-            int level = PetGesture.PatLevel((int)(nowMs - _pressClockMs));
-            if (level <= _patLevelReported) return false;
-            _patLevelReported = level;
-            return true;   // 调用方据此判断"这次 tick 会真的上报摸头"
+            return HoldTickCore(nowMs) > 0;
+        }
+
+        /// <summary>v13 自检用：手此刻是否仍在"按住不动"的容差内。</summary>
+        internal bool DiagHoldStill
+        {
+            get { return _holdStill; }
+        }
+
+        /// <summary>v13 自检用：设置容差（走与 Program 同一条 `SetGestureTolerance`）。</summary>
+        internal void DiagSetTolerance(double gain, double sensitivity)
+        {
+            SetGestureTolerance(gain, sensitivity);
         }
 
         /// <summary>自检用：已上报到第几级。</summary>
@@ -1575,10 +1704,10 @@ namespace DshZhuangFangyiPet
             // 这里保留 `IsClickGesture` 只为一件事：`Classify` 在**坏数据**上
             // 会 try/catch 回落 Drag，而点击判定要能独立兜住那次异常。
             // 两者口径相同（同一个 `PetGesture.IsClick`），不构成第二套判据。
-            bool isClick = !_movedSincePress && IsClickGesture(dx, dy, elapsedMs);
+            bool isClick = !_movedSincePress && IsClickGesture(dx, dy, elapsedMs, _tolerance);
 
             PetGestureKind kind = PetGestureKind.Drag;
-            try { kind = PetGesture.Classify(dx, dy, elapsedMs, speed); }
+            try { kind = PetGesture.Classify(dx, dy, elapsedMs, speed, _tolerance); }
             catch { kind = PetGestureKind.Drag; }
 
             if (isClick || kind == PetGestureKind.Click) return ReleaseAction.Click;
@@ -1645,6 +1774,12 @@ namespace DshZhuangFangyiPet
             return PetGesture.IsClick(dx, dy, elapsedMs);
         }
 
+        /// <summary>v13：同上，但用**指定的容差**（事件处理器走这一条）。</summary>
+        internal static bool IsClickGesture(double dx, double dy, int elapsedMs, GestureTolerance tol)
+        {
+            return PetGesture.IsClick(dx, dy, elapsedMs, tol);
+        }
+
         /// <summary>自检诊断用：直接跑一次判定。</summary>
         internal static bool DiagIsClick(double dx, double dy, int ms)
         {
@@ -1680,8 +1815,12 @@ namespace DshZhuangFangyiPet
             try
             {
                 Point screen = PointToScreen(e.GetPosition(this));
+                // v13：时刻**只读一次**，同时喂给速度样本与静止计时。
+                // 读两次的话"样本时间"与"静止起点"会差一点点，而摸头的
+                // 判级完全建立在后者上 —— 两个时刻来自同一次移动才自洽。
+                double now = ClockMs();
                 // v10：每个移动都进速度样本（抛掷判据的唯一数据来源）。
-                PushSample(ClockMs(), screen);
+                PushSample(now, screen);
                 // v12：**"按住不动"的容差必须与手势判定一致**。
                 //
                 // 这里原先调 `IsClickGesture(..., 0)`，也就是用**单击**的
@@ -1699,7 +1838,7 @@ namespace DshZhuangFangyiPet
                 // **没有任何断言能发现**。回滚验证证实了这点：我把这行改回
                 // `IsClickGesture(..., 0)`，自检照样 264 全绿。抽出来之后，
                 // 自检能直接驱动这段**真实接线**（见 `SelfTest` 的 v12 接线断言）。
-                TrackMove(screen.X - _pressScreen.X, screen.Y - _pressScreen.Y);
+                TrackMove(screen.X - _pressScreen.X, screen.Y - _pressScreen.Y, now);
                 double dpi = _hwnd == IntPtr.Zero ? 1.0 : PetNative.GetDpiForWindowSafe(_hwnd) / 96.0;
                 if (dpi <= 0) dpi = 1.0;
                 Left = screen.X / dpi - _dragOffsetDip.X;
@@ -1736,6 +1875,24 @@ namespace DshZhuangFangyiPet
             int patLevel;
             double speed;
             ReleaseAction action = ResolveRelease(dx, dy, elapsed, out patLevel, out speed);
+
+            // v13：**每一次松手都记一行真实数据**。
+            //
+            // ⚠️ 为什么必须加（这是本次诊断最大的障碍）：原先只有**成功**的手势
+            // 才留日志（"单击桌宠" / "长按摸头" / "抛掷 v="），失败的那一次
+            // 只有 `EndDrag` 那句"拖动结束 → x,y" —— **没有任何 dx/dy/时长**。
+            // 于是"用户按了 54 次、只认了 4 次点击"这件事，在日志里完全看不出来：
+            // 54 条"拖动结束"看起来就像 54 次正常的挪位置。
+            //
+            // 现在每次松手都带上真实位移/时长/速度/判定结果/当时用的容差，
+            // 下次再有人报"手势不灵"，可以直接从数据读出阈值该定在哪，
+            // 而不是像我这次一样靠猜。
+            PetLog.Info("松手 dx=" + dx.ToString("0.#", CultureInfo.InvariantCulture) +
+                        " dy=" + dy.ToString("0.#", CultureInfo.InvariantCulture) +
+                        " ms=" + elapsed +
+                        " v=" + speed.ToString("0", CultureInfo.InvariantCulture) +
+                        " → " + action +
+                        " [" + _tolerance.Describe() + "]");
 
             StopHoldTimer();
             _pressClockMs = 0;

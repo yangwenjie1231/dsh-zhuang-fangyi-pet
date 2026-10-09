@@ -2935,6 +2935,185 @@ namespace DshZhuangFangyiPet
                 Check(relOff == "none",
                       "⭐⭐ 接线：关掉 longPress 后，松手不再补摸头（开关真的接通）",
                       "Release=" + relOff);
+
+                // ══════════════════════════════════════════════════════════════
+                // (2h) v13：**高指针增益下的手势容差**
+                //
+                // 用户报的 bug："我鼠标DPI平时开的比较高，所以很多手势触发不了"。
+                // 实测证据：日志 54 次按下-抬起，只有 4 次被认成单击、2 次摸头。
+                // 根因：容差是**绝对物理像素**（4/6），而要吸收的是"手抖了多少
+                // 像素" = 手抖物理距离 × 硬件 DPI × **指针增益**。增益 1.5 时
+                // 4px 实际只剩 2.7px。
+                // ══════════════════════════════════════════════════════════════
+
+                // (2h-1) 增益换算表必须是 Windows 那张固定表（12 → 1.5×）。
+                bool gainTable =
+                    Math.Abs(PetNative.SpeedToGain(10) - 1.0) < 1e-9 &&   // 默认速度
+                    Math.Abs(PetNative.SpeedToGain(12) - 1.5) < 1e-9 &&   // 本机实测
+                    Math.Abs(PetNative.SpeedToGain(1) - 1.0 / 32) < 1e-9 &&
+                    Math.Abs(PetNative.SpeedToGain(20) - 3.5) < 1e-9 &&
+                    Math.Abs(PetNative.SpeedToGain(0) - 1.0) < 1e-9 &&    // 越界 → 1.0
+                    Math.Abs(PetNative.SpeedToGain(21) - 1.0) < 1e-9;
+                Check(gainTable,
+                      "⭐⭐ 指针增益换算：Windows 档位表（10→1.0×、12→1.5×、20→3.5×，越界→1.0）",
+                      "gain(10)=" + PetNative.SpeedToGain(10) + " gain(12)=" + PetNative.SpeedToGain(12) +
+                      " gain(20)=" + PetNative.SpeedToGain(20));
+
+                // (2h-2) 容差随增益放大，且**绝不小于**基准（低增益不许更难触发）。
+                GestureTolerance tG1 = GestureTolerance.FromGain(1.0, 1.0);
+                GestureTolerance tG15 = GestureTolerance.FromGain(1.5, 1.0);
+                GestureTolerance tG0 = GestureTolerance.FromGain(0.5, 1.0);
+                GestureTolerance tBad = GestureTolerance.FromGain(double.NaN, 1.0);
+                bool tolScale =
+                    Math.Abs(tG1.ClickMaxPx - 4.0) < 1e-9 &&
+                    Math.Abs(tG1.PatMaxPx - 6.0) < 1e-9 &&
+                    Math.Abs(tG15.ClickMaxPx - 6.0) < 1e-9 &&
+                    Math.Abs(tG15.PatMaxPx - 9.0) < 1e-9 &&
+                    // 0.5× 增益 → 仍是 4/6（下限 = 基准，绝不更小）
+                    Math.Abs(tG0.ClickMaxPx - 4.0) < 1e-9 &&
+                    Math.Abs(tG0.PatMaxPx - 6.0) < 1e-9 &&
+                    // 坏增益 → 回落到 1.0×（安全侧）
+                    Math.Abs(tBad.ClickMaxPx - 4.0) < 1e-9;
+                Check(tolScale,
+                      "⭐⭐⭐ 容差 = 基准 × 增益，**下限是基准**（低增益不许更难触发），坏数据回落 1.0×",
+                      "1.0×→" + tG1.Describe() + " | 1.5×→" + tG15.Describe());
+
+                // (2h-3) 容差有上限：否则"真拖动"会被当成点击。
+                GestureTolerance tHuge = GestureTolerance.FromGain(100.0, 3.0);
+                bool tolCapped =
+                    tHuge.ClickMaxPx <= GestureTolerance.ClickCapPx &&
+                    tHuge.PatMaxPx <= GestureTolerance.PatCapPx &&
+                    tHuge.PatMaxPx > tHuge.ClickMaxPx;
+                Check(tolCapped,
+                      "⭐⭐ 容差有上限（否则真拖动会被判成点击）",
+                      "极大增益 → " + tHuge.Describe());
+
+                // (2h-4) ⭐⭐⭐⭐ 接线：增益 1.5 下，一个"漂移 5px"的按住
+                //         **必须**仍被当成摸头。
+                //
+                // 这正是用户踩中的场景：5px 在 1.0× 容差(6px)内，在 1.5× 下
+                // 相对更小 → 更该成立。而 v12 里 `TrackMove` 用固定 6px 判，
+                // 5px 侥幸通过；把增益接上之后 6px→9px，语义才真正正确。
+                // 这条断言的价值在于它**同时**驱动 SetGestureTolerance 与 TrackMove：
+                // 把 `SetGestureTolerance` 改成空实现 → `DiagTolerance` 仍是默认，
+                // 下面的 11px 断言会红。
+                w.DiagSetTolerance(1.5, 1.0);
+                bool tolWired =
+                    Math.Abs(w.DiagTolerance.ClickMaxPx - 6.0) < 1e-9 &&
+                    Math.Abs(w.DiagTolerance.PatMaxPx - 9.0) < 1e-9;
+                Check(tolWired,
+                      "⭐⭐⭐⭐ 接线：SetGestureTolerance 真的换了窗口用的容差（1.5× → 6/9px）",
+                      "窗口容差=" + w.DiagTolerance.Describe());
+
+                // (2h-5) ⭐⭐⭐⭐ 接线：7px 漂移在 1.5× 下**仍算没动**（9px 容差内），
+                //        而在默认 1.0×（6px）下算动过 —— 两条都要成立，
+                //        否则"容差真的被用上了"就没被证明。
+                // ⚠️ 取 7px 而不是 11px：必须落在**两个容差之间**（6 < 7 ≤ 9）
+                // 才能区分"用没用上"，落在 9px 之外两条都是"动过"，断言恒真。
+                w.DiagPressAt(100, 100, 0);
+                w.DiagMoveAt(7, 0, 10);
+                bool stillAt15 = w.DiagHoldStill && !w.DiagMovedSincePress;
+                w.DiagSetTolerance(1.0, 1.0);
+                w.DiagPressAt(100, 100, 0);
+                w.DiagMoveAt(7, 0, 10);
+                bool movedAt10 = w.DiagMovedSincePress;
+                w.DiagSetTolerance(1.5, 1.0);
+                Check(stillAt15 && movedAt10,
+                      "⭐⭐⭐⭐ 接线：7px 漂移在 1.5× 容差下算「没动」、在 1.0× 下算「动过」" +
+                      "（证明容差真的参与了判定）",
+                      "1.5×→没动=" + stillAt15 + " 1.0×→动过=" + movedAt10);
+
+                // (2h-6) ⭐⭐⭐⭐ 接线：**手抖越界后稳回来，摸头必须还能触发**。
+                //
+                // 这是 v13 修的另一半：原先 `_movedSincePress` 一旦置位就永久为真，
+                // `OnHoldTick` 靠它停掉计时器 → 手抖一下这次按住就彻底作废。
+                // 高增益下容差只有 4px，"抖一下"是常态，所以摸头大面积失灵。
+                // 现在越界只清零静止计时，稳回来重新计时。
+                w.DiagSetTolerance(1.5, 1.0);
+                w.DiagPressAt(100, 100, 0);
+                w.DiagMoveAt(30, 0, 0);        // 抖出去（远超 9px 容差）
+                bool outOfTol = !w.DiagHoldStill;
+                bool tickWhileOut = w.DiagHoldTick(900);   // 越界期间**不该**报级
+                w.DiagMoveAt(0, 0, 1000);      // 手稳回原位（位移回到 0）
+                bool backInTol = w.DiagHoldStill;
+                // 静止重新计时：从 1000ms 起算，需要再满 PatMinMs(350) → 1350ms
+                bool tickTooEarly = w.DiagHoldTick(1200);  // 只静了 200ms → 不报
+                bool tickAfter = w.DiagHoldTick(1400);     // 静了 400ms → 报第 1 级
+                Check(outOfTol && !tickWhileOut && backInTol && !tickTooEarly && tickAfter,
+                      "⭐⭐⭐⭐ 接线：手抖越界 → 不报级；稳回来 → 重新静满 350ms 后照常报摸头" +
+                      "（原先越界一次就永久作废）",
+                      "越界=" + outOfTol + " 越界期间报级=" + tickWhileOut +
+                      " 稳回=" + backInTol + " 早报=" + tickTooEarly + " 到期报=" + tickAfter);
+
+                // (2h-7) ⭐⭐⭐ 已报过的级数**不因抖动而重置**（否则来回抖就能刷级）。
+                w.DiagSetTolerance(1.5, 1.0);
+                w.DiagPressAt(100, 100, 0);
+                bool firstTick = w.DiagHoldTick(900);      // 第 1 级
+                w.DiagMoveAt(30, 0, 950);                  // 抖出去
+                w.DiagMoveAt(0, 0, 1000);                  // 稳回来
+                int lvlAfterShake = w.DiagPatLevelReported;
+                // 重新静满：从 1000ms 起算，第 2 级要到 PatMinMs+PatStepMs=950ms → 1950ms
+                bool reTick = w.DiagHoldTick(1950);
+                Check(firstTick && lvlAfterShake == 1 && reTick && w.DiagPatLevelReported == 2,
+                      "⭐⭐⭐ 接线：抖动不重置已报级数（重新静满只升到第 2 级，不能刷级）",
+                      "首报=" + firstTick + " 抖动后级别=" + lvlAfterShake +
+                      " 重新静满报级=" + reTick + " 最终=" + w.DiagPatLevelReported);
+
+                w.DiagSetTolerance(1.0, 1.0);   // 还原，避免影响后续断言
+
+                // (2h-8) ⭐⭐⭐⭐ 接线：**松手判定**也要用放大后的容差。
+                //
+                // 回滚验证 R6 抓到过：`ResolveRelease` 里把 `_tolerance` 换回
+                // 固定容差，自检**依然 279 全绿** —— 因为 (2h-5)/(2h-6) 只驱动了
+                // `TrackMove`/`HoldTickCore`，而**松手**那条路径没人测。
+                // 于是"增益对点击/抛掷判定生效"这件事完全没有断言保护。
+                //
+                // 这条断言直接驱动 `DiagRelease`（= 事件处理器同款 `ResolveRelease`）：
+                //   · 7px/120ms 松手：1.0× 容差(4px) → 不是点击；1.5× 容差(6px) →
+                //     **也不是点击**（7 > 6），所以这里必须用 **5px** 才能区分。
+                //   · 5px/120ms：1.0×(4px) → 不是点击；1.5×(6px) → 是点击。
+                w.DiagSetTolerance(1.0, 1.0);
+                w.DiagPressAt(100, 100, 0);
+                string relSmall10 = w.DiagRelease(5, 0, 120);      // 5 > 4 → 不是点击
+                w.DiagSetTolerance(1.5, 1.0);
+                w.DiagPressAt(100, 100, 0);
+                string relSmall15 = w.DiagRelease(5, 0, 120);      // 5 ≤ 6 → 是点击
+                Check(relSmall10 == "none" && relSmall15 == "click",
+                      "⭐⭐⭐⭐ 接线：松手判定也吃放大后的容差（5px 在 1.0× 下不是点击、1.5× 下是点击）",
+                      "1.0×→" + relSmall10 + " 1.5×→" + relSmall15);
+
+                // (2h-9) ⭐⭐⭐ 抛掷阈值也随增益放大（否则高增益下"轻轻一碰就飞"）。
+                //
+                // 1000px/s 在 1.0× 阈值(800)之上 → 抛掷；在 1.5× 阈值(1200)之下
+                // → 不是抛掷。这条证明 `FlingMinSpeedPx` 真的接进了判定链。
+                // ⚠️ 这里走**纯函数**（而不是 `DiagRelease`）：松手速度来自样本
+                // 缓冲的**真实时钟**窗口，无头自检造不出"真实的甩动时序"，
+                // 硬造只会得到一个恒为 0 的速度 → 断言恒真（等于没测）。
+                bool flingThresh =
+                    PetGesture.Classify(200, 0, 200, 1000, GestureTolerance.FromGain(1.0, 1.0))
+                        == PetGestureKind.Fling &&
+                    PetGesture.Classify(200, 0, 200, 1000, GestureTolerance.FromGain(1.5, 1.0))
+                        != PetGestureKind.Fling &&
+                    Math.Abs(GestureTolerance.FromGain(1.5, 1.0).FlingMinSpeedPx - 1200.0) < 1e-9;
+                Check(flingThresh,
+                      "⭐⭐⭐ 抛掷阈值随增益同向放大（1000px/s 在 1.0× 下算抛掷、1.5× 下不算）",
+                      "1.0×阈值=800 1.5×阈值=1200；1000px/s → 1.0×=" +
+                      PetGesture.Classify(200, 0, 200, 1000, GestureTolerance.FromGain(1.0, 1.0)) +
+                      " 1.5×=" + PetGesture.Classify(200, 0, 200, 1000, GestureTolerance.FromGain(1.5, 1.0)));
+
+                // (2h-10) ⭐⭐⭐ 用户灵敏度与自动增益**相乘**（两个因子都要生效）。
+                bool bothFactors =
+                    Math.Abs(GestureTolerance.FromGain(1.5, 2.0).ClickMaxPx - 12.0) < 1e-9 &&
+                    Math.Abs(GestureTolerance.FromGain(2.0, 1.5).ClickMaxPx - 12.0) < 1e-9 &&
+                    Math.Abs(GestureTolerance.FromGain(1.0, 2.0).PatMaxPx - 12.0) < 1e-9 &&
+                    // 上限仍然管用（24px 封顶）
+                    Math.Abs(GestureTolerance.FromGain(3.0, 3.0).ClickMaxPx - GestureTolerance.ClickCapPx) < 1e-9;
+                Check(bothFactors,
+                      "⭐⭐⭐ 容差 = 基准 × 系统增益 × 用户灵敏度（两个因子都生效，且仍受上限约束）",
+                      "1.5×2.0→click=" + GestureTolerance.FromGain(1.5, 2.0).ClickMaxPx +
+                      "px；3.0×3.0→click=" + GestureTolerance.FromGain(3.0, 3.0).ClickMaxPx + "px(封顶)");
+
+                w.DiagSetTolerance(1.0, 1.0);   // 还原
             }
             finally
             {
