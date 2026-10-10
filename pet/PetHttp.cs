@@ -803,6 +803,17 @@ namespace DshZhuangFangyiPet
                      "{\"voice\":" + (on ? "true" : "false") + "}");
         }
 
+        /// <summary>
+        /// 手势调试模式（v13.6）→ POST /pet/settings，只带 `debugGestures` 一个字段。
+        ///
+        /// 合并语义：宿主侧 `/pet/settings` 是合并补丁，只带一个字段不会抹掉其它设置。
+        /// </summary>
+        public void PostSettingsDebugGestures(bool on)
+        {
+            PostJson("/api/zhuang-fangyi/pet/settings",
+                     "{\"debugGestures\":" + (on ? "true" : "false") + "}");
+        }
+
         // ── v9：互动 ──────────────────────────────────────────────────────────
 
         /// <summary>允许的互动动作（**唯一真相**，与 Host 的 `INTERACT_KINDS` 同集合）。</summary>

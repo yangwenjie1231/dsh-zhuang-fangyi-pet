@@ -100,6 +100,14 @@ namespace DshZhuangFangyiPet
             string baseDir = AppDataDir();
             PetLog.Init(Path.Combine(baseDir, "pet.log"), opt.Verbose);
 
+            // v13.6：把面包屑接到日志上。
+            //
+            // ⚠️ 必须在 `PetLog.Init` **之后**：接早了日志路径还没定，
+            // 面包屑会写到空路径上（`PetLog` 内部直接 return，静默丢失）。
+            PetBreadcrumb.SetSink(PetLog.Info);
+            // 命令行也能直接开（`--debug-gestures 1`），便于排障时不进设置页。
+            if (opt.DebugGestures) PetBreadcrumb.SetEnabled(true);
+
             if (opt.Help)
             {
                 PetLog.StdoutUtf8(PetOptions.Usage());
@@ -971,8 +979,18 @@ namespace DshZhuangFangyiPet
                 _gestureSens = st.GestureSensitivity;
                 ApplyGestureTolerance();
             }
-            if (st.HasPomodoroBreath && st.PomodoroBreath != _breathOn)
+            // ── 契约 §2 v13.6：手势调试模式（面包屑）─────────────────────
+            //
+            // 与上面几个开关同一条纪律：逐字段 diff（值没变不动）。
+            // `SetEnabled` 自己会打"开启/关闭"的日志并把**开启之前**的
+            // 环形缓冲倒出来 —— 用户的实际流程是"按了几下没反应 → 才去开开关"，
+            // 那几下正是最有价值的证据。
+            if (st.HasDebugGestures && st.DebugGestures != _debugGestures)
             {
+                _debugGestures = st.DebugGestures;
+                PetBreadcrumb.SetEnabled(_debugGestures);
+            }
+            if (st.HasPomodoroBreath && st.PomodoroBreath != _breathOn)            {
                 _breathOn = st.PomodoroBreath;
                 PetLog.Info("settings: 呼吸引导 → " + (_breathOn ? "1" : "0"));
                 // 正在跑的话立刻换显示（不必等下一帧）。
@@ -1402,6 +1420,9 @@ namespace DshZhuangFangyiPet
         private bool _breathOn = PetSettingsInfo.DefaultPomodoroBreath();
         /// <summary>v13：手势灵敏度倍率（来自 `settings.gestureSensitivity`）。</summary>
         private double _gestureSens = PetSettingsInfo.DefaultGestureSensitivity();
+
+        /// <summary>v13.6：手势调试模式（来自 `settings.debugGestures`）。默认关。</summary>
+        private bool _debugGestures;
 
         /// <summary>
         /// v13：把"指针增益 × 用户灵敏度"算成容差并交给窗口。
@@ -1842,8 +1863,30 @@ namespace DshZhuangFangyiPet
         /// 托盘菜单与桌宠右键菜单都走这里，保证"本地改了 → 宿主知道 → 设置页跟着变"。
         /// 失败只记日志（`PostJson` 的既有语义）：宿主不在时不该弹框打断用户。
         /// </summary>
-        private void ReportSettingFlags(bool? clickThrough = null, bool? topmost = null, bool? bubble = null)
+        /// <summary>
+        /// 开/关手势调试模式（v13.6）。
+        ///
+        /// `report=true` 时回报宿主持久化 —— 与 `ReportSettingFlags` 同一纪律：
+        /// **本地改了不回报，设置页就与本地分叉**（用户看到"设置页还是旧值"，
+        /// 而这一条在 v10 已经因为四个开关漏回报踩过一次）。
+        ///
+        /// ⚠️ 回报走 `/pet/settings` 的**合并补丁**语义，只带这一个字段，
+        /// 不会抹掉其它设置。
+        /// </summary>
+        private void SetDebugGestures(bool on, bool report)
         {
+            _debugGestures = on;
+            PetBreadcrumb.SetEnabled(on);
+            if (!report || _http == null) return;
+            try
+            {
+                _http.PostSettingsDebugGestures(on);
+                PetLog.Info("设置已上报 /pet/settings debugGestures=" + (on ? "1" : "0"));
+            }
+            catch (Exception ex) { PetLog.Warn("设置回报失败: " + PetLog.Describe(ex)); }
+        }
+
+        private void ReportSettingFlags(bool? clickThrough = null, bool? topmost = null, bool? bubble = null)        {
             if (_http == null) return;
             try
             {
@@ -2598,6 +2641,24 @@ namespace DshZhuangFangyiPet
             reset.Header = "重置位置(_R)";
             reset.Click += delegate { _win.ReclampPosition(true); };
             m.Items.Add(reset);
+
+            m.Items.Add(new Separator());
+
+            // ── v13.6：手势调试模式（用户点名要的开关）─────────────────────
+            //
+            // 为什么放右键菜单：用户报"手势判定很奇怪"时，**手上正在做的就是右键**
+            //（他刚试完手势）。让他为了开日志去翻设置页，等于把排障门槛设在他
+            // 已经烦了的那一刻。这里一键开、一键关，日志立刻开始记。
+            MenuItem dbg = new MenuItem();
+            dbg.Header = "手势调试日志（面包屑）";
+            dbg.IsCheckable = true;
+            dbg.IsChecked = _debugGestures;
+            dbg.Click += delegate
+            {
+                SetDebugGestures(!_debugGestures, true);
+                dbg.IsChecked = _debugGestures;
+            };
+            m.Items.Add(dbg);
 
             m.Items.Add(new Separator());
 

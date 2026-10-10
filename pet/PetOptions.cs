@@ -32,6 +32,15 @@ namespace DshZhuangFangyiPet
         /// </summary>
         public string ShotsDir;
         public bool Verbose;               // --verbose（未在契约中，纯诊断；默认不额外输出）
+
+        /// <summary>
+        /// `--debug-gestures 0|1`：手势调试模式（面包屑日志）的**命令行入口**。
+        ///
+        /// 正常路径是设置页/右键菜单（`settings.debugGestures`，可持久化）。
+        /// 这个参数是给排障用的：不进设置页就能直接开，且**只影响本次运行**。
+        /// 实际生效值由快照实时覆盖 —— 与 `--voice` 同一套写法。
+        /// </summary>
+        public bool DebugGestures;
         public bool Help;                  // --help
 
         /// <summary>
@@ -183,6 +192,9 @@ namespace DshZhuangFangyiPet
                         break;
                     case "--voice":
                         if (!TryBool(val, out o.VoiceEnabled)) { err = "--voice 只能是 0/1: " + val; return null; }
+                        break;
+                    case "--debug-gestures":
+                        if (!TryBool(val, out o.DebugGestures)) { err = "--debug-gestures 只能是 0/1: " + val; return null; }
                         break;
                     case "--dark":
                         if (!TryDark(val, out o.DarkOverride)) { err = "--dark 只能是 auto/0/1: " + val; return null; }

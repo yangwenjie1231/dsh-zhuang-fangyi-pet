@@ -102,6 +102,16 @@ namespace DshZhuangFangyiPet
         /// </summary>
         public bool HasGestureSensitivity; public double GestureSensitivity;
 
+        /// <summary>
+        /// 契约 §2 v13.6：**手势调试模式**（面包屑日志）。
+        ///
+        /// 用户原话："手势的目前触发判定还是很奇怪。能不能加入类似可选的开关，
+        /// 就是比如说开启调试模式，用面包屑记录更详细的日志"。
+        ///
+        /// 旧快照缺省 = false（不动现状：不记面包屑）。
+        /// </summary>
+        public bool HasDebugGestures; public bool DebugGestures;
+
         /// <summary>非法/缺省值一律回落 focus-dsh（task-6 验收点）。</summary>
         public static string NormalizeDoubleClick(string v)
         {
@@ -600,6 +610,13 @@ namespace DshZhuangFangyiPet
                     si.HasGestureSensitivity = true;
                     si.GestureSensitivity = PetSettingsInfo.ClampGestureSensitivity(
                         st.Num("gestureSensitivity", PetSettingsInfo.DefaultGestureSensitivity()));
+                }
+                // ── 契约 §2 v13.6：手势调试模式（缺省 false = 不动现状）────────
+                if (st.Get("debugGestures") != null &&
+                    st.Get("debugGestures").Kind == PetJson.JVal.TBool)
+                {
+                    si.HasDebugGestures = true;
+                    si.DebugGestures = st.Bool("debugGestures", false);
                 }
                 s.Settings = si;
             }

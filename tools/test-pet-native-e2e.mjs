@@ -119,7 +119,12 @@ fs.writeFileSync(path.join(tmpHome, 'zhuang-fangyi-pet', 'settings.json'), JSON.
   // 设置页能改、`settings.json` 里也有，但 `exeSettings()` **根本没发给 exe**，
   // 于是开关全是装饰品（用户报"手势没法正常触发"的原因之一）。
   // 写一个非默认值(2.0)，才能证明"这个键真的穿过了宿主 → 快照 → exe"。
-  gestureSensitivity: 2
+  gestureSensitivity: 2,
+  // v13.6：手势调试模式**显式设成 true**（默认是 false）。
+  // 同一个坑的第三次防线：设置页能勾、`settings.json` 里也有，
+  // 但只要 `exeSettings()` 漏发，exe 就永远不开面包屑 ——
+  // 而用户报"手势判定很奇怪"时**正是要靠它**。设成 true 才能证明它穿到了快照。
+  debugGestures: true
 }, null, 2), 'utf8')
 
 const { apply } = await import(`file://${path.join(ROOT, 'index.js').replace(/\\/g, '/')}`)
@@ -411,6 +416,22 @@ await ok('⭐⭐⭐ 宿主快照的 settings 带 gestureSensitivity（漏了它�
   assert.equal(snap.settings.gestureSensitivity, 2,
     `快照里的 gestureSensitivity 是 ${snap.settings.gestureSensitivity}，应为设置文件里的 2` +
     '（宿主 exeSettings() 漏发了这个键 → 设置页的滑杆是装饰品）')
+})
+
+await ok('⭐⭐⭐ 宿主快照的 settings 带 debugGestures（漏了它面包屑永远不开）', async () => {
+  const args = spawnedArgs.argv
+  const token = args[args.indexOf('--token') + 1]
+  const res = await fetch(`http://127.0.0.1:${port}/api/zhuang-fangyi/pet/state`, {
+    headers: { authorization: `Bearer ${token}` }
+  })
+  assert.equal(res.status, 200)
+  const snap = await res.json()
+  assert.ok(snap.settings, '快照里没有 settings 块')
+  // 设置文件里写的是 true（默认 false）—— 必须是 true。
+  // 漏发的话 exe 侧 `HasDebugGestures` 为 false → 用户勾了也没日志。
+  assert.equal(snap.settings.debugGestures, true,
+    `快照里的 debugGestures 是 ${snap.settings.debugGestures}，应为设置文件里的 true` +
+    '（宿主 exeSettings() 漏发了这个键 → 设置页的开关是装饰品）')
 })
 
 await ok('⭐⭐⭐⭐ exe 日志里出现"手势容差 →"且数值随灵敏度放大（真接线）', async () => {

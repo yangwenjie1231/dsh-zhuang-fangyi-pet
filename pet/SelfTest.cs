@@ -1232,6 +1232,36 @@ namespace DshZhuangFangyiPet
                   !PetSettingsInfo.DefaultPomodoroBreath(),
                   "⭐⭐ 手势开关缺省值唯一真相：长按/抛掷默认开，悬停/呼吸默认关",
                   "longPress=1 fling=1 hover=0 breath=0");
+
+            // (15c) v13.6：手势调试模式（面包屑开关）的**解析链**。
+            //
+            // 用户："手势的目前触发判定还是很奇怪……开启调试模式，用面包屑记录更详细的日志"。
+            // 这一条验 exe 侧能不能从快照里读到它 —— 链路是
+            // 设置页 → `settings.json` → 宿主 `exeSettings()` → 快照 → exe。
+            // 宿主那半段由 `test-pet-native-e2e.mjs` 断言（快照里必须带 debugGestures），
+            // 这里补上 exe 这半段：**两边都断言，中间断了才会红**。
+            PetSnapshot noDbg = PetSnapshot.Parse("{\"rev\":1,\"petState\":\"idle\",\"settings\":{}}");
+            bool dbgAbsentOk = noDbg != null && noDbg.Settings != null &&
+                               !noDbg.Settings.HasDebugGestures;
+            PetSnapshot withDbg = PetSnapshot.Parse(
+                "{\"rev\":1,\"petState\":\"idle\",\"settings\":{\"debugGestures\":true}}");
+            bool dbgOnOk = withDbg != null && withDbg.Settings != null &&
+                           withDbg.Settings.HasDebugGestures && withDbg.Settings.DebugGestures;
+            PetSnapshot dbgOff = PetSnapshot.Parse(
+                "{\"rev\":1,\"petState\":\"idle\",\"settings\":{\"debugGestures\":false}}");
+            bool dbgOffOk = dbgOff != null && dbgOff.Settings != null &&
+                            dbgOff.Settings.HasDebugGestures && !dbgOff.Settings.DebugGestures;
+            // 坏类型（字符串）必须当"没有这个键"，不能抛也不能当成 true
+            PetSnapshot dbgBad = PetSnapshot.Parse(
+                "{\"rev\":1,\"petState\":\"idle\",\"settings\":{\"debugGestures\":\"yes\"}}");
+            bool dbgBadOk = dbgBad != null && dbgBad.Settings != null &&
+                            !dbgBad.Settings.HasDebugGestures;
+            Check(dbgAbsentOk && dbgOnOk && dbgOffOk && dbgBadOk,
+                  "⭐⭐ 手势调试开关能从快照解析（缺键=false / true / false / 坏类型都正确）",
+                  "缺键=" + (dbgAbsentOk ? "无标记" : "错") +
+                  " true→" + (dbgOnOk ? "开" : "错") +
+                  " false→" + (dbgOffOk ? "关" : "错") +
+                  " 坏类型→" + (dbgBadOk ? "当缺键" : "错"));
         }
 
         /// <summary>
@@ -4883,6 +4913,231 @@ namespace DshZhuangFangyiPet
                     }
                     Pump(80);
                 }
+                // ── (11c) v13.6 手势面包屑（用户点名要的调试开关）──
+                //
+                // 用户："手势的目前触发判定还是很奇怪。能不能加入类似可选的开关，
+                // 就是比如说开启调试模式，用面包屑记录更详细的日志"。
+                //
+                // 这一节验三件事：① 解释函数说得对不对（核心价值）；
+                // ② 关闭时**不落盘但缓冲**（"开开关之前那几下"能看到的前提）；
+                // ③ 打开时把历史倒出来。
+                {
+                    PetBreadcrumb.DiagReset();
+                    GestureTolerance tol = GestureTolerance.FromGain(1.5, 1.0);
+
+                    // ① 解释函数：每种结局都要给出**说得通**的一句话
+                    string exClick = PetBreadcrumb.Explain(1, 0, 100, 0, tol, false, true, 0, true, true);
+                    string exPat = PetBreadcrumb.Explain(2, 0, 900, 0, tol, false, true, 0, true, true);
+                    string exPatOff = PetBreadcrumb.Explain(2, 0, 900, 0, tol, false, true, 0, false, true);
+                    string exPatDone = PetBreadcrumb.Explain(2, 0, 900, 0, tol, false, true, 2, true, true);
+                    // ⚠️ 抛掷的用例必须**真的**落在 Fling 上：dx=3/ms=200 其实是单击
+                    //（位移 3px ≤ 容差 6px 且 200ms ≤ 300ms）—— 我第一版就是这么写的，
+                    // 于是断言红得莫名其妙。要 Fling 就得**位移超容差**（30px）。
+                    string exFling = PetBreadcrumb.Explain(30, 0, 200, 5000, tol, true, false, 0, true, true);
+                    string exFlingOff = PetBreadcrumb.Explain(30, 0, 200, 5000, tol, true, false, 0, true, false);
+                    string exNothing = PetBreadcrumb.Explain(30, 20, 800, 50, tol, true, false, 0, true, true);
+                    string exMoved = PetBreadcrumb.Explain(2, 0, 100, 0, tol, true, true, 0, true, true);
+
+                    bool exOk = exClick.Contains("命中**单击**") &&
+                                exPat.Contains("命中**摸头**") &&
+                                exPatOff.Contains("开关是**关的**") &&
+                                exPatDone.Contains("已经报到第 2 级") &&
+                                exFling.Contains("命中**抛掷**") &&
+                                exFlingOff.Contains("开关是**关的**") &&
+                                exNothing.Contains("什么都没命中") &&
+                                exMoved.Contains("命中**单击**");
+                    Check(exOk,
+                          "⭐⭐⭐ 面包屑能说清**为什么没触发**（每种结局一句话）",
+                          "单击→" + Short(exClick) + "｜摸头关→" + Short(exPatOff) +
+                          "｜已报级→" + Short(exPatDone) + "｜没命中→" + Short(exNothing));
+
+                    // ①b ⭐⭐⭐⭐ **解释不许与判定矛盾**。
+                    //
+                    // ⚠️ 这条是被我自己的实现打出来的：第一版 `Explain` 自己重排了
+                    // 一遍判据顺序，于是对 `(30,20,800ms,5000px/s)` 说"按拖动处理"，
+                    // 而 `Classify` 在同一组输入上返回 **Fling** —— 自相矛盾。
+                    // 一份**与判定不一致的解释**比没有解释更糟：它把人引向错方向。
+                    //
+                    // 判据：拿一批覆盖各分支的输入，逐个比对
+                    // "`Classify` 的结果"与"`Explain` 声称命中的手势"必须一致。
+                    object[][] cases = new object[][]
+                    {
+                        new object[] { 1.0, 0.0, 100, 0.0 },
+                        new object[] { 3.0, 0.0, 200, 0.0 },
+                        new object[] { 2.0, 0.0, 320, 0.0 },     // 空档 → Click
+                        new object[] { 2.0, 0.0, 900, 0.0 },     // Pat
+                        new object[] { 2.0, 0.0, 5000, 0.0 },    // 超 PatMaxMs → Drag
+                        new object[] { 3.0, 0.0, 200, 5000.0 },  // Fling
+                        new object[] { 30.0, 20.0, 800, 50.0 },  // Drag（位移超）
+                        new object[] { 30.0, 20.0, 800, 5000.0 },// 时长够 + 速度够 → Fling
+                        new object[] { 40.0, 0.0, 40, 3000.0 },  // 太短 → Drag
+                        new object[] { 10.0, 10.0, 1000, 0.0 }   // 位移超 → Drag
+                    };
+                    int mismatches = 0;
+                    StringBuilder mismatchDetail = new StringBuilder();
+                    for (int ci = 0; ci < cases.Length; ci++)
+                    {
+                        double cdx = (double)cases[ci][0];
+                        double cdy = (double)cases[ci][1];
+                        int cms = (int)cases[ci][2];
+                        double cv = (double)cases[ci][3];
+                        PetGestureKind ck = PetGesture.Classify(cdx, cdy, cms, cv, tol);
+                        string exp = PetBreadcrumb.Explain(cdx, cdy, cms, cv, tol,
+                                                           false, true, 0, true, true);
+                        string want;
+                        if (ck == PetGestureKind.Click) want = "单击";     // 含"空档兜底"那种写法
+                        else if (ck == PetGestureKind.Pat) want = "命中**摸头**";
+                        else if (ck == PetGestureKind.Fling) want = "命中**抛掷**";
+                        else want = "什么都没命中";
+                        if (exp.IndexOf(want, StringComparison.Ordinal) < 0)
+                        {
+                            mismatches++;
+                            if (mismatchDetail.Length < 120)
+                            {
+                                mismatchDetail.Append("(" + cdx + "," + cdy + "," + cms + "," + cv +
+                                                      ") 判定=" + ck + " 解释=" + Short(exp) + " ");
+                            }
+                        }
+                    }
+                    Check(mismatches == 0,
+                          "⭐⭐⭐⭐ 面包屑的解释**与判定结果一致**（不自己重排判据、不撒谎）",
+                          "不一致 " + mismatches + "/" + cases.Length + " 例" +
+                          (mismatches == 0 ? "" : "：" + mismatchDetail.ToString()));
+
+                    // ⭐⭐ "什么都没命中"必须给出**具体差在哪**（否则等于没说）。
+                    //
+                    // ⚠️ 判据不能只看"有没有那两个字"（回滚 B5 全绿暴露的洞）：
+                    // 我第一版只查 `Contains("位移")`，而**别的分支**里也有"位移"
+                    // 这两个字 → 把"差在哪"整段删掉照样通过。
+                    // 改成查**具体数值**：位移超了要报出位移与容差，
+                    // 速度不够要报出速度与门槛。
+                    string exShort = PetBreadcrumb.Explain(40, 0, 40, 3000, tol, true, false, 0, true, true);
+                    bool exNothingUseful =
+                        exNothing.Contains("36.1px") && exNothing.Contains("9px") &&
+                        exNothing.Contains("50px/s") && exNothing.Contains("1200px/s");
+                    bool exShortUseful = exShort.Contains("40ms") && exShort.Contains("60ms");
+                    Check(exNothingUseful && exShortUseful,
+                          "⭐⭐ 「什么都没命中」会报出**具体差多少**（数值，不是套话）",
+                          "位移超→" + Short(exNothing) + "｜时长太短→" + Short(exShort));
+
+                    // ② 关闭时：写缓冲、**不落盘**
+                    List<string> sunk = new List<string>();
+                    PetBreadcrumb.SetSink(delegate(string line) { sunk.Add(line); });
+                    PetBreadcrumb.DiagReset();
+                    PetBreadcrumb.SetEnabled(false);
+                    int before = sunk.Count;
+                    PetBreadcrumb.Trace("测试面包屑 A");
+                    PetBreadcrumb.Trace("测试面包屑 B");
+                    bool bufferedOnly = sunk.Count == before && PetBreadcrumb.DiagRing().Count >= 2;
+                    Check(bufferedOnly,
+                          "⭐⭐ 关闭时**只进环形缓冲、不落盘**（这是「开开关前那几下」能看到的前提）",
+                          "落盘条数=" + (sunk.Count - before) + "（应为 0）" +
+                          " 缓冲条数=" + PetBreadcrumb.DiagRing().Count + "（应 ≥2）");
+
+                    // ③ 打开时：把**开启之前**的历史一起倒出来
+                    PetBreadcrumb.SetEnabled(true);
+                    List<string> ring = PetBreadcrumb.DiagRing();
+                    bool flushedHistory = false;
+                    for (int i = 0; i < sunk.Count; i++)
+                    {
+                        if (sunk[i].IndexOf("测试面包屑 A", StringComparison.Ordinal) >= 0)
+                            flushedHistory = true;
+                    }
+                    bool hasHeader = false;
+                    for (int i = 0; i < sunk.Count; i++)
+                    {
+                        if (sunk[i].IndexOf("调试模式开启", StringComparison.Ordinal) >= 0)
+                            hasHeader = true;
+                    }
+                    Check(flushedHistory && hasHeader,
+                          "⭐⭐⭐ 打开开关时把**开启之前**的面包屑一起倒出来（真实流程不丢证据）",
+                          "倒出历史=" + flushedHistory + " 有开启说明=" + hasHeader +
+                          " 落盘总条数=" + sunk.Count);
+
+                    // ④ 打开之后：新面包屑**实时落盘**
+                    int afterOpen = sunk.Count;
+                    PetBreadcrumb.Trace("测试面包屑 C");
+                    bool liveWrite = sunk.Count == afterOpen + 1;
+                    Check(liveWrite,
+                          "⭐ 打开之后新面包屑实时落盘",
+                          "新增落盘=" + (sunk.Count - afterOpen) + "（应为 1）");
+
+                    // ⑤ 环形缓冲会溢出，但**不许假装没发生**
+                    PetBreadcrumb.DiagReset();
+                    for (int i = 0; i < PetBreadcrumb.RingCapacity + 25; i++)
+                        PetBreadcrumb.Trace("填充 " + i);
+                    bool ringBounded = PetBreadcrumb.DiagRing().Count == PetBreadcrumb.RingCapacity;
+                    bool droppedCounted = PetBreadcrumb.DiagDropped >= 25;
+                    Check(ringBounded && droppedCounted,
+                          "⭐⭐ 环形缓冲有界，且丢弃条数被记下（不静默丢证据）",
+                          "缓冲=" + PetBreadcrumb.DiagRing().Count + "/" + PetBreadcrumb.RingCapacity +
+                          " 记录丢弃=" + PetBreadcrumb.DiagDropped + "（应 ≥25）");
+
+                    // ⑥ ⭐⭐⭐ 前缀固定 + **产品接线**（回滚 B6/B7 全绿暴露的洞）。
+                    //
+                    // ⚠️ 上面五条只验 `PetBreadcrumb` **自己**的行为：
+                    //   · 把 `PetBreadcrumb.SetSink(PetLog.Info)` 从 Program 删掉
+                    //     （面包屑永远到不了日志）→ 照样全绿；
+                    //   · 把快照里 `debugGestures` 的应用那段删掉
+                    //     （设置页的开关变成装饰品）→ 也照样全绿。
+                    // 两条都是"接线"，而接线必须**在源码层面**钉住
+                    //（`PetApp` 要跑起来才能驱动它们，自检没有那个环境）。
+                    //
+                    // 这与 `test-pet-interactions.mjs` 验"菜单有没有用中文名"
+                    // 是同一手法：**结构断言落在源码字面量上**。
+                    PetBreadcrumb.DiagReset();
+                    PetBreadcrumb.Trace("前缀检查");
+                    List<string> r2 = PetBreadcrumb.DiagRing();
+                    bool prefixOk = r2.Count == 1 &&
+                                    r2[0].StartsWith(PetBreadcrumb.Prefix, StringComparison.Ordinal);
+                    Check(prefixOk,
+                          "⭐ 面包屑行以固定前缀开头（便于 grep 排障）",
+                          "首行=" + (r2.Count > 0 ? r2[0] : "(空)"));
+
+                    // ⑦ ⭐⭐⭐ 产品**真的接了** sink、也真的应用了设置开关。
+                    string progSrc = ReadSelfSource("Program.cs");
+                    string winSrc = ReadSelfSource("PetWindow.cs");
+                    bool sinkWired = progSrc != null &&
+                                     progSrc.IndexOf("PetBreadcrumb.SetSink(PetLog.Info)",
+                                                     StringComparison.Ordinal) >= 0;
+                    bool settingApplied = progSrc != null &&
+                                          progSrc.IndexOf("PetBreadcrumb.SetEnabled(_debugGestures)",
+                                                          StringComparison.Ordinal) >= 0;
+                    Check(sinkWired && settingApplied,
+                          "⭐⭐⭐ 面包屑**真的接进了产品**（sink 接上 + 设置开关生效）",
+                          "接了 sink=" + sinkWired + " 开关生效=" + settingApplied +
+                          "（任一为 False 时：日志里永远看不到面包屑 / 设置页的开关是装饰品）");
+
+                    // ⑧ ⭐⭐⭐ 原先**什么都不记**的路径现在都有面包屑。
+                    //
+                    // 这是整个功能的**主要用途**（用户："按了没反应，日志里什么都没有"）。
+                    // 少记一条就等于那类问题仍然查不了，所以逐条钉住。
+                    string[] needTrace = new string[]
+                    {
+                        "落在**透明像素**上",       // 点在透明处（最常见）
+                        "抛掷动画进行中",            // 动画期间吞输入
+                        "没有按下记录",              // 抬起时没有按下
+                        "移动**越出**容差",          // 摸头失灵的现场
+                        "移动回到容差内",            // 稳回来会推迟摸头
+                        "长按计时器报级"             // 摸头真的报了级
+                    };
+                    List<string> missingTrace = new List<string>();
+                    for (int i = 0; i < needTrace.Length; i++)
+                    {
+                        if (winSrc == null ||
+                            winSrc.IndexOf(needTrace[i], StringComparison.Ordinal) < 0)
+                            missingTrace.Add(needTrace[i]);
+                    }
+                    Check(missingTrace.Count == 0,
+                          "⭐⭐⭐ 原先静默的路径现在都记面包屑（否则那类问题仍然查不了）",
+                          missingTrace.Count == 0 ? "6 条全在"
+                          : ("缺 " + missingTrace.Count + " 条：" + string.Join("、", missingTrace.ToArray())));
+
+                    // 复位：别把自检自己的面包屑留给后续断言
+                    PetBreadcrumb.SetEnabled(false);
+                    PetBreadcrumb.DiagReset();
+                }
+
                 // ── (12) 离屏截图：把每个窗口渲染成 PNG，供人眼确认 ──
                 //
                 // `RenderTargetBitmap` 渲染的是**已排布的元素**，不需要窗口真的显示
@@ -4902,6 +5157,41 @@ namespace DshZhuangFangyiPet
             {
                 try { if (Directory.Exists(dir)) Directory.Delete(dir, true); } catch { }
             }
+        }
+
+        /// <summary>
+        /// 读一个 `pet/*.cs` 源文件（找不到返回 null）。
+        ///
+        /// 用途：**接线类断言**。有些行为（`PetBreadcrumb.SetSink(...)` 有没有接上、
+        /// 菜单项用了哪个名字）只有把 `PetApp` 跑起来才驱动得到，而自检没有那个环境。
+        /// 那时以**源码字面量**为判据 —— 不精确，但足以挡住"删掉那一行"这类真实回归
+        ///（与 `test-pet-assets.mjs` 验"台词有没有接线"、`test-pet-interactions.mjs`
+        ///  验"菜单有没有用中文名"是同一手法）。
+        /// </summary>
+        private static string ReadSelfSource(string fileName)
+        {
+            try
+            {
+                string petDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "pet");
+                if (!Directory.Exists(petDir)) petDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "pet");
+                string p = Path.Combine(petDir, fileName);
+                if (!File.Exists(p)) return null;
+                return File.ReadAllText(p, System.Text.Encoding.UTF8);
+            }
+            catch { return null; }
+        }
+
+        /// <summary>
+        /// 面包屑断言的 detail 里截断长句子（断言输出要能一眼看完）。
+        /// </summary>
+        private static string Short(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "(空)";
+            // 取第一句（面包屑的解释以句号/分号分段）
+            int cut = s.IndexOf('。');
+            string one = cut > 0 ? s.Substring(0, cut) : s;
+            if (one.Length > 46) one = one.Substring(0, 46) + "…";
+            return one;
         }
 
         /// <summary>

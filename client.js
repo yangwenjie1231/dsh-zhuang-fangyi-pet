@@ -222,6 +222,9 @@ window.__ModuleLoader__.load({
         gestureSensitivity: '手势灵敏度',
         gestureSensitivityHint: '点不中 / 按不住就调大（高 DPI 鼠标常见）',
         noteGesture: '手势容差按"屏幕像素"判定，而手抖落成多少像素 = 手抖距离 × 鼠标硬件 DPI × 系统指针增益。系统指针增益桌宠能自己读（并自动补偿），但**鼠标硬件 DPI 没有接口可读** —— 所以「我 DPI 开得高」那一半只能靠这个滑杆补。调大的代价：慢慢拖动一小段距离时，也可能被当成点击。',
+        debugGestures: '手势调试日志（面包屑）',
+        debugGesturesHint: '记下每一次按下/移动/松手，并说明为什么没触发',
+        debugGesturesNote: '打开后，桌宠会把每一次按下、移动、松手都写进日志 —— **包括原先什么都不记的那些情况**（点在透明像素上、抛掷动画中、抬起时没有按下记录），并给出「为什么没触发」的一句话解释。日志在 `%LOCALAPPDATA%\\DSH-ZhuangFangyi-Pet\\pet.log`，搜 `[手势]` 即可。**开启之前**最后 200 条也会一并倒出来，所以「按了几下没反应 → 再来开开关」这个流程不会丢掉证据。默认关闭：面包屑很密集，常态开着会淹掉日志。右键菜单里也有一键开关。',
         hoverReact: '鼠标停在她身上时看你一眼',
         hoverReactHint: '默认关闭 —— 这是唯一她会主动找你的互动',
         // ── v10：「今天」页签 ──────────────────────────────────────────────
@@ -478,6 +481,9 @@ window.__ModuleLoader__.load({
         gestureSensitivity: 'Gesture sensitivity',
         gestureSensitivityHint: 'Raise this if taps/holds miss (common with high-DPI mice)',
         noteGesture: 'Gesture tolerance is judged in screen pixels, while hand tremor in pixels = tremor distance × mouse hardware DPI × system pointer gain. The pet can read the system pointer gain itself (and compensates automatically), but mouse hardware DPI has no readable API — so the "my DPI is high" half can only be covered by this slider. The tradeoff: dragging a short distance slowly may also register as a tap.',
+        debugGestures: 'Gesture debug log (breadcrumbs)',
+        debugGesturesHint: 'Record every press/move/release and why it did not fire',
+        debugGesturesNote: 'When on, the pet logs every press, move and release — including the cases that previously logged nothing (presses on transparent pixels, during a fling animation, or a release with no recorded press) — plus a one-line explanation of why the gesture did not fire. The log is at `%LOCALAPPDATA%\\DSH-ZhuangFangyi-Pet\\pet.log`; search for `[手势]`. The last 200 entries from before you enabled it are flushed too, so "tap a few times with no reaction, then enable it" keeps the evidence. Off by default: breadcrumbs are dense. There is also a one-click toggle in the right-click menu.',
         hoverReact: 'Glance up when the cursor rests on her',
         hoverReactHint: 'Off by default — the only interaction she starts herself',
         // ── v10: Today tab ────────────────────────────────────────────────
@@ -831,7 +837,9 @@ window.__ModuleLoader__.load({
         'pomodoroBreath', 'flingEnabled', 'longPress', 'hoverReact',
         'voice', 'chatEnabled',
         // ⚠️ 这三个曾经漏在白名单外 —— 见上面 `memoryAuto` 的说明。
-        'memoryAuto', 'speakReplies', 'ttsResident']) {
+        'memoryAuto', 'speakReplies', 'ttsResident',
+        // v13.6：手势调试日志。同样必须在这里，否则设置页能勾、但发不出去。
+        'debugGestures']) {
         if (typeof input[k] === 'boolean') out[k] = input[k]
       }
       // 番茄钟时长：与 Host 的 settings.js **同范围**（三处口径必须一致：
@@ -2317,6 +2325,19 @@ window.__ModuleLoader__.load({
             suffix: '×',
             onChange: v => set({ gestureSensitivity: v })
           }),
+          // v13.6：手势调试模式（面包屑日志）。
+          // 用户："手势的目前触发判定还是很奇怪。能不能加入类似可选的开关，
+          // 就是比如说开启调试模式，用面包屑记录更详细的日志"。
+          // 放在灵敏度**之后**：灵敏度是"让它能触发"，调试日志是"触发不了时怎么看"。
+          h(Toggle, {
+            key: 'debugGestures',
+            label: t('debugGestures'),
+            hint: t('debugGesturesHint'),
+            value: settings.debugGestures,
+            onChange: v => set({ debugGestures: v })
+          }),
+          h('div', { key: 'debugGesturesNote', className: 'zf-pet-settings__note' },
+            t('debugGesturesNote')),
           // v10：手势提示只有**一次**（10 秒气泡），很容易错过 ——
           // 而"错过之后再也看不到"正是用户报的那个问题。所以给一个
           // 随时能再要一次的入口（托盘里也有一份）。

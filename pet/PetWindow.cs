@@ -1522,17 +1522,31 @@ namespace DshZhuangFangyiPet
             // 一次点击 —— 用户明明只是甩了她一下，却收到"打招呼"的互动。
             if (_flinging)
             {
+                // ⚠️ 面包屑：这条路径原先**什么都不记**。用户"甩出去之后又想点她"
+                // 时会发现"点了没反应"，而日志里一片空白 —— 无从判断。
+                PetBreadcrumb.Trace("按下被吞：抛掷动画进行中（动画结束前不收鼠标输入）");
                 e.Handled = true;
                 return;
             }
             if (e.ClickCount == 2)
             {
+                PetBreadcrumb.Trace("双击（ClickCount=2）→ 交给双击行为，不进入手势判定");
                 e.Handled = true;
                 DoubleClickInvoked();   // task-6：行为由 settings.doubleClick 决定（Program 装配）
                 return;
             }
             Point p = e.GetPosition(this);
-            if (!HitTestDip(p)) return;
+            if (!HitTestDip(p))
+            {
+                // ⚠️⚠️ 这是**最要紧**的一条：点在透明像素上时原来完全静默。
+                // 而"我明明点了她"与"点在了她旁边的透明处"在日志里长得一模一样
+                //（都是一片空白）—— 这正是"手势判定很奇怪"最常见的真因之一。
+                PetBreadcrumb.Trace("按下落在**透明像素**上 → 不接收（她没有吃掉这次点击）" +
+                                    " dip=(" + Fmt(p.X) + "," + Fmt(p.Y) + ")" +
+                                    " 窗口=" + Fmt(ActualWidth) + "x" + Fmt(ActualHeight) +
+                                    " 素材=" + (_sheet == null ? "(未加载)" : _sheet.File));
+                return;
+            }
 
             _dragging = true;
             _dragOffsetDip = p;
@@ -1553,6 +1567,9 @@ namespace DshZhuangFangyiPet
             PushSample(_pressClockMs, _pressScreen);
             _patLevelReported = 0;
             StartHoldTimer();
+
+            PetBreadcrumb.Trace("按下 pos=(" + Fmt(_pressScreen.X) + "," + Fmt(_pressScreen.Y) +
+                                ") 容差[" + _tolerance.Describe() + "]");
 
             try { CaptureMouse(); } catch { }
             e.Handled = true;
@@ -1649,11 +1666,27 @@ namespace DshZhuangFangyiPet
             //     `PatMinMs`，摸头会从"偶尔不灵"变成"完全不可能触发"。
             if (still)
             {
-                if (!_holdStill) _pressClockMs = nowMs;
+                if (!_holdStill)
+                {
+                    _pressClockMs = nowMs;
+                    // 面包屑：手**稳回来**了 —— 静止计时从这一刻重算（会推迟摸头）
+                    PetBreadcrumb.Trace("移动回到容差内（位移 " + Fmt(Math.Sqrt(dx * dx + dy * dy)) +
+                                        "px ≤ " + Fmt(_tolerance.PatMaxPx) +
+                                        "px）→ 静止计时**从这一刻重算**（摸头会晚 " +
+                                        "PatMinMs 才可能触发）");
+                }
                 _holdStill = true;
                 return;
             }
 
+            if (_holdStill)
+            {
+                // 面包屑：**刚越界**这一下（只记跳变，不是每次都记 —— 拖动时 125~500 次/秒）
+                PetBreadcrumb.Trace("移动**越出**容差（位移 " + Fmt(Math.Sqrt(dx * dx + dy * dy)) +
+                                    "px > " + Fmt(_tolerance.PatMaxPx) +
+                                    "px）→ 手不在容差内，长按计时器暂停报级" +
+                                    "（但仍继续跑，稳回来可恢复）");
+            }
             _holdStill = false;
             // `_movedSincePress` 仍然是**一次性**的：它只用来排除"单击"，
             // 而"这次按下动过没有"这个事实不该因为手抖回来而消失
@@ -1833,6 +1866,7 @@ namespace DshZhuangFangyiPet
         {
             int level = HoldTickCore(ClockMs());
             if (level <= 0) return;
+            PetBreadcrumb.Trace("长按计时器报级 → 第 " + level + " 级摸头");
             try { PatInvoked(level); } catch { }
         }
 
@@ -2242,6 +2276,14 @@ namespace DshZhuangFangyiPet
             return PetGesture.IsClick(dx, dy, elapsedMs, tol);
         }
 
+        /// <summary>面包屑里格式化数字（C#5 没有字符串插值，统一走这里）。</summary>
+        private static string Fmt(double v)
+        {
+            if (double.IsNaN(v)) return "NaN";
+            if (double.IsInfinity(v)) return "Inf";
+            return v.ToString("0.#", CultureInfo.InvariantCulture);
+        }
+
         /// <summary>自检诊断用：直接跑一次判定。</summary>
         internal static bool DiagIsClick(double dx, double dy, int ms)
         {
@@ -2321,7 +2363,13 @@ namespace DshZhuangFangyiPet
 
         private void OnMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
         {
-            if (!_dragging) return;
+            if (!_dragging)
+            {
+                // 面包屑：抬起时**没有按下记录**（按下被吞了，或按下根本没落到她身上）
+                PetBreadcrumb.Trace("松手但**没有按下记录**（_dragging=false）→ 不判定手势。" +
+                                    "常见原因：按下时落在透明像素上 / 抛掷动画中 / 双击被吞");
+                return;
+            }
             // v9：先判定"这是点击还是拖动"，**再**结束拖动。
             // 顺序不能反：`EndDrag` 会清 `_dragging` 并 ReclampPosition，
             // 而点击判定要用按下时的坐标（不受 Reclamp 影响，但逻辑上先判更清楚）。
@@ -2360,6 +2408,19 @@ namespace DshZhuangFangyiPet
                         " v=" + speed.ToString("0", CultureInfo.InvariantCulture) +
                         " → " + action +
                         " [" + _tolerance.Describe() + "]");
+
+            // v13.6：面包屑 —— **为什么**是这个结果（用户要的是这个，不是数字）。
+            //
+            // ⚠️ 解释必须在 `EndDrag()` **之前**算：`EndDrag` 会清 `_dragging`，
+            // 而这里的 `_holdStill` / `_patLevelReported` 还是本次按下的真值。
+            PetBreadcrumb.Trace("松手 dx=" + dx.ToString("0.#", CultureInfo.InvariantCulture) +
+                                " dy=" + dy.ToString("0.#", CultureInfo.InvariantCulture) +
+                                " ms=" + elapsed +
+                                " v=" + speed.ToString("0", CultureInfo.InvariantCulture) +
+                                " → " + action + "｜" +
+                                PetBreadcrumb.Explain(dx, dy, elapsed, speed, _tolerance,
+                                    _movedSincePress, _holdStill, _patLevelReported,
+                                    LongPressEnabled, FlingEnabled));
 
             StopHoldTimer();
             _pressClockMs = 0;
@@ -2463,6 +2524,7 @@ namespace DshZhuangFangyiPet
 
         private void OnMouseRightButtonUp(object sender, MouseButtonEventArgs e)
         {
+            PetBreadcrumb.Trace("右键抬起 → 弹菜单（左键手势与它无关，但排障时要知道这次按下是被右键吃掉的）");
             e.Handled = true;
             PetContextMenuRequested(this, e);
         }

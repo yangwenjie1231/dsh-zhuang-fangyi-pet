@@ -345,6 +345,19 @@ export function defaultSettings () {
      */
     gestureSensitivity: 1.0,
     /**
+     * **手势调试模式**（v13.6）。用户原话："手势的目前触发判定还是很奇怪。
+     * 能不能加入类似可选的开关，就是比如说开启调试模式，用面包屑记录更详细的日志"。
+     *
+     * 打开后，exe 会把**每一次按下/移动/松手**都写进日志，包括原先
+     * **什么都不记**的那些路径（点在透明像素上、抛掷动画期间、抬起时没有按下记录），
+     * 并给出"**为什么没触发**"的一句话解释。
+     *
+     * ⚠️ **默认关闭**：面包屑是高频的（拖动时每次移动都可能记一行），
+     * 常态开着会把日志淹掉。用户遇到问题时会主动打开 —— 所以它必须是
+     * 一个**显式开关**，而不是恒开的调试输出。
+     */
+    debugGestures: false,
+    /**
      * **悬停反应**：鼠标停在她身上一会儿，她看你一眼。
      *
      * ⚠️ **默认关闭**。这是唯一"她主动找你"的互动 —— 默认开就是骚扰
@@ -489,7 +502,8 @@ export function normalizeSettings (input) {
     'hint', 'statusAlways', 'notifyComplete', 'attentionReminder',
     'pomodoro', 'pomodoroAutoNext', 'pomodoroNotify', 'pomodoroCountdown',
     'pomodoroBreath', 'flingEnabled', 'longPress', 'hoverReact',
-    'voice', 'chatEnabled', 'memoryAuto', 'speakReplies', 'ttsResident']) {
+    'voice', 'chatEnabled', 'memoryAuto', 'speakReplies', 'ttsResident',
+    'debugGestures']) {
     if (typeof input[key] === 'boolean') out[key] = input[key]
   }
 
