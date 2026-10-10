@@ -106,11 +106,15 @@ namespace DshZhuangFangyiPet
         /// ⚠️ `ContentPresenter` 必须 `ContentSource='Header'` —— 换成别的绑定，
         /// 动态文本（好感度/今天）就不会更新（它们是运行时改 `Header` 的）。
         /// </summary>
-        internal static ControlTemplate BuildItemTemplate(Color fg, Color hover, Color disabledFg)
+        internal static ControlTemplate BuildItemTemplate(Color fg, Color bg, Color bd,
+                                                          Color hover, Color disabledFg)
         {
             string xaml =
                 "<ControlTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' " +
                 "xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml' TargetType='MenuItem'>" +
+                // ⚠️ 外层必须是 Grid：`Border`（本项内容）与 `PART_Popup`（子菜单）
+                // 要**并存**，不是二选一。
+                "<Grid>" +
                 "<Border x:Name='Bd' Background='Transparent' CornerRadius='" + ItemCornerRadius + "' " +
                   "Padding='{TemplateBinding Padding}' SnapsToDevicePixels='True'>" +
                   "<Grid>" +
@@ -130,6 +134,29 @@ namespace DshZhuangFangyiPet
                       "VerticalAlignment='Center' Margin='10,0,0,0'/>" +
                   "</Grid>" +
                 "</Border>" +
+                // ── v13.4：子菜单弹层（**漏了它 = 子菜单打不开**）─────────────────
+                //
+                // `MenuItem` 是 `HeaderedItemsControl`，子项就渲染在这个名为
+                // `PART_Popup` 的 `Popup` 里（WPF 按**名字**找它）。
+                // v13.3 我的模板没写它 → 子项无处可显示 → 用户报"更多没有下一级菜单"。
+                //
+                // 两个必须保留的契约：
+                //   · 名字**必须**是 `PART_Popup`（改名同样静默失效）；
+                //   · `IsOpen` 必须绑 `IsSubmenuOpen`（悬停/点击时 MenuItem 置位它）。
+                "<Popup x:Name='PART_Popup' AllowsTransparency='True' Focusable='False' " +
+                  "IsOpen='{TemplateBinding IsSubmenuOpen}' Placement='Right' " +
+                  "HorizontalOffset='-4' VerticalOffset='-6'>" +
+                  "<Border Background='" + Hex(bg) + "' BorderBrush='" + Hex(bd) + "' " +
+                    "BorderThickness='1' CornerRadius='" + MenuCornerRadius + "' " +
+                    "Margin='" + ShadowMargin + "' SnapsToDevicePixels='True'>" +
+                    "<Border.Effect>" +
+                      "<DropShadowEffect BlurRadius='14' ShadowDepth='2' Direction='270' " +
+                        "Opacity='0.32' Color='Black'/>" +
+                    "</Border.Effect>" +
+                    "<StackPanel IsItemsHost='True' Margin='6'/>" +
+                  "</Border>" +
+                "</Popup>" +
+                "</Grid>" +
                 "<ControlTemplate.Triggers>" +
                   "<Trigger Property='IsHighlighted' Value='True'>" +
                     "<Setter TargetName='Bd' Property='Background' Value='" + Hex(hover) + "'/>" +
@@ -214,7 +241,7 @@ namespace DshZhuangFangyiPet
             }
             catch { }
 
-            ControlTemplate itemTpl = BuildItemTemplate(fg, hover, disabledFg);
+            ControlTemplate itemTpl = BuildItemTemplate(fg, bg, bd, hover, disabledFg);
             ControlTemplate sepTpl = BuildSeparatorTemplate(line);
             ApplyToItems(menu, itemTpl, sepTpl, fg, bg, bd);
         }

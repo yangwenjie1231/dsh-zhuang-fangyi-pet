@@ -4713,6 +4713,91 @@ namespace DshZhuangFangyiPet
                     Check(subTemplated,
                           "⭐⭐ 子菜单项也换了模板（子菜单有独立弹出层，不跟着父级走）",
                           "父项模板与子项模板同一个=" + subTemplated);
+
+                    // ⑧ ⭐⭐⭐⭐ 子菜单**真的打得开**（v13.4：用户报的"更多没有下一级菜单"）
+                    //
+                    // ⚠️ 这条是**回归补课**。v13.3 我给 `MenuItem` 换模板时
+                    // **漏了 `PART_Popup`** —— 而 `MenuItem` 的子项就渲染在那个
+                    // 名叫 `PART_Popup` 的 `Popup` 里，WPF 按**名字**找它。
+                    // 模板里没有它 → 子项无处可显示 → 用户看到"箭头在，点开什么都没有"。
+                    //
+                    // ⚠️ 为什么上面 ⑦ 条抓不到：它只验"子项也换了模板"（结构），
+                    // 而**子项确实换了模板** —— 只是没地方显示。
+                    // 判据：**"能渲染" ≠ "能交互"**。换 `MenuItem`/`ComboBox` 这类
+                    // 带弹出层的控件模板时，必须有一条**真的把它打开**的断言。
+                    //
+                    // ⚠️⚠️ 而且"真的打开"必须是**在活的窗口里**打开：
+                    // 我第一版把菜单项放进一个**没有挂到窗口**的 ContextMenu 里就
+                    // `IsSubmenuOpen = true` —— 结果 `pop.IsOpen` 一直是 false，
+                    // 断言**报了红，但产品其实是好的**。
+                    // 真因：WPF 的 `MenuItem.IsSubmenuOpen` 有**强制转换**：
+                    // 项还没 `IsLoaded` 时它把值压成 false，只登记"等加载后再开"
+                    // （`RegisterToOpenOnLoad`）。所以不挂窗口就永远开不了。
+                    // 教训：验交互必须给**真实的宿主**，否则测的是"控件没加载时的行为"。
+                    System.Windows.Window host = null;
+                    System.Windows.Controls.ContextMenu subMenu = null;
+                    System.Windows.Controls.MenuItem head = null;
+                    System.Windows.Controls.MenuItem kid = null;
+                    System.Windows.Controls.Primitives.Popup pop = null;
+                    try
+                    {
+                        // 屏幕外的宿主窗口：让菜单项真的 IsLoaded，又不打扰用户
+                        host = new System.Windows.Window();
+                        host.WindowStyle = System.Windows.WindowStyle.None;
+                        host.ShowInTaskbar = false;
+                        host.ShowActivated = false;      // 不抢焦点
+                        host.Width = 1; host.Height = 1;
+                        host.Left = -4000; host.Top = -4000;
+                        host.Show();
+                        Pump(120);
+
+                        subMenu = new System.Windows.Controls.ContextMenu();
+                        head = new System.Windows.Controls.MenuItem();
+                        head.Header = "更多";
+                        kid = new System.Windows.Controls.MenuItem();
+                        kid.Header = "投喂";
+                        head.Items.Add(kid);
+                        subMenu.Items.Add(head);
+                        PetApp.SkinMenu(subMenu, false);
+                        subMenu.PlacementTarget = host;
+                        subMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.AbsolutePoint;
+                        subMenu.HorizontalOffset = -4000;
+                        subMenu.VerticalOffset = -4000;
+                        subMenu.IsOpen = true;           // 打开菜单 → 菜单项 IsLoaded
+                        Pump(150);
+
+                        pop = head.Template == null ? null
+                            : head.Template.FindName("PART_Popup", head)
+                                as System.Windows.Controls.Primitives.Popup;
+                        bool popupExists = pop != null;
+                        bool loaded = head.IsLoaded;
+                        // 真的展开"下一级" —— 这就是用户要的那件事
+                        head.IsSubmenuOpen = true;
+                        Pump(150);
+                        bool popupOpened = pop != null && pop.IsOpen;
+                        // 展开后子项必须**真的渲染出内容**（不是空白弹层）
+                        int kidDark = popupOpened ? CountDarkPixels(kid, 0.55) : 0;
+                        // 弹层里必须挂着 `IsItemsHost` 的面板（子项的宿主）。
+                        //
+                        // ⚠️ 不能只看 `pop.Child`：那是模板里的 **`Border`**（圆角壳），
+                        // `IsItemsHost` 的 `StackPanel` 在它**里面**。
+                        // 我第一版直接判 `pop.Child as Panel` → 恒 false →
+                        // **产品是好的却报红**。要往下找一层。
+                        bool hasItemsHost = popupOpened && HasItemsHost(pop.Child);
+                        Check(popupExists && loaded && popupOpened && hasItemsHost && kidDark > 40,
+                              "⭐⭐⭐⭐ 子菜单**真的能打开**（PART_Popup 在 + 展开后子项有内容）",
+                              "PART_Popup存在=" + popupExists + " 宿主已加载=" + loaded +
+                              " 能展开=" + popupOpened + " 子项宿主=" + hasItemsHost +
+                              " 子项暗像素=" + kidDark +
+                              "（>40 才算子项真的画出来了；漏了 PART_Popup 时后四项全 false）");
+                    }
+                    finally
+                    {
+                        try { if (head != null) head.IsSubmenuOpen = false; } catch { }
+                        try { if (subMenu != null) subMenu.IsOpen = false; } catch { }
+                        try { if (host != null) host.Close(); } catch { }
+                    }
+                    Pump(80);
                 }
                 // ── (12) 离屏截图：把每个窗口渲染成 PNG，供人眼确认 ──
                 //
@@ -4896,6 +4981,27 @@ namespace DshZhuangFangyiPet
                 PetLog.Warn("数暗像素失败: " + PetLog.Describe(ex));
                 return 0;
             }
+        }
+
+        /// <summary>
+        /// 在可视化树里递归找**子项宿主**（`IsItemsHost=true` 的面板）。
+        ///
+        /// ⚠️ 为什么不能只看直接子元素：子菜单弹层的直接子元素是模板里的
+        /// **`Border`**（圆角壳），`IsItemsHost` 的 `StackPanel` 在它**里面**。
+        /// 我第一版判 `pop.Child as Panel` → 恒 false → **产品是好的却报红**。
+        /// </summary>
+        private static bool HasItemsHost(System.Windows.DependencyObject root)
+        {
+            if (root == null) return false;
+            System.Windows.Controls.Panel pnl = root as System.Windows.Controls.Panel;
+            if (pnl != null && pnl.IsItemsHost) return true;
+            int n = System.Windows.Media.VisualTreeHelper.GetChildrenCount(root);
+            for (int i = 0; i < n; i++)
+            {
+                if (HasItemsHost(System.Windows.Media.VisualTreeHelper.GetChild(root, i)))
+                    return true;
+            }
+            return false;
         }
 
         /// <summary>
@@ -5109,8 +5215,7 @@ namespace DshZhuangFangyiPet
                 Pump(80);
             }
 
-            // ---- 4b. v13.3 右键菜单：浅色 / 深色各一张 ----
-            //
+            // ---- 4b. v13.3 右键菜单：浅色 / 深色各一张 ----            //
             // ⚠️ 为什么要截图：断言只能证明"画出了字、圆角参数大于 0"，
             // **证明不了"看起来现代"** —— 而用户提的就是观感问题。
             // 所以这里把真实菜单渲染成 PNG，让人眼确认（也留给以后对比）。
@@ -5172,6 +5277,74 @@ namespace DshZhuangFangyiPet
             }
             catch (Exception ex) { PetLog.Warn("菜单截图失败: " + PetLog.Describe(ex)); }
             Pump(60);
+
+            // ---- 4c. v13.4 **展开的子菜单**（用户报的"更多没有下一级菜单"）----
+            //
+            // ⚠️ 必须真的挂到窗口里再展开：`MenuItem.IsSubmenuOpen` 在项
+            // 未 `IsLoaded` 时会被压成 false（WPF 只登记"加载后再开"）。
+            // 截图存的是**子菜单弹层的内容**（`pop.Child`），因为弹层是
+            // 独立的弹出窗口，渲染 `ContextMenu` 本身拍不到它。
+            {
+                System.Windows.Window host = null;
+                System.Windows.Controls.ContextMenu mm = null;
+                System.Windows.Controls.MenuItem more = null;
+                try
+                {
+                    host = new System.Windows.Window();
+                    host.WindowStyle = System.Windows.WindowStyle.None;
+                    host.ShowInTaskbar = false;
+                    host.ShowActivated = false;
+                    host.Width = 1; host.Height = 1;
+                    host.Left = -4000; host.Top = -4000;
+                    host.Show();
+                    Pump(120);
+
+                    mm = new System.Windows.Controls.ContextMenu();
+                    more = new System.Windows.Controls.MenuItem();
+                    more.Header = "更多(_M)";
+                    string[] kids = new string[] { "投喂", "夸奖", "表情包…(_G)" };
+                    for (int i = 0; i < kids.Length; i++)
+                    {
+                        System.Windows.Controls.MenuItem k = new System.Windows.Controls.MenuItem();
+                        k.Header = kids[i];
+                        more.Items.Add(k);
+                    }
+                    mm.Items.Add(more);
+                    PetApp.SkinMenu(mm, false);
+                    mm.PlacementTarget = host;
+                    mm.Placement = System.Windows.Controls.Primitives.PlacementMode.AbsolutePoint;
+                    mm.HorizontalOffset = -4000;
+                    mm.VerticalOffset = -4000;
+                    mm.IsOpen = true;
+                    Pump(150);
+                    more.IsSubmenuOpen = true;
+                    Pump(200);
+
+                    System.Windows.Controls.Primitives.Popup pop =
+                        more.Template == null ? null
+                        : more.Template.FindName("PART_Popup", more)
+                            as System.Windows.Controls.Primitives.Popup;
+                    if (pop != null && pop.IsOpen && pop.Child != null)
+                    {
+                        System.Windows.FrameworkElement fe = pop.Child as System.Windows.FrameworkElement;
+                        SaveShot(fe, Path.Combine(outDir, "10-submenu-open.png"), 0, 0);
+                        count++;
+                        PetLog.Info("截图 10 展开的子菜单（能存下来本身就说明弹层开了）");
+                    }
+                    else
+                    {
+                        PetLog.Warn("子菜单没能展开，跳过截图 10（pop=" + (pop == null) + "）");
+                    }
+                }
+                catch (Exception ex) { PetLog.Warn("子菜单截图失败: " + PetLog.Describe(ex)); }
+                finally
+                {
+                    try { if (more != null) more.IsSubmenuOpen = false; } catch { }
+                    try { if (mm != null) mm.IsOpen = false; } catch { }
+                    try { if (host != null) host.Close(); } catch { }
+                }
+            }
+            Pump(80);
 
             // ---- 5. 番茄钟进度环：四个占比 ----
             PetPomodoro pomo = null;
