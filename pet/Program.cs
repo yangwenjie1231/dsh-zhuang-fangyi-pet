@@ -106,7 +106,11 @@ namespace DshZhuangFangyiPet
             // 面包屑会写到空路径上（`PetLog` 内部直接 return，静默丢失）。
             PetBreadcrumb.SetSink(PetLog.Info);
             // 命令行也能直接开（`--debug-gestures 1`），便于排障时不进设置页。
-            if (opt.DebugGestures) PetBreadcrumb.SetEnabled(true);
+            if (opt.DebugGestures)
+            {
+                PetBreadcrumb.SetEnabled(true);
+                PetLog.SetDebugEnabled(true);   // v13.7：同一个开关也放开高频过程日志
+            }
 
             if (opt.Help)
             {
@@ -1877,6 +1881,9 @@ namespace DshZhuangFangyiPet
         {
             _debugGestures = on;
             PetBreadcrumb.SetEnabled(on);
+            // v13.7：同一个开关也管**高频过程日志**的落盘（用户："所有日志最好都能用面包屑"）。
+            // 一次开关打开"详细模式"，而不是让用户去理解两个开关的区别。
+            PetLog.SetDebugEnabled(on);
             if (!report || _http == null) return;
             try
             {

@@ -3032,6 +3032,75 @@ namespace DshZhuangFangyiPet
                       "⭐⭐⭐ 接线：计时器未上报时，松手兜底补摸头第 1 级（原先 Pat 无人响应）",
                       "Release=" + relPat);
 
+                // (2g-4b) ⭐⭐⭐⭐ v13.7：**"移动消息发现左键已抬起"这条路径必须判定手势**。
+                //
+                // 用户实测："我用触控板拖就能触发，鼠标拖基本上触发不了。"
+                //
+                // 面包屑日志把机制写清楚了 —— 同一次按下，两种设备**事件顺序不同**：
+                //   鼠标：移动消息先到（此时 LeftButton 已是 Released）→
+                //         `OnMouseMove` 的"键已抬起"分支抢先 EndDrag 并清 `_dragging` →
+                //         真正的抬起消息到达时看到 `_dragging=false` 就 return →
+                //         **判定从来没跑过**（日志里只有"拖动结束"+"松手但没有按下记录"）。
+                //   触控板：抬起消息先到 → 判定正常跑 → 一直"能用"。
+                //
+                // ⚠️ 判据是**产品路径的真实副作用**，不是"我以为它会做什么"：
+                //   · 单击 → `DiagClickCount` 自增
+                //   · 摸头 → `DiagPatCount` 自增
+                //   · 拖动 → 两个都不增，但拖动被收尾（`DiagDragging` 变 false）
+                //
+                // 我第一版让诊断**返回"回放算出来的应该是什么"** —— 于是产品那条路径
+                // 整个不判定时，回放照样算出 "click" → 断言**依然全绿**
+                //（回滚 L1/L2/L3 就是这么全绿的）。判据：**观察副作用**。
+                w.DiagPressAt(100, 100, 0);
+                int c0 = w.DiagClickCount;
+                w.DiagLostRelease(0, 0, 120);
+                bool lostClick = w.DiagClickCount == c0 + 1 && !w.DiagDragging;
+
+                w.DiagPressAt(100, 100, 0);
+                int p0 = w.DiagPatCount;
+                w.DiagLostRelease(0, 0, 800);
+                bool lostPat = w.DiagPatCount == p0 + 1 && !w.DiagDragging;
+
+                w.DiagPressAt(100, 100, 0);
+                int c1 = w.DiagClickCount, p1 = w.DiagPatCount;
+                w.DiagLostRelease(200, 0, 900);
+                bool lostDrag = w.DiagClickCount == c1 && w.DiagPatCount == p1 && !w.DiagDragging;
+
+                Check(lostClick && lostPat && lostDrag,
+                      "⭐⭐⭐⭐ 移动消息发现左键已抬起时**仍然判定手势**（鼠标拖不动就是这个）",
+                      "补判定副作用：单击=" + lostClick + " 摸头=" + lostPat +
+                      " 真拖动不误报=" + lostDrag +
+                      "（全 false 就是回到了「这条路径不判定」的坏行为）");
+
+                // (2g-4b2) ⭐⭐⭐⭐ **决策本身**必须钉住。
+                //
+                // ⚠️ 为什么单独一条（回滚 L1 抓到）：上面那条断言驱动的是
+                // `OnLostReleaseCore`（判定核心），而**产品的分支决策**在
+                // `ResolveAndDispatchOnLostRelease` 里 —— 把那里改回
+                // "只 EndDrag、不判定"（= 用户报的坏行为），上面那条**照样全绿**。
+                // 所以决策必须抽成可断言的纯函数并单独钉住。
+                bool decidesToJudge =
+                    PetWindow.LostReleaseDecision() == PetWindow.LostReleaseAction.JudgeGesture;
+                Check(decidesToJudge,
+                      "⭐⭐⭐⭐ 这条路径的**决策**是「判定手势」而不是「只收尾」（改坏这里必红）",
+                      "决策=" + PetWindow.LostReleaseDecision() +
+                      "（若为 Abandon 就是回到了坏行为：鼠标抬起时移动消息先到，这次按下永远不算手势）");
+
+                // (2g-4c) ⭐⭐⭐ **幂等**：这条路径连跑两次只结算一次。
+                //
+                // 没有护栏的话，一次按下会**上报两次互动**（好感度也多算一次）。
+                // ⚠️ 必须直接驱动"丢失抬起"这条核心两次：`OnMouseLeftButtonUp`
+                // 自己有 `!_dragging` 早退护栏，走它**测不到** `FinishRelease` 里的护栏
+                //（回滚 L2 就是这么全绿的 —— 判据没走到被测的那一行）。
+                w.DiagPressAt(100, 100, 0);
+                int before2 = w.DiagClickCount;
+                w.DiagLostRelease(0, 0, 120);      // 第一条路径结算
+                w.DiagLostRelease(0, 0, 120);      // 同一条路径再来一次（应被护栏挡掉）
+                int clicks2 = w.DiagClickCount - before2;
+                Check(clicks2 == 1,
+                      "⭐⭐⭐ 同一条松手路径重复触发只结算**一次**（否则一次点击上报两次互动）",
+                      "点击上报次数=" + clicks2 + "（应为 1；无护栏时是 2）");
+
                 // (2g-5) 已上报过 → **不重复**补（否则一次按住上报两次）。
                 w.DiagPressAt(100, 100, 0);
                 bool ticked = w.DiagHoldTick(900);          // 计时器报了第 1 级
@@ -5133,6 +5202,82 @@ namespace DshZhuangFangyiPet
                           missingTrace.Count == 0 ? "6 条全在"
                           : ("缺 " + missingTrace.Count + " 条：" + string.Join("、", missingTrace.ToArray())));
 
+                    // ⑨ ⭐⭐⭐ v13.7：**日志分级**（用户："所有日志最好都能用面包屑"）。
+                    //
+                    // ⚠️ 这句诉求的实质不是"多记"，而是"该记的别被淹掉"。
+                    // 实测：打开面包屑后 `[手势]` 只有 38 条，而同一份日志 4616 行 ——
+                    // 最吵两类占了一半以上（`贴纸圆角裁剪` 1310 条、`回复分片起播` 1140 条）。
+                    // 所以把高频**过程日志**降到 `Debug`（默认不落盘），
+                    // 而**异常仍走 `Warn`/`Error`（永远落盘）**。
+                    //
+                    // ⚠️ 判据必须是**落盘与否的真实差别**，不能只看"调了哪个方法"：
+                    // 回滚 G2（`Debug` 不判开关）与 G3（开关不放开 Debug）都曾全绿 ——
+                    // 因为我当时**根本没有断言**这两件事。
+                    {
+                        List<string> dbgSink = new List<string>();
+                        // 换一个只收 Debug 的 sink 测不了"落不落盘"，所以直接测
+                        // "开关状态"与"源码里高频行确实用的是 Debug"。
+                        bool offByDefault = !PetLog.DebugEnabled;   // 默认必须是关的
+                        PetLog.SetDebugEnabled(true);
+                        bool onWorks = PetLog.DebugEnabled;
+                        PetLog.SetDebugEnabled(false);
+                        bool offWorks = !PetLog.DebugEnabled;
+
+                        // 高频行必须用 Debug（不是 Info）—— 否则噪音照样落盘
+                        string bubSrc = ReadSelfSource("PetBubble.cs");
+                        string voiceSrc = ReadSelfSource("PetVoicePlayer.cs");
+                        bool clipIsDebug = bubSrc != null &&
+                            bubSrc.IndexOf("PetLog.Debug(\"贴纸圆角裁剪", StringComparison.Ordinal) >= 0;
+                        bool clipNotInfo = bubSrc != null &&
+                            bubSrc.IndexOf("PetLog.Info(\"贴纸圆角裁剪", StringComparison.Ordinal) < 0;
+                        bool voiceIsDebug = voiceSrc != null &&
+                            voiceSrc.IndexOf("PetLog.Debug(\"回复分片起播", StringComparison.Ordinal) >= 0;
+                        bool voiceNotInfo = voiceSrc != null &&
+                            voiceSrc.IndexOf("PetLog.Info(\"回复分片起播", StringComparison.Ordinal) < 0;
+                        // 失败路径必须**仍然**是 Warn（降噪不能把"出错了"也藏起来）
+                        bool failStillWarn = bubSrc != null &&
+                            bubSrc.IndexOf("PetLog.Warn(\"贴纸圆角裁剪失败", StringComparison.Ordinal) >= 0;
+                        // 产品必须真的放开 Debug 级别（否则开了调试模式噪音还是被吞）
+                        string progSrc2 = ReadSelfSource("Program.cs");
+                        bool switchOpensDebug = progSrc2 != null &&
+                            progSrc2.IndexOf("PetLog.SetDebugEnabled(on)", StringComparison.Ordinal) >= 0;
+
+                        // ⚠️ 判据：拿日志文件的**行数增量**比较"关时"与"开时"。
+                        //
+                        // ⚠️ 计数必须**精确**：我第一版把 `linesBefore` 取在探针 A **之后**，
+                        // 于是增量里含了 A 自己那行 → `关时新增=1`（看起来"开关没生效"），
+                        // 而断言却因为 `silentWhenOff = (after == before)` 恰好成立而通过 ——
+                        // **测的其实是"B 没写"，不是"A 和 B 都没写"**。
+                        // 现在两次探针各自独立测增量。
+                        PetLog.SetDebugEnabled(false);
+                        int l0 = CountLogLines();
+                        PetLog.Debug("自检探针：关时不应出现 A");
+                        int l1 = CountLogLines();
+                        PetLog.Debug("自检探针：关时不应出现 B");
+                        int l2 = CountLogLines();
+                        bool silentWhenOff = (l1 == l0) && (l2 == l1);
+
+                        PetLog.SetDebugEnabled(true);
+                        int l3 = CountLogLines();
+                        PetLog.Debug("自检探针：开时应出现");
+                        int l4 = CountLogLines();
+                        bool writesWhenOn = l4 > l3;
+                        PetLog.SetDebugEnabled(false);
+
+                        Check(silentWhenOff && writesWhenOn,
+                              "⭐⭐⭐ `Debug()` 真的受开关控制（关时零落盘、开时落盘）",
+                              "关时增量A=" + (l1 - l0) + " B=" + (l2 - l1) +
+                              "（都应为 0）开时增量=" + (l4 - l3) + "（应 >0）");
+
+                        Check(offByDefault && onWorks && offWorks && clipIsDebug && clipNotInfo &&
+                              voiceIsDebug && voiceNotInfo && failStillWarn && switchOpensDebug,
+                              "⭐⭐⭐ 高频过程日志降级到 Debug（默认不落盘），异常仍永远落盘",
+                              "默认关=" + offByDefault + " 开关可用=" + (onWorks && offWorks) +
+                              " 裁剪行=Debug" + clipIsDebug + "/无Info" + clipNotInfo +
+                              " 语音行=Debug" + voiceIsDebug + "/无Info" + voiceNotInfo +
+                              " 失败仍Warn=" + failStillWarn + " 开关放开Debug=" + switchOpensDebug);
+                    }
+
                     // 复位：别把自检自己的面包屑留给后续断言
                     PetBreadcrumb.SetEnabled(false);
                     PetBreadcrumb.DiagReset();
@@ -5157,6 +5302,24 @@ namespace DshZhuangFangyiPet
             {
                 try { if (Directory.Exists(dir)) Directory.Delete(dir, true); } catch { }
             }
+        }
+
+        /// <summary>自检用：当前日志文件的行数（验 `Debug()` 真的落不落盘）。</summary>
+        private static int CountLogLines()
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(PetLog.LogPath) || !File.Exists(PetLog.LogPath)) return 0;
+                int n = 0;
+                using (FileStream fs = new FileStream(PetLog.LogPath, FileMode.Open,
+                                                      FileAccess.Read, FileShare.ReadWrite))
+                using (StreamReader sr = new StreamReader(fs, System.Text.Encoding.UTF8))
+                {
+                    while (sr.ReadLine() != null) n++;
+                }
+                return n;
+            }
+            catch { return 0; }
         }
 
         /// <summary>

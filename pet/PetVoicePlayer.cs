@@ -313,7 +313,9 @@ namespace DshZhuangFangyiPet
                         PlayedCount++;
                         if (_playingIsReply)
                         {
-                            PetLog.Info("回复分片起播（队列剩 " + _replyQueue.Count + "）");
+                            // ⚠️ v13.7：高频过程日志（实测 1140 条，占 25%）——
+                            // 每个语音分片一行，把 `[手势]` 面包屑淹掉了。降级到 `Debug`。
+                            PetLog.Debug("回复分片起播（队列剩 " + _replyQueue.Count + "）");
                         }
                     }
                     catch (Exception ex)

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -63,6 +63,49 @@ namespace DshZhuangFangyiPet
         public static void Info(string msg) { Write(false, "INFO", msg); }
         public static void Warn(string msg) { Write(true, "WARN", msg); }
         public static void Error(string msg) { Write(true, "ERR ", msg); }
+
+        /// <summary>
+        /// 调试开关（v13.7）。打开后 `Debug()` 才会落盘。
+        ///
+        /// 用户原话：**"所有日志最好都能用面包屑"**。
+        ///
+        /// ── 为什么需要分级（实测数据）───────────────────────────────────────
+        ///
+        /// 打开手势面包屑后，日志里 `[手势]` 只有 **38 条**，而同一份日志共 **4616 行** ——
+        /// 最吵的两类占了一半以上：
+        ///   · `贴纸圆角裁剪 …`  **1310 条**（每次气泡尺寸变化都记一行）
+        ///   · `回复分片起播 …`  **1140 条**（每个语音分片都记一行）
+        /// 用户想看面包屑，得在这 2400+ 行噪音里翻 —— 这正是"所有日志最好都能用面包屑"
+        /// 这句诉求的实质：**不是"多记"，而是"该记的别被淹掉"**。
+        ///
+        /// 所以高频的"过程日志"降级到 `Debug()`（默认不落盘、开关打开才落），
+        /// 而**真正的异常仍然走 `Warn`/`Error`（永远落盘）** ——
+        /// 不能因为降噪把"出错了"也一起藏起来。
+        /// </summary>
+        public static void SetDebugEnabled(bool on)
+        {
+            lock (Gate) { _debugEnabled = on; }
+        }
+
+        private static bool _debugEnabled;
+
+        /// <summary>诊断用：调试日志是否在落盘。</summary>
+        public static bool DebugEnabled { get { lock (Gate) { return _debugEnabled; } } }
+
+        /// <summary>
+        /// 高频"过程日志"：**只有调试开关打开时才落盘**。
+        ///
+        /// ⚠️ 用它的时候要自问一句：这行是"出问题时必须有的证据"，
+        /// 还是"看着舒服的进度条"？前者用 `Info`，后者用 `Debug`。
+        /// 判据：**默认关闭时，日志里还找不找得到定位问题所需的全部信息**。
+        /// </summary>
+        public static void Debug(string msg)
+        {
+            bool on;
+            lock (Gate) { on = _debugEnabled; }
+            if (!on) return;
+            Write(false, "DBG ", msg);
+        }
 
         private static void Write(bool force, string level, string msg)
         {

@@ -2232,6 +2232,40 @@ namespace DshZhuangFangyiPet
         }
 
         /// <summary>
+        /// 自检用：走**"移动消息发现左键已抬起"那条路径**的判定核心（v13.7 薄壳）。
+        ///
+        /// ⚠️ 必须是薄壳、不能抄判定 —— 这条路径原先**根本不判定**（直接 EndDrag），
+        /// 而用户"鼠标拖触发不了"就是它。
+        ///
+        /// ⚠️⚠️ 而且**返回值不能是"回放算出来的应该是什么"**：我第一版这么做，
+        /// 结果产品那条路径整个不判定（= 回到坏的行为）时，回放照样算出 "click"
+        /// → 断言**依然全绿**（回滚 L1 就是这么绿的）。
+        ///
+        /// 所以这里**什么都不返回**，断言改为观察产品路径的**真实副作用**：
+        ///   · 单击 → `DiagClickCount` 自增（`DispatchRelease` 里数的）
+        ///   · 摸头 → `DiagPatCount` 自增
+        ///   · 拖动 → 两个都不增，且 `_dragging` 被清
+        /// 判据：**断言必须观察副作用，不能观察"我以为它会做什么"**。
+        /// </summary>
+        internal void DiagLostRelease(double dx, double dy, int elapsedMs)
+        {
+            OnLostReleaseCore(dx, dy, elapsedMs);
+        }
+
+        /// <summary>自检用：已上报的摸头次数（验"补判定真的报了摸头"）。</summary>
+        internal int DiagPatCount { get { return _diagPatCount; } }
+
+        private int _diagPatCount;
+
+        /// <summary>自检用：当前是否还在拖动中（验"补判定真的收尾了"）。</summary>
+        internal bool DiagDragging { get { return _dragging; } }
+
+        /// <summary>自检用：本次会话已上报的点击次数（验"两条路径只结算一次"）。</summary>
+        internal int DiagClickCount { get { return _diagClickCount; } }
+
+        private int _diagClickCount;
+
+        /// <summary>
         /// 自检用：走**事件处理器同款**的松手判定（`ResolveRelease` 薄壳）。
         /// 返回 `"click"` / `"fling"` / `"pat:N"` / `"none"`。
         ///
@@ -2317,8 +2351,38 @@ namespace DshZhuangFangyiPet
                 // 或捕获丢失时，抬起事件根本不来，只能由移动事件发现"键已经不在了"）。
                 // 摸头的压扁动画在这里也必须收尾，否则她会一直扁着 ——
                 // 用户看到的是"她卡住了"，而不是"松手没反应"。
-                try { PatEndInvoked(); } catch { }
-                EndDrag();
+                //
+                // ⚠️⚠️ v13.7：**这里必须补一次手势判定**，不能直接 `EndDrag()`。
+                //
+                // 用户实测（面包屑日志）：
+                //   "我用触控板拖就能触发，鼠标拖基本上触发不了。"
+                //
+                // 日志把机制写得很清楚 —— 同一次按下，两种输入设备的**事件顺序不同**：
+                //
+                //   鼠标（失败）：
+                //     21:40:57.299 按下 pos=(2224,444)
+                //     21:40:57.400 移动越出容差（位移 10px > 9px）
+                //     21:40:57.502 拖动结束 → 634,291     ← **这条路径**先跑
+                //     21:40:57.504 松手但没有按下记录      ← 抬起事件白跑一趟
+                //
+                //   触控板（成功）：
+                //     21:41:02.049 按下 pos=(1844,563)
+                //     21:41:02.762 松手 dx=-711 dy=-104 ms=710 v=15720 → Fling
+                //     21:41:02.763 拖动结束                ← 判定先跑，结束在后
+                //
+                // 鼠标抬起时，**移动消息先到**（`LeftButton` 已是 Released），
+                // 于是这一支抢先 `EndDrag()` 并清掉 `_dragging`；
+                // 紧接着真正的抬起消息到达，`OnMouseLeftButtonUp` 看到
+                // `_dragging == false` 就**直接 return** —— 判定从来没跑过。
+                // 触控板抬起时顺序相反（抬起消息先到），所以一直"能用"。
+                //
+                // 也就是说：**这条"兜底"路径把正常路径的活抢了，却不会判定手势** ——
+                // 用户看到的是"拖一下没反应"（连拖动都不算，互动更是没有）。
+                //
+                // 修法：先按**与 `OnMouseLeftButtonUp` 完全相同**的判定链走一遍
+                //（`ResolveRelease` 是单一真相，这里不重写判据），再收尾。
+                ResolveAndDispatchOnLostRelease(e);
+                e.Handled = true;
                 return;
             }
             try
@@ -2361,6 +2425,102 @@ namespace DshZhuangFangyiPet
             e.Handled = true;
         }
 
+        /// <summary>
+        /// v13.7：**在"移动消息发现左键已抬起"这条路径上补一次完整的手势判定**。
+        ///
+        /// 背景见 `OnMouseMove` 里那段注释：鼠标抬起时移动消息先到，于是
+        /// `OnMouseMove` 的"键已松开"分支抢先 `EndDrag()`，把 `_dragging` 清掉；
+        /// 真正的抬起消息随后到达时 `OnMouseLeftButtonUp` 直接 return ——
+        /// **判定从来没跑过**。表现就是"鼠标拖基本上触发不了"。
+        ///
+        /// ⚠️ 这里**不重写判据**，而是走与 `OnMouseLeftButtonUp` **完全同一条**
+        /// `FinishRelease`。本项目已经四次踩过"两份判据互相掩护、改坏一份仍全绿"
+        ///（v12 `ResolveRelease`、v13 `HoldTickCore`、v13.1 `DispatchRelease`、
+        ///  v13.6 面包屑接线），所以宁可把公共尾巴抽成方法，也不复制一段。
+        ///
+        /// 与抬起路径的唯一差别是**坐标来源**：
+        /// 抬起路径有 `MouseButtonEventArgs`，这里只有 `MouseEventArgs`
+        ///（`e.GetPosition(this)` 两者都有，所以用同一个取法）。
+        /// </summary>
+        private void ResolveAndDispatchOnLostRelease(MouseEventArgs e)
+        {
+            double dx = double.NaN;
+            double dy = double.NaN;
+            int elapsed = 0;
+            try
+            {
+                Point now = PointToScreen(e.GetPosition(this));
+                dx = now.X - _pressScreen.X;
+                dy = now.Y - _pressScreen.Y;
+                elapsed = (int)(DateTime.UtcNow - _pressAt).TotalMilliseconds;
+            }
+            catch { dx = double.NaN; dy = double.NaN; }
+
+            // ⚠️ v13.7：真正的判定走 `OnLostReleaseCore`（可从三个数驱动、能被自检覆盖）。
+            // 这里只负责**从事件里取坐标** —— 而"取坐标"是自检造不出来的部分
+            //（`MouseEventArgs` 没有公开构造）。
+            //
+            // ⚠️⚠️ 但"移动消息发现键已抬起时该做什么"这个**决策**不能长在这里：
+            // 回滚 L1（把这一行换回 `EndDrag()`、不判定 = 用户报的坏行为）
+            // 曾经**全绿** —— 因为自检直接调 `OnLostReleaseCore`，绕过了本方法，
+            // 于是"产品那条路径改坏了"根本没人测。
+            // 现在决策收进 `LostReleaseDecision()`（纯函数），自检直接断言它 ——
+            // 改坏这里必红。这是本项目第五次踩"判据长在事件处理器里"。
+            if (LostReleaseDecision() == LostReleaseAction.JudgeGesture)
+                OnLostReleaseCore(dx, dy, elapsed);
+            else
+                AbandonRelease();
+        }
+
+        /// <summary>"移动消息发现左键已抬起"时该做什么（v13.7）。</summary>
+        internal enum LostReleaseAction
+        {
+            /// <summary>按完整手势链判定（v13.7 的正确行为）。</summary>
+            JudgeGesture,
+            /// <summary>只收尾、不判定（v13.1 的旧行为 = 用户报的"鼠标拖不动"）。</summary>
+            Abandon
+        }
+
+        /// <summary>
+        /// **决策**：移动消息发现左键已抬起时，是"判定手势"还是"只收尾"。
+        ///
+        /// ⚠️ 抽成纯函数是为了**能被自检钉住**（见 `ResolveAndDispatchOnLostRelease`
+        /// 里回滚 L1 的说明）：判据长在事件处理器里 = 自检只能测拷贝。
+        ///
+        /// 必须判定，理由见 `OnMouseMove` 里那段日志分析：鼠标抬起时移动消息先到，
+        /// 这条路径若只收尾，这次按下**永远不会被算成任何手势**。
+        /// </summary>
+        internal static LostReleaseAction LostReleaseDecision()
+        {
+            return LostReleaseAction.JudgeGesture;
+        }
+
+        /// <summary>只收尾、不判定（旧行为，保留给决策函数的另一支）。</summary>
+        private void AbandonRelease()
+        {
+            try { PatEndInvoked(); } catch { }
+            EndDrag();
+        }
+
+        /// <summary>
+        /// "移动消息发现左键已抬起"的**判定核心**（v13.7）。
+        ///
+        /// ⚠️ 为什么要把坐标提取与判定分开：自检**造不出真的 MouseMove 事件**
+        ///（`MouseEventArgs` 没有公开构造），所以判定必须能从"三个数"驱动，
+        /// 否则断言只能测一份拷贝。
+        ///
+        /// 这与 v12 `ResolveRelease`、v13 `HoldTickCore`、v13.1 `DispatchRelease`、
+        /// v13.6 `PetBreadcrumb.SetSink` 是同一个教训（第五次）：
+        /// **判据长在事件处理器里 = 自检只能测拷贝 = 回滚验证失效**。
+        /// </summary>
+        private void OnLostReleaseCore(double dx, double dy, int elapsed)
+        {
+            PetBreadcrumb.Trace("移动消息发现**左键已抬起** → 走与抬起同一条判定链" +
+                                "（鼠标抬起时移动消息先到，这条路径必须自己判定，" +
+                                "否则这次按下永远不算手势）");
+            FinishRelease(dx, dy, elapsed);
+        }
+
         private void OnMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
         {
             if (!_dragging)
@@ -2384,6 +2544,34 @@ namespace DshZhuangFangyiPet
                 elapsed = (int)(DateTime.UtcNow - _pressAt).TotalMilliseconds;
             }
             catch { dx = double.NaN; dy = double.NaN; }
+
+            FinishRelease(dx, dy, elapsed);
+            e.Handled = true;
+        }
+
+        /// <summary>
+        /// 松手后的**公共尾巴**（v13.7 抽出）：判定 → 记录 → 收尾 → 分发。
+        ///
+        /// ⚠️ 必须**唯一**。原先这段长在 `OnMouseLeftButtonUp` 里，
+        /// 而 v13.7 发现 `OnMouseMove` 那条"键已抬起"的路径也需要它 ——
+        /// 那时如果抄一份，就会出现"两条路径判据漂移了也看不出来"
+        ///（本项目已经四次踩过，见 `ResolveAndDispatchOnLostRelease` 的说明）。
+        /// </summary>
+        /// <param name="dx">按下到松手的屏幕位移（物理像素）</param>
+        /// <param name="dy">同上（纵向）</param>
+        /// <param name="elapsed">按下到松手的时长（ms）</param>
+        private void FinishRelease(double dx, double dy, int elapsed)
+        {
+            // ⚠️ 幂等护栏：两条路径（抬起消息 / 移动消息发现键已抬起）**都可能**触发，
+            // 而 `EndDrag()` 会把 `_dragging` 置 false —— 所以第二次进来时直接退出。
+            //
+            // 没有这道护栏的话，一次按下会**上报两次互动**（好感度也多算一次）。
+            // 判据放在这里而不是各个调用点：这是"公共尾巴"，护栏也该只有一份。
+            if (!_dragging)
+            {
+                PetBreadcrumb.Trace("松手判定被跳过：本次按下**已经结算过**（另一条路径先跑）");
+                return;
+            }
 
             // v10/v12：判定链收敛在 `ResolveRelease`（事件处理器与自检**同一份**）。
             // 速度必须在 `EndDrag` 之前取 —— 之后样本会被下一次按下清掉。
@@ -2426,9 +2614,8 @@ namespace DshZhuangFangyiPet
             _pressClockMs = 0;
 
             EndDrag();
-            e.Handled = true;
 
-            // ⚠️ v13.1：摸头按住的收尾放在 `finally` 里，**不是**放在 Pat 分支里。
+            // ⚠️ v13.1：摸头的收尾放在 `finally` 里，**不是**放在 Pat 分支里。
             //
             // 三个理由，每一个都是会出错的具体路径：
             // ① 松手兜底（下面的 Pat 分支）会调 `PatInvoked` → `PlayPatHold`，
@@ -2465,6 +2652,7 @@ namespace DshZhuangFangyiPet
         {
             if (action == ReleaseAction.Click)
             {
+                _diagClickCount++;   // 自检用：验"两条松手路径只结算一次"
                 try { ClickInvoked(); } catch { }
                 return;
             }
@@ -2496,6 +2684,7 @@ namespace DshZhuangFangyiPet
             // 按住会上报两次），一级都没报过且时长够了就补第 1 级。
             if (action == ReleaseAction.Pat)
             {
+                _diagPatCount++;   // 自检用：验"补判定真的报了摸头"
                 PetLog.Info("长按摸头 → 第 " + patLevel + " 级（松手兜底：计时器未上报）");
                 // ⚠️ v13.1：兜底走 `PatBackstopInvoked`（瞬时戳），**不是**
                 // `PatInvoked`（按住加深）。差别是实打实的：

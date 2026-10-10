@@ -835,7 +835,11 @@ namespace DshZhuangFangyiPet
             // 保留一行精简日志：圆角失效这类问题**只有运行期真值能定位**
             //（我先前靠读代码推理，误判成时序问题，白改一轮）。
             // v13.5 起连**偏移**一起记 —— 只记宽度是查不出"右侧被切"的。
-            PetLog.Info("贴纸圆角裁剪 w=" + w.ToString("0.#") + " r=" + r.ToString("0.#") +
+            // ⚠️ v13.7：这行是**高频过程日志**（实测 1310 条，占整份日志的 28%）——
+            // 每次气泡尺寸变化都记一行，把用户真正想看的 `[手势]` 面包屑淹掉了。
+            // 降级到 `Debug`（调试开关打开才落盘）。
+            // ⚠️ 但**失败路径**（上面的 `Warn`）保持永远落盘 —— 降噪不能把"出错了"藏起来。
+            PetLog.Debug("贴纸圆角裁剪 w=" + w.ToString("0.#") + " r=" + r.ToString("0.#") +
                         " offset=" + dx.ToString("0.#") + "," + dy.ToString("0.#") +
                         " 壳=" + _border.ActualWidth.ToString("0.#") + "x" +
                         _border.ActualHeight.ToString("0.#"));
