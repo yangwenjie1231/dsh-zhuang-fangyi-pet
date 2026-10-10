@@ -1564,6 +1564,66 @@ namespace DshZhuangFangyiPet
                   " → 撑大后 裁剪=" + afterW.ToString("0.#") + " 图片=" + afterImgW.ToString("0.#"));
             try { spread.ForceClose(); } catch { }
 
+            // ⭐⭐⭐ v13.5：**图片不许被裁掉**（用户："气泡表情有概率显示不全"）。
+            //
+            // ── 这条在防什么 ────────────────────────────────────────────────
+            //
+            // 裁剪矩形原来写死 `Rect(0, 0, 图片宽, 图片高)` —— 以 **Border 左上角**
+            // 为原点。而 `_image.HorizontalAlignment = Center`：壳一旦比图宽，
+            // 图片就被**居中**（左偏移 `dx>0`），于是裁剪窗口停在左边，
+            // **把图片右侧多出来的那一条切掉**（截图里那道竖直切口）。
+            //
+            // ── 为什么上面那两条抓不到 ──────────────────────────────────────
+            //
+            // 上面验的是"裁剪**尺寸** == 图片**尺寸**"—— 而尺寸**确实相等**，
+            // 错的是**位置**。所以必须验偏移。
+            //
+            // ── 为什么必须"撑宽壳"才测得出来 ────────────────────────────────
+            //
+            // 自检窗口里壳与图天然一样宽（`dx≈0`），不制造差异就区分不出。
+            // 实测：壳宽 0.7px 时切 0.7px（看不出），撑宽 40px 时**切 40.7px**。
+            PetBubble cutProbe = new PetBubble();
+            try
+            {
+                PetBubbleInfo cpb = new PetBubbleInfo();
+                cpb.Id = 92001;
+                cpb.Kind = "image";
+                cpb.Opaque = true;
+                cpb.DurationMs = 600000;
+                // 宽高不等的图（截图里就是横向的）
+                cutProbe.Show(cpb, MakeRectBubbleBitmap(200, 120));
+                Pump(250);
+                cutProbe.DiagSpreadBorder(40);    // 壳比图宽 40px
+                Pump(250);
+                // 撑宽后必须重刷裁剪才谈得上"跟随"
+                cutProbe.DiagRefreshClip();
+                Pump(80);
+
+                double dx, dy, iw, ih;
+                cutProbe.DiagImageOffsetInBorder(out dx, out dy, out iw, out ih);
+                double clw, clh, clr;
+                cutProbe.DiagClipGeometry(out clw, out clh, out clr);
+                double clipX, clipY;
+                cutProbe.DiagClipOrigin(out clipX, out clipY);
+                // 图片右边界 vs 裁剪右边界 —— 差 > 1px 就是被切
+                double cutRight = Math.Max(0, (dx + iw) - (clipX + clw));
+                double cutLeft = Math.Max(0, clipX - dx);
+                bool notCut = iw > 0 && cutRight <= 1.0 && cutLeft <= 1.0;
+                Check(notCut,
+                      "⭐⭐⭐ 气泡图片**不被裁掉**（壳比图宽时裁剪跟着图片走，不是死守 (0,0)）",
+                      "图片=" + iw.ToString("0.#") + " 偏移=" + dx.ToString("0.#") +
+                      " 裁剪原点=" + clipX.ToString("0.#") + " 裁剪宽=" + clw.ToString("0.#") +
+                      " → 右切=" + cutRight.ToString("0.#") + " 左切=" + cutLeft.ToString("0.#") +
+                      (notCut ? "（没被切）" : "（被切！这就是『显示不全』）"));
+                // 同时必须保住"圆角落在图片自己四角上"（裁剪尺寸仍跟图片走）
+                bool sizeStillFollowsImage = Math.Abs(clw - iw) <= 1.5 && Math.Abs(clh - ih) <= 1.5;
+                Check(sizeStillFollowsImage,
+                      "⭐⭐ 裁剪尺寸仍等于图片尺寸（圆角落在图片四角，不是落在壳四角）",
+                      "裁剪=" + clw.ToString("0.#") + "x" + clh.ToString("0.#") +
+                      " 图片=" + iw.ToString("0.#") + "x" + ih.ToString("0.#"));
+            }
+            finally { try { cutProbe.ForceClose(); } catch { } }
+
             try { sizeClip.ForceClose(); } catch { }
             // ⭐⭐ **新建窗口**首次显示满幅贴纸时圆角必须生效（"第一次启动没圆角"）。
             //
@@ -3788,6 +3848,30 @@ namespace DshZhuangFangyiPet
         }
 
         /// <summary>自检用：生成一张不透明的实心 PNG 位图（模拟满幅贴纸）。</summary>
+        /// <summary>
+        /// 造一张**宽高不等**的纯色位图（自检用）。
+        ///
+        /// 为什么要它：气泡"显示不全"只在**壳比图宽**时暴露，而壳比图宽的前提
+        /// 是图**不是正方形**（正方形图撑满后壳与图等宽，偏移恒为 0，
+        /// 测不出裁剪错位）。`MakeSolidBubbleBitmap` 只造正方形，测不出来。
+        /// </summary>
+        private static BitmapSource MakeRectBubbleBitmap(int w, int h)
+        {
+            using (Bitmap bmp = new Bitmap(w, h, PixelFormat.Format32bppArgb))
+            {
+                using (Graphics g = Graphics.FromImage(bmp))
+                    g.Clear(Color.FromArgb(255, 255, 255, 255));
+                using (MemoryStream ms = new MemoryStream())
+                {
+                    bmp.Save(ms, ImageFormat.Png);
+                    ms.Position = 0;
+                    BitmapSource src = BitmapFrame.Create(ms, BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
+                    src.Freeze();
+                    return src;
+                }
+            }
+        }
+
         private static BitmapSource MakeSolidBubbleBitmap(int size)
         {
             using (Bitmap bmp = new Bitmap(size, size, PixelFormat.Format32bppArgb))
@@ -5238,6 +5322,28 @@ namespace DshZhuangFangyiPet
                     more.Items.Add(f1); more.Items.Add(f2);
                     more.Items.Add(new System.Windows.Controls.Separator());
                     more.Items.Add(f3);
+                    // v13.5：把「姿势」那两项也画进截图（命名与中文状态名要看得到）
+                    System.Windows.Controls.MenuItem pose = new System.Windows.Controls.MenuItem();
+                    pose.Header = "切换她的姿势(_E)";
+                    System.Windows.Controls.MenuItem auto = new System.Windows.Controls.MenuItem();
+                    auto.Header = "跟随状态自动切换";
+                    pose.Items.Add(auto);
+                    pose.Items.Add(new System.Windows.Controls.Separator());
+                    string[] zhStates = new string[]
+                    {
+                        "waking", "idle", "listening", "thinking", "working",
+                        "waiting", "happy", "error", "sleeping"
+                    };
+                    for (int k = 0; k < zhStates.Length; k++)
+                    {
+                        System.Windows.Controls.MenuItem si = new System.Windows.Controls.MenuItem();
+                        si.Header = PetApp.StateLabelZh(zhStates[k]);
+                        pose.Items.Add(si);
+                    }
+                    more.Items.Add(pose);
+                    System.Windows.Controls.MenuItem nxt = new System.Windows.Controls.MenuItem();
+                    nxt.Header = "换下一个姿势(_N)";
+                    more.Items.Add(nxt);
                     mm.Items.Add(more);
 
                     System.Windows.Controls.MenuItem aff = new System.Windows.Controls.MenuItem();
@@ -5302,13 +5408,25 @@ namespace DshZhuangFangyiPet
                     mm = new System.Windows.Controls.ContextMenu();
                     more = new System.Windows.Controls.MenuItem();
                     more.Header = "更多(_M)";
-                    string[] kids = new string[] { "投喂", "夸奖", "表情包…(_G)" };
-                    for (int i = 0; i < kids.Length; i++)
-                    {
-                        System.Windows.Controls.MenuItem k = new System.Windows.Controls.MenuItem();
-                        k.Header = kids[i];
-                        more.Items.Add(k);
-                    }
+                    // v13.5：把「更多」的**真实内容**画出来，含改名后的三项与
+                    // 中文状态名 —— 这两处都是用户点名反馈的观感问题，
+                    // 断言只能证明"字串对"，得让人眼看到成品。
+                    System.Windows.Controls.MenuItem k1 = new System.Windows.Controls.MenuItem();
+                    k1.Header = "投喂";
+                    System.Windows.Controls.MenuItem k2 = new System.Windows.Controls.MenuItem();
+                    k2.Header = "夸奖";
+                    more.Items.Add(k1);
+                    more.Items.Add(k2);
+                    more.Items.Add(new System.Windows.Controls.Separator());
+                    System.Windows.Controls.MenuItem k3 = new System.Windows.Controls.MenuItem();
+                    k3.Header = "表情包…(_G)";          // 气泡贴图（保留"表情包"）
+                    more.Items.Add(k3);
+                    System.Windows.Controls.MenuItem kPose = new System.Windows.Controls.MenuItem();
+                    kPose.Header = "切换她的姿势(_E)";  // 她本人（改名）
+                    more.Items.Add(kPose);
+                    System.Windows.Controls.MenuItem kNext = new System.Windows.Controls.MenuItem();
+                    kNext.Header = "换下一个姿势(_N)";  // 轮换（改名）
+                    more.Items.Add(kNext);
                     mm.Items.Add(more);
                     PetApp.SkinMenu(mm, false);
                     mm.PlacementTarget = host;

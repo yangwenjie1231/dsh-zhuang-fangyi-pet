@@ -267,6 +267,51 @@ namespace DshZhuangFangyiPet
             "waiting", "happy", "error", "sleeping"
         };
 
+        /// <summary>
+        /// 状态名 → 中文（右键「切换她的姿势」子菜单用）。
+        ///
+        /// 用户原话："表情预览，为什么那几个全都是英文"。
+        /// 原来子菜单直接显示 `idle`/`thinking`/`working` 这些**内部状态名** ——
+        /// 它们是给代码看的，不该出现在用户面前。
+        ///
+        /// ⚠️ 这是 exe 侧的**第二份**状态文案（第一份在 Host 的
+        /// `src/pet/state.js` 的 `STATE_TEXT` 里）。为什么不去 Host 取：
+        /// 那个表没有经 HTTP 暴露（`/state` 只给**当前**状态的一条 `label`），
+        /// 而为了九个名字去改 `src/*.js` 会触发**整台 DSH 重启**（宿主缓存 ESM）。
+        ///
+        /// 代价是可能**漂移**（Host 改了文案、exe 没跟上）。所以有一条
+        /// node 断言把这个表与 `state.js` 的 `STATE_TEXT` 逐条比对
+        ///（`tools/test-pet-interactions.mjs`），漂移会直接变红 ——
+        /// 这是本项目"重复一份就必须有断言钉住"的一贯做法
+        ///（与 `atlas.js` 的 `VALID_STATES`、`assets/catalog.json` 同源同策）。
+        /// </summary>
+        internal static readonly string[][] StateLabelsZh = new string[][]
+        {
+            new string[] { "waking",    "醒来了…" },
+            new string[] { "idle",      "待机中" },
+            new string[] { "listening", "收到啦" },
+            new string[] { "thinking",  "正在思考…" },
+            new string[] { "working",   "正在调用工具…" },
+            new string[] { "waiting",   "在等你审批" },
+            new string[] { "happy",     "完成啦" },
+            new string[] { "error",     "出错了…" },
+            new string[] { "sleeping",  "睡一会儿…" }
+        };
+
+        /// <summary>
+        /// 取状态的中文名。未知状态**回落成原状态名**（前向兼容：Host 新增状态时
+        /// 菜单不会显示空白，最坏是显示一个英文词，而不是一个空项）。
+        /// </summary>
+        internal static string StateLabelZh(string state)
+        {
+            if (string.IsNullOrEmpty(state)) return state;
+            for (int i = 0; i < StateLabelsZh.Length; i++)
+            {
+                if (StateLabelsZh[i][0] == state) return StateLabelsZh[i][1];
+            }
+            return state;
+        }
+
         public PetApp(PetOptions opt, string baseDir)
         {
             _opt = opt;
@@ -2455,13 +2500,25 @@ namespace DshZhuangFangyiPet
             }
             more.Items.Add(new Separator());
             MenuItem gallery = new MenuItem();
+            // ── v13.5：三个「表情」的命名（用户："这几个命名让人很困惑呀"）────────
+            //
+            // 原来叫「表情包…」/「表情预览」/「切换表情预览」，三处都带"表情"，
+            // 但**指的完全是两样东西**：
+            //   · 「表情包…」  → 打开画廊，挑的是**气泡里那张贴图**（bubble 素材）；
+            //   · 「表情预览」/「切换表情预览」 → 换的是**她本人的姿势/状态图**
+            //     （idle/thinking/working… 那套 sprite）。
+            // 名字都叫"表情"，用户没法知道点下去动的是气泡还是她本人。
+            //
+            // 改名原则：**按"动的是谁"区分**，而不是继续用同一个词。
+            //   · 动气泡 → 保留「表情包」（它本来就是聊天表情的意思，且与托盘一致）；
+            //   · 动她本人 → 改叫「姿势」，因为它切的是 sprite 状态而不是表情贴图。
             gallery.Header = "表情包…(_G)";
             gallery.Click += delegate { OpenGallery(); };
             more.Items.Add(gallery);
             MenuItem preview = new MenuItem();
-            preview.Header = "表情预览(_E)";
+            preview.Header = "切换她的姿势(_E)";
             MenuItem auto = new MenuItem();
-            auto.Header = "自动跟随状态";
+            auto.Header = "跟随状态自动切换";     // 与「切换她的姿势」对照：这条是"不手动"
             auto.Click += delegate
             {
                 _previewMode = false;
@@ -2473,7 +2530,11 @@ namespace DshZhuangFangyiPet
             {
                 string st = PreviewStates[i];
                 MenuItem mi = new MenuItem();
-                mi.Header = st;
+                // 子菜单显示**中文状态名**（原来直接显示 idle/thinking 这些英文
+                // 内部状态名 —— 用户："为什么那几个全都是英文"）。
+                // 复用 Host 的 `STATE_TEXT`（同一份文案，气泡里显示的就是它），
+                // 保证"菜单里选的"与"气泡里说的"是同一个词。
+                mi.Header = StateLabelZh(st);
                 mi.Click += delegate
                 {
                     _previewMode = true;
@@ -2484,7 +2545,9 @@ namespace DshZhuangFangyiPet
             }
             more.Items.Add(preview);
             MenuItem next = new MenuItem();
-            next.Header = "切换表情预览(_N)";
+            // 「切换表情预览」→「换下一个姿势」：与上面那项的"下拉选"区分开
+            //（这条是**不打开子菜单直接轮换**，双击她也是这个动作）。
+            next.Header = "换下一个姿势(_N)";
             next.Click += delegate { CycleEmote(); };   // task-6：与双击 emote 共用同一机制
             more.Items.Add(next);
             m.Items.Add(more);

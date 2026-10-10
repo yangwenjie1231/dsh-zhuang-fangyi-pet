@@ -15,6 +15,9 @@
  */
 
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import {
   createAffection,
@@ -28,6 +31,9 @@ import {
   AFFECTION_TIERS,
   DAILY_CAP
 } from '../src/pet/interactions.js'
+import { STATE_TEXT } from '../src/pet/state.js'
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 let passed = 0
 let failed = 0
@@ -626,6 +632,100 @@ ok('⭐ 未知动作仍然拒绝（不因为加了新动作就放宽）', () => 
     assert.equal(r.accepted, false, `${bad} 不该被接受`)
     assert.equal(r.reason, 'unknown-kind')
   }
+})
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * v13.5：右键菜单「切换她的姿势」的中文状态名
+ *
+ * 用户原话："表情预览，为什么那几个全都是英文"。
+ * exe 侧现在有一份 `StateLabelsZh` 表（`pet/Program.cs`），
+ * 而**唯一真相**是 Host 的 `src/pet/state.js` 的 `STATE_TEXT`。
+ * 这里逐条比对，**漂移直接变红** —— 本项目对"重复一份"的一贯要求。
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+section('v13.5 菜单里的状态中文名与 Host 一致')
+
+/** 从 C# 源码里抠出 `StateLabelsZh` 的 {状态 → 中文}。 */
+function parseStateLabelsZh () {
+  const src = fs.readFileSync(path.join(ROOT, 'pet', 'Program.cs'), 'utf8')
+  const start = src.indexOf('StateLabelsZh = new string[][]')
+  assert.ok(start > 0, 'Program.cs 里找不到 StateLabelsZh（表被删了？）')
+  const body = src.slice(start, src.indexOf('};', start))
+  const out = {}
+  for (const m of body.matchAll(/new string\[\]\s*\{\s*"([a-z-]+)"\s*,\s*"([^"]+)"\s*\}/g)) {
+    out[m[1]] = m[2]
+  }
+  return out
+}
+
+ok('⭐ 菜单里的每个状态名都与 Host 的 STATE_TEXT 中文一致', () => {
+  const labels = parseStateLabelsZh()
+  assert.ok(Object.keys(labels).length >= 9, `只解析到 ${Object.keys(labels).length} 条，表被改坏了`)
+  const mismatched = []
+  for (const [state, zh] of Object.entries(labels)) {
+    const host = STATE_TEXT[state]
+    if (!host) { mismatched.push(`${state}：Host 里没有这个状态`); continue }
+    if (host.zh !== zh) mismatched.push(`${state}：exe="${zh}" vs Host="${host.zh}"`)
+  }
+  assert.deepEqual(mismatched, [],
+    `exe 的中文状态名与 Host 漂移了（改一边要改另一边）：\n      ${mismatched.join('\n      ')}`)
+})
+
+ok('⭐ 菜单覆盖 Host 的全部状态（漏一个就会在菜单里露出英文）', () => {
+  const labels = parseStateLabelsZh()
+  const missing = Object.keys(STATE_TEXT).filter(s => labels[s] === undefined)
+  assert.deepEqual(missing, [],
+    `这些状态没有中文名，菜单里会直接显示英文：${missing.join(', ')}`)
+})
+
+ok('⭐ 中文名里不含 ASCII 状态名（防"中文 + 英文"半吊子）', () => {
+  const labels = parseStateLabelsZh()
+  const bad = Object.entries(labels).filter(([, zh]) => /^[\x00-\x7F]+$/.test(zh))
+  assert.deepEqual(bad.map(([s]) => s), [], '有状态名仍是纯 ASCII（等于没翻译）')
+})
+
+ok('⭐⭐ 子菜单**真的用了**中文名（不是只在旁边放了一张没用的表）', () => {
+  // ⚠️ 为什么需要这条（回滚 N1 全绿）：上面三条只验"表本身对不对"，
+  // 而把 `mi.Header = StateLabelZh(st)` 改回 `= st`（菜单又变英文）时，
+  // **表还在、也仍然正确** → 三条断言照样全绿。判据必须落在**接线**上。
+  const src = fs.readFileSync(path.join(ROOT, 'pet', 'Program.cs'), 'utf8')
+  assert.ok(src.includes('mi.Header = StateLabelZh(st)'),
+    '状态子菜单没有用 StateLabelZh（菜单里会显示 idle/thinking 这些英文）')
+})
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * v13.5：三个「表情」入口的命名（用户："这几个命名让人很困惑呀"）
+ *
+ * 原来三处都带"表情"，但**指的是两样东西**：
+ *   · 表情包…       → 气泡里那张贴图（bubble 素材）
+ *   · 表情预览 / 切换表情预览 → 她本人的姿势（sprite 状态）
+ * 现在按"动的是谁"分开：气泡叫「表情包」，她本人叫「姿势」。
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+section('v13.5 三个入口的命名不再撞车')
+
+ok('⭐⭐ 右键菜单里「姿势」与「表情包」各司其职，不再都叫"表情"', () => {
+  // ⚠️ 为什么扫源码（回滚 N3 全绿）：菜单项是 `Program.BuildPetMenu` 里
+  // 逐个 new 出来的，没有可枚举的"菜单清单"数据。而 `BuildPetMenu` 是私有方法、
+  // 需要一个活的 `PetApp` 才能跑 —— 所以这里以**源码字面量**为判据。
+  // 它不精确（可能匹配到注释），但足以挡住"改回旧名"这类真实回归，
+  // 与 `test-pet-assets.mjs` 验"台词有没有接线"用的是同一手法。
+  const src = fs.readFileSync(path.join(ROOT, 'pet', 'Program.cs'), 'utf8')
+  const needed = [
+    ['gallery.Header = "表情包…(_G)"', '气泡贴图那个入口应叫「表情包」'],
+    ['preview.Header = "切换她的姿势(_E)"', '换她本人姿势那个入口应叫「切换她的姿势」'],
+    ['next.Header = "换下一个姿势(_N)"', '轮换那个入口应叫「换下一个姿势」']
+  ]
+  const missing = needed.filter(([lit]) => !src.includes(lit)).map(([, why]) => why)
+  assert.deepEqual(missing, [], `菜单命名不符：\n      ${missing.join('\n      ')}`)
+})
+
+ok('⭐ 不再有两个入口共用同一个词（"表情"只留给气泡贴图）', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'pet', 'Program.cs'), 'utf8')
+  // 旧名必须消失 —— 它们正是用户说"困惑"的那两个
+  const stale = ['"表情预览(_E)"', '"切换表情预览(_N)"']
+  const left = stale.filter(s => src.includes(s))
+  assert.deepEqual(left, [], `旧名还在（用户已明确说困惑）：${left.join(', ')}`)
 })
 
 /* ══════════════════════════════════════════════════════════════════════════

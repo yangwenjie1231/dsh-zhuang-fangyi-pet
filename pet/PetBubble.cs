@@ -199,6 +199,46 @@ namespace DshZhuangFangyiPet
             if (rg == null) return;
             w = rg.Rect.Width; h = rg.Rect.Height; r = rg.RadiusX;
         }
+
+        /// <summary>
+        /// 自检诊断用：图片元素在 **`_border` 坐标系**里的位置与尺寸。
+        ///
+        /// ⚠️ 为什么需要它（用户反馈"气泡表情有概率显示不全"）：
+        /// 圆角裁剪是 `_border.Clip = Rect(0, 0, 图片宽, 图片高)` —— 它以
+        /// **Border 左上角**为原点；而 `_image.HorizontalAlignment = Center`，
+        /// 一旦 Border 比图片宽，图片会被**居中**（左偏移 `dx &gt; 0`），
+        /// 于是裁剪矩形 `[0, 图片宽]` 切掉的是图片右侧 `[图片宽, dx+图片宽]` 那一条。
+        /// 只看 `clip == img` 是发现不了的（两者确实相等），**必须看偏移**。
+        /// </summary>
+        internal void DiagImageOffsetInBorder(out double dx, out double dy,
+                                              out double imgW, out double imgH)
+        {
+            dx = -1; dy = -1; imgW = 0; imgH = 0;
+            if (_image == null || _border == null) return;
+            try
+            {
+                System.Windows.Point p = _image.TranslatePoint(new System.Windows.Point(0, 0), _border);
+                dx = p.X; dy = p.Y;
+                imgW = _image.ActualWidth;
+                imgH = _image.ActualHeight;
+            }
+            catch { }
+        }
+
+        /// <summary>自检诊断用：当前裁剪矩形的**原点**（判断它有没有跟着图片挪）。</summary>
+        internal void DiagClipOrigin(out double x, out double y)
+        {
+            x = 0; y = 0;
+            RectangleGeometry rg = _border == null ? null : _border.Clip as RectangleGeometry;
+            if (rg == null) return;
+            x = rg.Rect.X; y = rg.Rect.Y;
+        }
+
+        /// <summary>自检诊断用：立刻按当前尺寸重刷一次圆角裁剪（模拟 SizeChanged 的那条路）。</summary>
+        internal void DiagRefreshClip()
+        {
+            if (_opaquePresentation) UpdateOpaqueClip();
+        }
         /// <summary>自检诊断用：喂入本体尺寸后按比例算出的上限。</summary>
         internal double DiagCapForPet(int frameW, int frameH, double dpi, double scale)
         {
@@ -755,10 +795,50 @@ namespace DshZhuangFangyiPet
             // 圆角不能超过短边的一半，否则会画成诡异形状
             double limit = Math.Min(w, h) / 2;
             if (r > limit) r = limit;
-            _border.Clip = new RectangleGeometry(new Rect(0, 0, w, h), r, r);
+
+            // ⚠️⚠️ 裁剪矩形必须落在**图片自己的位置**上，不能写死 `(0, 0)`。
+            //
+            // 用户反馈："气泡表情有概率显示不全（之前一直也有，但是是偶发情况）"。
+            // 实测（探针，见 `.scratch/probe-clip2.py`）：
+            //   · 壳比图宽 0.7px 时 → 图片右边界 179.3、裁剪右边界 178.7 → 切 0.7px；
+            //   · 人为把壳撑宽 40px 时 → 图片右边界 219.3、裁剪右边界 178.7
+            //     → **右侧被切掉 40.7px**（截图里那道竖直切口就是这个）。
+            //
+            // 真因：`_image.HorizontalAlignment = Center` —— 一旦 `_border` 比图片宽，
+            // 图片会被**居中**（左偏移 `dx > 0`），而裁剪矩形 `Rect(0, 0, w, h)`
+            // 是以 **Border 左上角**为原点的。于是裁剪窗口停在左边，
+            // 把图片**右侧**多出来的那一条切掉。
+            //
+            // 为什么"偶发"：多数时候壳与图一样宽（`dx≈0`，只差亚像素）；
+            // 只有壳比图宽时才切得肉眼可见 —— 而壳变宽发生在
+            // "上一条气泡更宽（如长文字）→ 这一条是图"的窗口收缩过程中：
+            // 此时 `_border.ActualWidth` 还是旧的较大值，而图片已是新的较小尺寸。
+            // 更要命的是裁剪**只在 `SizeChanged` 时重算** —— 若尺寸随后不再变化，
+            // 这个错位的裁剪就**一直留着**，于是表现为"随机某几次显示不全"。
+            //
+            // ⚠️ 修法必须是"把裁剪**挪到图片的位置**"，不能是"把裁剪扩到整个壳"：
+            // 后者虽然也不切图，但圆角会落在**壳的四角**上 —— 壳比图宽时，
+            // 图片自己的四角就变回直角了（那正是用户先前反馈过的"气泡没有圆角"）。
+            // 所以这里保持"裁剪尺寸 = 图片尺寸"，只补上**位置**。
+            //
+            // 判据教训：只验 `clip == img`（尺寸相等）**发现不了**它 ——
+            // 尺寸确实相等，错的是**位置**。断言必须一起验偏移。
+            double dx = 0, dy = 0;
+            try
+            {
+                Point p = _image.TranslatePoint(new Point(0, 0), _border);
+                if (!double.IsNaN(p.X) && !double.IsInfinity(p.X)) dx = p.X;
+                if (!double.IsNaN(p.Y) && !double.IsInfinity(p.Y)) dy = p.Y;
+            }
+            catch { }
+            _border.Clip = new RectangleGeometry(new Rect(dx, dy, w, h), r, r);
             // 保留一行精简日志：圆角失效这类问题**只有运行期真值能定位**
             //（我先前靠读代码推理，误判成时序问题，白改一轮）。
-            PetLog.Info("贴纸圆角裁剪 w=" + w.ToString("0.#") + " r=" + r.ToString("0.#"));
+            // v13.5 起连**偏移**一起记 —— 只记宽度是查不出"右侧被切"的。
+            PetLog.Info("贴纸圆角裁剪 w=" + w.ToString("0.#") + " r=" + r.ToString("0.#") +
+                        " offset=" + dx.ToString("0.#") + "," + dy.ToString("0.#") +
+                        " 壳=" + _border.ActualWidth.ToString("0.#") + "x" +
+                        _border.ActualHeight.ToString("0.#"));
         }
 
         /// <summary>清掉满幅贴纸的裁剪（回到透明抠图气泡时要还原，气泡窗是复用的）。</summary>
