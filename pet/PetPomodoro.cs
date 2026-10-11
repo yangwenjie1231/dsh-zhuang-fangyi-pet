@@ -69,6 +69,29 @@ namespace DshZhuangFangyiPet
 
         private double _scale = 1.0;
         private bool _dark;
+
+        /// <summary>
+        /// v14：停靠方位（用户问"番茄钟的位置可以调吗"）。
+        ///
+        /// 取值 `auto` / `below` / `above` / `left` / `right`；
+        /// `auto` = 原先的智能避让（贴下方，放不下翻上方）→ 老配置零回归。
+        /// 未知值一律当 `auto`（`ComputeTarget` 里兜底），
+        /// 所以就算宿主推来一个没见过的值，她也只是回到默认位置，不会消失。
+        /// </summary>
+        private string _anchor = "auto";
+
+        /// <summary>v14：设置停靠方位；变化时立刻重贴一次（用户要马上看到效果）。</summary>
+        public void SetAnchor(string anchor)
+        {
+            string a = string.IsNullOrEmpty(anchor) ? "auto" : anchor;
+            if (a == _anchor) return;
+            _anchor = a;
+            if (IsVisible) PlaceNearPet(_lastPetRect);
+        }
+
+        /// <summary>v14：自检/诊断用：当前停靠方位。</summary>
+        internal string DiagAnchor { get { return _anchor; } }
+
         /// <summary>最近一次已知的本体矩形（缩放/主题变化后要重新定位时用）。</summary>
         private int[] _lastPetRect;
         /// <summary>
@@ -530,31 +553,80 @@ namespace DshZhuangFangyiPet
         }
 
         /// <summary>
-        /// 定位算法（**纯函数**）：算出贴在某矩形下方居中的目标位置（物理像素）。
+        /// 定位算法（**纯函数**）：算出贴在某矩形旁的目标位置（物理像素）。
         ///
-        /// 与 `PetStatusLabel.ComputeTarget` **同一套算法**（含"下方放不下就转上方"
+        /// 与 `PetStatusLabel.ComputeTarget` **同一套算法**（含"放不下就避让"
         /// 与 clamp 进工作区）。单独抽出来是为了让自检验证**真实逻辑**而不是副本 ——
         /// 状态文字那边正是踩过"两处各写一份算术、改坏真实逻辑自检仍绿"的坑。
+        ///
+        /// ⚠️ v14：新增 `anchor`（用户问"番茄钟的位置可以调吗"）。
+        /// 默认 `auto` = **与之前逐字相同的行为**（贴下方，放不下翻上方），
+        /// 所以没改设置的人零回归。四个固定方位则跳过"翻面"逻辑 ——
+        /// 用户明确指定了方位，就不该再自作主张换到对面
+        ///（指定"上方"却因为上方放不下而跑到下方，比"贴边被夹住"更让人困惑）。
         /// </summary>
+        /// <param name="anchor">停靠方位：auto/below/above/left/right（未知值按 auto）</param>
         internal static void ComputeTarget(int px, int py, int pw, int ph,
                                            int bw, int bh, double dpi,
+                                           out int x, out int y)
+        {
+            ComputeTarget(px, py, pw, ph, bw, bh, dpi, "auto", out x, out y);
+        }
+
+        internal static void ComputeTarget(int px, int py, int pw, int ph,
+                                           int bw, int bh, double dpi, string anchor,
                                            out int x, out int y)
         {
             int gap = (int)Math.Round(GapBelowPet * dpi);
             PetNative.WorkArea scr = PetNative.NearestScreen(px + pw / 2, py + ph / 2);
 
-            x = px + pw / 2 - bw / 2;          // 水平居中
-            y = py + ph + gap;                  // 锚点**下方**
-            if (y + bh > scr.Bottom - 4)
+            // 未知/空 → auto（绝不因为一个拼错的值就把它丢到屏幕角上）
+            if (string.IsNullOrEmpty(anchor)) anchor = "auto";
+
+            if (anchor == "left" || anchor == "right")
             {
-                // 下方放不下 → 放到上方；上方也放不下 → 贴屏幕底
-                y = py - bh - gap;
-                if (y < scr.Y + 4) y = scr.Bottom - bh - 4;
+                // 左右停靠：垂直**居中对齐**她的中线，水平贴在她的旁边。
+                y = py + ph / 2 - bh / 2;
+                x = anchor == "left" ? (px - bw - gap) : (px + pw + gap);
+                // 用户指定的方位**不翻面**，但要保证整体在屏幕内（否则会跑到屏幕外看不见）
+                if (x < scr.X + 4) x = scr.X + 4;
+                int maxX = scr.Right - bw - 4;
+                if (maxX < scr.X + 4) maxX = scr.X + 4;
+                if (x > maxX) x = maxX;
+                if (y < scr.Y + 4) y = scr.Y + 4;
+                int maxY = scr.Bottom - bh - 4;
+                if (maxY < scr.Y + 4) maxY = scr.Y + 4;
+                if (y > maxY) y = maxY;
+                return;
             }
-            int maxX = scr.Right - bw - 4;
-            if (maxX < scr.X + 4) maxX = scr.X + 4;
-            if (x > maxX) x = maxX;
+
+            x = px + pw / 2 - bw / 2;          // 水平居中
+            if (anchor == "above")
+            {
+                y = py - bh - gap;              // 用户指定上方：不翻面
+            }
+            else
+            {
+                y = py + ph + gap;              // 下方（auto 与 below 都从这里开始）
+                // ⚠️ 只有 `auto` 才自动翻到上方 —— `below` 是用户的明确选择，
+                // 翻面会让他以为设置没生效。
+                if (anchor == "auto" && y + bh > scr.Bottom - 4)
+                {
+                    // 下方放不下 → 放到上方；上方也放不下 → 贴屏幕底
+                    y = py - bh - gap;
+                    if (y < scr.Y + 4) y = scr.Bottom - bh - 4;
+                }
+            }
+            int maxXb = scr.Right - bw - 4;
+            if (maxXb < scr.X + 4) maxXb = scr.X + 4;
+            if (x > maxXb) x = maxXb;
             if (x < scr.X + 4) x = scr.X + 4;
+            // 竖直方向也要夹住：指定"上方"而上方空间不够时，宁可贴住屏幕顶，
+            // 也不能让窗口有一半在屏幕外（用户会以为它坏了）
+            if (y < scr.Y + 4) y = scr.Y + 4;
+            int maxYb = scr.Bottom - bh - 4;
+            if (maxYb < scr.Y + 4) maxYb = scr.Y + 4;
+            if (y > maxYb) y = maxYb;
         }
 
         /// <summary>取当前窗口的物理尺寸与 DPI（定位用）。</summary>
@@ -590,7 +662,9 @@ namespace DshZhuangFangyiPet
             int bw, bh; double dpi;
             CurrentMetrics(out bw, out bh, out dpi);
             int x, y;
-            ComputeTarget(anchor[0], anchor[1], anchor[2], anchor[3], bw, bh, dpi, out x, out y);
+            // v14：方位由 `_anchor` 决定（默认 auto = 与之前逐字相同的行为）
+            ComputeTarget(anchor[0], anchor[1], anchor[2], anchor[3], bw, bh, dpi, _anchor,
+                          out x, out y);
             Left = x / dpi;
             Top = y / dpi;
         }
@@ -605,7 +679,7 @@ namespace DshZhuangFangyiPet
             double dpi;
             CurrentMetrics(out bw, out bh, out dpi);
             int ix, iy;
-            ComputeTarget(petX, petY, petW, petH, bw, bh, dpi, out ix, out iy);
+            ComputeTarget(petX, petY, petW, petH, bw, bh, dpi, _anchor, out ix, out iy);
             x = ix;
             y = iy;
         }

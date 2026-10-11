@@ -145,6 +145,31 @@ export const POMODORO_ROUNDS_MAX = 12
  */
 export const POMODORO_PRESETS = ['classic', 'deep', 'sprint', 'free', 'custom']
 
+/**
+ * v14：番茄钟倒计时窗的**停靠方位**。
+ *
+ * 用户问："番茄钟的位置可以调吗" —— 原先它是**自动贴在她下方**的
+ *（居中，下方放不下就翻到上方，再 clamp 进工作区），用户无法左右。
+ *
+ * 四方位而不是"任意坐标"：
+ *   · 倒计时是**挂在桌宠身上**的说明性元素，跟着她走才是它该有的行为
+ *     （桌宠可以拖到任何地方，绝对坐标会在她移动后失效）；
+ *   · 四个方位已经覆盖"挡住任务栏/挡住桌面图标"的全部实际诉求，
+ *     而任意坐标要额外解决"桌宠移动后怎么办""屏幕换了怎么办"两个新问题。
+ *
+ * `auto` = 保持原先的智能避让（默认，零回归）。
+ */
+export const POMODORO_ANCHORS = ['auto', 'below', 'above', 'left', 'right']
+
+/** 停靠方位 → 中文标签（设置页与右键菜单**共用这一份**，不许各写一份）。 */
+export const POMODORO_ANCHOR_LABELS = {
+  auto: '自动（贴下方，放不下自动避让）',
+  below: '桌宠下方',
+  above: '桌宠上方',
+  left: '桌宠左侧',
+  right: '桌宠右侧'
+}
+
 /** 预设 → 四个时长字段。`custom` 不在表里（它是"用户手改过"的标记）。 */
 export const POMODORO_PRESET_VALUES = {
   classic: { pomodoroFocusMs: 25 * 60 * 1000, pomodoroBreakMs: 5 * 60 * 1000, pomodoroLongBreakMs: 15 * 60 * 1000, pomodoroRounds: 4 },
@@ -300,6 +325,13 @@ export function defaultSettings () {
      * 就会出现"我明明改成 30 分钟，它又变回 25"这种打架状态。
      */
     pomodoroPreset: 'classic',
+    /**
+     * v14：倒计时窗停靠方位（用户问"番茄钟的位置可以调吗"）。
+     *
+     * `auto` = 原先的智能避让（贴下方，放不下翻上方）。默认值保持 `auto`，
+     * 所以老配置**零回归** —— 没碰过这个设置的人看到的位置与之前完全一样。
+     */
+    pomodoroAnchor: 'auto',
     /**
      * v10：专注期间显示呼吸引导（4-7-8 节奏）。
      *
@@ -520,6 +552,11 @@ export function normalizeSettings (input) {
   // 它是"套用哪一组时长"的开关，不认识的值必须回落而不是透传
   //（透传的话下游 `applyPreset` 查表会拿到 undefined，静默什么都不做）。
   if (POMODORO_PRESETS.includes(input.pomodoroPreset)) out.pomodoroPreset = input.pomodoroPreset
+
+  // v14：倒计时停靠方位。与预设同样是**枚举白名单** ——
+  // 不认识的值必须回落到 base，不能透传（透传的话 exe 侧查表拿到未知名，
+  // 会静默按"居中贴下方"处理，用户改了设置却看不到任何变化）。
+  if (POMODORO_ANCHORS.includes(input.pomodoroAnchor)) out.pomodoroAnchor = input.pomodoroAnchor
 
   // 人设名与聊天工作区：字符串，走**保守校验**。
   //

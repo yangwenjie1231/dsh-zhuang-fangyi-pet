@@ -207,6 +207,14 @@ window.__ModuleLoader__.load({
         presetCustom: '自定义',
         pomodoroBreath: '专注时显示呼吸引导',
         pomodoroBreathHint: '桌宠下方一个随呼吸缩放的光环（4-7-8 节奏）',
+        // v14：倒计时方位（用户问"番茄钟的位置可以调吗"）
+        pomodoroAnchor: '倒计时位置',
+        pomodoroAnchorHint: '倒计时贴在桌宠的哪一侧（她移动时会跟着走）',
+        anchorAuto: '自动（贴下方，放不下自动避让）',
+        anchorBelow: '桌宠下方',
+        anchorAbove: '桌宠上方',
+        anchorLeft: '桌宠左侧',
+        anchorRight: '桌宠右侧',
         pomodoroTask: '这一轮做什么',
         pomodoroTaskHint: '起个名字，统计里能看到时间花在哪',
         pomodoroTaskPlaceholder: '比如：桌宠开发',
@@ -466,6 +474,14 @@ window.__ModuleLoader__.load({
         presetCustom: 'Custom',
         pomodoroBreath: 'Breathing guide while focusing',
         pomodoroBreathHint: 'A ring below the pet that expands and contracts (4-7-8)',
+        // v14: countdown position
+        pomodoroAnchor: 'Countdown position',
+        pomodoroAnchorHint: 'Which side of the pet the countdown sticks to (it follows her)',
+        anchorAuto: 'Auto (below, avoids the screen edge)',
+        anchorBelow: 'Below the pet',
+        anchorAbove: 'Above the pet',
+        anchorLeft: 'Left of the pet',
+        anchorRight: 'Right of the pet',
         pomodoroTask: 'What this round is for',
         pomodoroTaskHint: 'Name it and the stats show where the time went',
         pomodoroTaskPlaceholder: 'e.g. pet plugin',
@@ -674,6 +690,17 @@ window.__ModuleLoader__.load({
      */
     const PET_POMODORO_PRESETS = ['classic', 'deep', 'sprint', 'free']
 
+    /**
+     * v14：倒计时方位白名单（**必须与 `src/settings.js` 的 `POMODORO_ANCHORS` 同集**）。
+     *
+     * ⚠️ 客户端这份是**下拉框的选项值**，而真正的白名单校验在
+     * `src/settings.js`（宿主）。两边不同集时，界面能选到一个宿主不认识的值
+     * → 宿主回落 `auto` → **界面显示"左侧"、实际贴在下方**，而且不报错。
+     * `test-pet-pomodoro.mjs` 有一条"三份白名单同集"的断言盯着
+     *（宿主 / 客户端 / exe 的 `PetSettingsInfo.PomodoroAnchors`）。
+     */
+    const PET_POMODORO_ANCHORS = ['auto', 'below', 'above', 'left', 'right']
+
     /** 预设 → 四个时长字段。与 Host 的 `POMODORO_PRESET_VALUES` 同值。 */
     const PET_POMODORO_PRESET_VALUES = {
       classic: { pomodoroFocusMs: 25 * 60 * 1000, pomodoroBreakMs: 5 * 60 * 1000, pomodoroLongBreakMs: 15 * 60 * 1000, pomodoroRounds: 4 },
@@ -740,6 +767,8 @@ window.__ModuleLoader__.load({
         pomodoroAutoNext: true,
         pomodoroNotify: true,
         pomodoroCountdown: true,
+        // v14：倒计时方位。默认 `auto` = 与之前逐字相同的行为（老配置零回归）。
+        pomodoroAnchor: 'auto',
         // ── 番茄钟 v10（今日目标 / 节奏预设 / 呼吸引导）────────────────────
         pomodoroGoalCount: 8,
         pomodoroPreset: 'classic',
@@ -852,6 +881,10 @@ window.__ModuleLoader__.load({
       // v10：今日目标（0 = 不设目标，所以下限是 0）+ 节奏预设（白名单）。
       out.pomodoroGoalCount = num(input.pomodoroGoalCount, 0, 30, base.pomodoroGoalCount)
       if (PET_POMODORO_PRESETS.includes(input.pomodoroPreset)) out.pomodoroPreset = input.pomodoroPreset
+      // v14：倒计时方位（白名单）。**必须在这里** —— 它不是一个 boolean，
+      // 上面那个 `typeof === 'boolean'` 的白名单循环覆盖不到它；
+      // 漏掉的话设置页能选、但**发不出去**（宿主静默忽略，零报错）。
+      if (PET_POMODORO_ANCHORS.includes(input.pomodoroAnchor)) out.pomodoroAnchor = input.pomodoroAnchor
       if (typeof input.persona === 'string') {
         const p = input.persona.trim()
         if (p !== '' && p.length <= 64) out.persona = p
@@ -2464,6 +2497,27 @@ window.__ModuleLoader__.load({
                   label: t('pomodoroCountdown'),
                   value: settings.pomodoroCountdown,
                   onChange: v => set({ pomodoroCountdown: v })
+                }),
+                // v14：倒计时方位（用户问"番茄钟的位置可以调吗"）。
+                // 放在「下方常显倒计时」**之后** —— 它是那个开关的细化，
+                // 开关都没开的人不需要先看到"位置"。
+                h(Row, {
+                  key: 'pomodoroAnchor',
+                  label: t('pomodoroAnchor'),
+                  desc: t('pomodoroAnchorHint'),
+                  control: h('select', {
+                    key: 's',
+                    className: 'zf-pet-row__input',
+                    value: PET_POMODORO_ANCHORS.includes(settings.pomodoroAnchor)
+                      ? settings.pomodoroAnchor
+                      : 'auto',
+                    onChange: e => {
+                      const v = e.target.value
+                      // 只认白名单 —— 与 `src/settings.js` 的校验同源（单一真相）。
+                      if (PET_POMODORO_ANCHORS.includes(v)) set({ pomodoroAnchor: v })
+                    }
+                  }, PET_POMODORO_ANCHORS.map(id =>
+                    h('option', { key: id, value: id }, t('anchor' + id[0].toUpperCase() + id.slice(1)))))
                 }),
                 h(Toggle, {
                   key: 'pomodoroBreath',

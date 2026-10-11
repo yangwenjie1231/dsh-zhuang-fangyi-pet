@@ -1393,6 +1393,89 @@ namespace DshZhuangFangyiPet
             Check(fsMissing, "状态文字字号倍率：缺字段不动现状（旧快照零回归）",
                   fsMissing ? "Has=false" : "不该被置为 true");
 
+            // ⭐⭐ 契约 §2 v14：倒计时方位（用户问"番茄钟的位置可以调吗"）。
+            //
+            // 三件事必须都验到，缺一个就会出现"设置了没反应"：
+            //   ① 合法值能解析（`Has*=true` 且值正确）；
+            //   ② **缺字段不动现状**（旧宿主不发这个字段 → 零回归）；
+            //   ③ **不认识的字符串当作没设置**（不是"设成了一个怪值"）——
+            //      否则 exe 会按未知方位处理，用户看到位置没变却以为设置生效了。
+            {
+                PetSnapshot aOk = PetSnapshot.Parse(
+                    "{\"rev\":11,\"label\":\"待机中\",\"settings\":{\"pomodoroAnchor\":\"left\"}}");
+                bool aParse = aOk != null && aOk.Settings != null &&
+                    aOk.Settings.HasPomodoroAnchor && aOk.Settings.PomodoroAnchor == "left";
+
+                PetSnapshot aMiss = PetSnapshot.Parse(
+                    "{\"rev\":12,\"label\":\"待机中\",\"settings\":{}}");
+                bool aMissing = aMiss != null && aMiss.Settings != null &&
+                    !aMiss.Settings.HasPomodoroAnchor;
+
+                PetSnapshot aJunk = PetSnapshot.Parse(
+                    "{\"rev\":13,\"label\":\"待机中\",\"settings\":{\"pomodoroAnchor\":\"sideways\"}}");
+                bool aJunkRejected = aJunk != null && aJunk.Settings != null &&
+                    !aJunk.Settings.HasPomodoroAnchor;
+
+                // 非字符串类型（数字/布尔）也要当作没设置，不能崩也不能透传
+                PetSnapshot aNum = PetSnapshot.Parse(
+                    "{\"rev\":14,\"label\":\"待机中\",\"settings\":{\"pomodoroAnchor\":3}}");
+                bool aNumRejected = aNum != null && aNum.Settings != null &&
+                    !aNum.Settings.HasPomodoroAnchor;
+
+                Check(aParse && aMissing && aJunkRejected && aNumRejected,
+                      "⭐⭐ 倒计时方位：解析合法值 / 缺字段不动现状 / 未知值与错类型一律拒绝",
+                      "合法=" + aParse + " 缺字段=" + aMissing +
+                      " 未知值被拒=" + aJunkRejected + " 错类型被拒=" + aNumRejected);
+
+                // ⭐⭐⭐ **三份白名单必须同集**（宿主 / 客户端 / exe）。
+                //
+                // ⚠️ 这是本类设置最容易出的静默 bug：三处各有一份白名单，
+                // 不同集时界面能选到一个下游不认识的值 → 下游回落默认 →
+                // **界面显示"左侧"、实际贴在下方**，而且不报错。
+                string jsSettings = ReadSelfSource("..\\src\\settings.js");
+                if (jsSettings == null) jsSettings = ReadSelfSource("settings.js");
+                string jsClient = ReadSelfSource("..\\client.js");
+                if (jsClient == null) jsClient = ReadSelfSource("client.js");
+
+                bool hostHasAll = jsSettings != null;
+                for (int wi = 0; wi < PetSettingsInfo.PomodoroAnchors.Length; wi++)
+                {
+                    if (jsSettings == null ||
+                        jsSettings.IndexOf("'" + PetSettingsInfo.PomodoroAnchors[wi] + "'",
+                                           StringComparison.Ordinal) < 0) hostHasAll = false;
+                }
+                bool clientHasAll = jsClient != null;
+                for (int wi = 0; wi < PetSettingsInfo.PomodoroAnchors.Length; wi++)
+                {
+                    if (jsClient == null ||
+                        jsClient.IndexOf("'" + PetSettingsInfo.PomodoroAnchors[wi] + "'",
+                                         StringComparison.Ordinal) < 0) clientHasAll = false;
+                }
+                Check(hostHasAll && clientHasAll,
+                      "⭐⭐⭐ 方位白名单三处同集（宿主 settings.js / 客户端 client.js / exe）",
+                      "宿主含全部 5 值=" + hostHasAll + " 客户端含全部 5 值=" + clientHasAll +
+                      "（不同集 = 界面能选、下游不认，静默不生效）");
+
+                // ⭐⭐⭐ exe 拼 JSON 前**必须先过白名单**（`PostSettingsPomodoroAnchor`）。
+                //
+                // ⚠️ 这个值是被**直接拼进 JSON body** 的字符串 ——
+                // 不过白名单的话，一个带引号的值就能破坏整个请求
+                //（`{"pomodoroAnchor":"x","evil":"y"}`），而且会被持久化。
+                // 回滚 B5（去掉那道校验）抓到过：当时**没有任何断言**盯着它。
+                //
+                // 判据：验"那个方法体内确实做了白名单校验"，不是"文件里出现过这个词"
+                //（后者会因为别处也用到 `IsKnownPomodoroAnchor` 而假绿）。
+                {
+                    string httpSrc = ReadSelfSource("PetHttp.cs");
+                    string postBody = ExtractMethodBody(httpSrc, "void PostSettingsPomodoroAnchor(");
+                    bool guards = postBody != null &&
+                        postBody.IndexOf("IsKnownPomodoroAnchor", StringComparison.Ordinal) >= 0;
+                    Check(guards,
+                          "⭐⭐⭐ exe 回报方位前过白名单（否则拼串注入 + 持久化怪值）",
+                          "方法体内有白名单校验=" + guards);
+                }
+            }
+
             // ⭐ 显隐矩阵（与 overlay 逐条对齐；这是"两端表现一致"的唯一保证）
             PetStatusLabel lbl = new PetStatusLabel();
             lbl.DiagSetLabel("待机中", 1.0, false);
@@ -2501,6 +2584,94 @@ namespace DshZhuangFangyiPet
             bool placed = tx > 0 && ty > 800;   // 在本体下方
             Check(placed, "倒计时窗贴本体下方居中（复用 ComputeTarget）",
                   "本体(1000,800,200,200) → 窗 " + bw + "x" + bh + " @" + (int)tx + "," + (int)ty);
+
+            // (14b) ⭐⭐⭐ v14：**倒计时方位可调**（用户问"番茄钟的位置可以调吗"）。
+            //
+            // 原先它是**自动贴下方**的（居中，放不下翻上方），用户无法左右。
+            // 现在支持 auto/below/above/left/right。
+            //
+            // ⚠️ 判据必须**驱动产品那条 `ComputeTarget`**（含 `_anchor` 的重载），
+            // 而不是自己算一遍"上方应该在 y 更小的地方" —— 那样把产品的
+            // 分支改坏（比如 left/right 互换）也测不出来。
+            {
+                double ax, ay; int abw, abh;
+                // 用 `DiagSetAnchor` + `DiagTargetFor`（后者已经读 `_anchor`）
+                pomo.SetAnchor("below");
+                pomo.DiagTargetFor(1000, 800, 200, 200, out ax, out ay, out abw, out abh);
+                double belowY = ay;
+
+                pomo.SetAnchor("above");
+                pomo.DiagTargetFor(1000, 800, 200, 200, out ax, out ay, out abw, out abh);
+                double aboveY = ay;
+
+                pomo.SetAnchor("left");
+                pomo.DiagTargetFor(1000, 800, 200, 200, out ax, out ay, out abw, out abh);
+                double leftX = ax;
+
+                pomo.SetAnchor("right");
+                pomo.DiagTargetFor(1000, 800, 200, 200, out ax, out ay, out abw, out abh);
+                double rightX = ax;
+
+                // 下方 → 在她的下边（y 更大）；上方 → 在她的上边（y 更小）
+                bool belowOk = belowY > 800 + 200;
+                bool aboveOk = aboveY < 800;
+                // 左侧 → 在她左边（x 更小）；右侧 → 在她右边（x 更大）
+                bool leftOk = leftX < 1000;
+                bool rightOk = rightX > 1000 + 200;
+                // 四个方位必须**互不相同**（否则"能调"就是假的）
+                bool allDistinct = !(Math.Abs(belowY - aboveY) < 1) &&
+                                   !(Math.Abs(leftX - rightX) < 1);
+
+                Check(belowOk && aboveOk && leftOk && rightOk && allDistinct,
+                      "⭐⭐⭐ 倒计时方位可调（下/上/左/右各贴各的一侧，互不相同）",
+                      "下y=" + (int)belowY + " 上y=" + (int)aboveY +
+                      " 左x=" + (int)leftX + " 右x=" + (int)rightX +
+                      "（本体 1000,800 200x200）");
+
+                // ⭐ auto 必须**与 below 在同一块屏幕上表现一致**（老配置零回归）
+                pomo.SetAnchor("auto");
+                double autoY;
+                pomo.DiagTargetFor(1000, 800, 200, 200, out ax, out autoY, out abw, out abh);
+                Check(Math.Abs(autoY - belowY) < 1,
+                      "⭐⭐ auto 与 below 在空间够时位置一致（老配置零回归）",
+                      "auto y=" + (int)autoY + " vs below y=" + (int)belowY);
+
+                // ⭐ 未知方位不许乱跑（回落 auto，不是丢到屏幕角上）
+                pomo.SetAnchor("nonsense-value");
+                double junkY;
+                pomo.DiagTargetFor(1000, 800, 200, 200, out ax, out junkY, out abw, out abh);
+                Check(Math.Abs(junkY - belowY) < 1,
+                      "⭐⭐ 未知方位回落 auto（不会因为一个拼错的值就跑到屏幕角）",
+                      "未知值 y=" + (int)junkY + " vs auto y=" + (int)belowY);
+
+                // ⭐⭐⭐ **空/null 方位也必须是 auto**（不是"落到某一侧分支"）。
+                //
+                // ⚠️ 这条必须**直接调 `ComputeTarget`**，不能走 `SetAnchor`：
+                // `SetAnchor` 自己就把 `""` 归一成 `"auto"` 了，于是 `ComputeTarget`
+                // 里那句 `IsNullOrEmpty → auto` 的兜底**永远不会被走到** ——
+                // 回滚 A3b（把兜底改成 `left`）就是这么全绿的。
+                // 判据：**要测兜底，就得走能到达兜底的那条路**。
+                //
+                // 用 **x** 比较（不是 y）：left 的 x 是"贴她左侧"，auto 是"水平居中"，
+                // 两者差了一个窗口宽度，一定不同；而 y 在贴边夹取后可能恰好相同。
+                {
+                    int ax0, ay0, ax1, ay1, ax2, ay2;
+                    PetPomodoro.ComputeTarget(1000, 800, 200, 200, 58, 42, 1.0, "auto",
+                                              out ax0, out ay0);
+                    PetPomodoro.ComputeTarget(1000, 800, 200, 200, 58, 42, 1.0, "",
+                                              out ax1, out ay1);
+                    PetPomodoro.ComputeTarget(1000, 800, 200, 200, 58, 42, 1.0, null,
+                                              out ax2, out ay2);
+                    bool emptyIsAuto = Math.Abs(ax1 - ax0) < 1 && Math.Abs(ay1 - ay0) < 1;
+                    bool nullIsAuto = Math.Abs(ax2 - ax0) < 1 && Math.Abs(ay2 - ay0) < 1;
+                    Check(emptyIsAuto && nullIsAuto,
+                          "⭐⭐⭐ 空/ null 方位也按 auto 处理（不是落到左侧等某一支）",
+                          "auto=(" + ax0 + "," + ay0 + ") 空=(" + ax1 + "," + ay1 +
+                          ") null=(" + ax2 + "," + ay2 + ")");
+                }
+
+                pomo.SetAnchor("auto");
+            }
 
             // (15) ⭐ 显隐：**穿透时照显示**（与状态文字的关键差别）
             pomo.DiagSetState("专注 25:00", true, true);

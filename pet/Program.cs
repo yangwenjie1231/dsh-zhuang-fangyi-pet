@@ -268,6 +268,15 @@ namespace DshZhuangFangyiPet
 
         // v7：番茄钟（上次应用的块；null=旧 Host 或不支持）
         private PetPomodoroInfo _lastPomodoro;
+
+        /// <summary>
+        /// v14：倒计时停靠方位（用户："番茄钟的位置可以调吗"）。
+        ///
+        /// 本地记住是为了**逐字段 diff**：宿主每帧都会带这个字段，
+        /// 值没变就不该重贴窗口（否则倒计时每帧抖一下）。
+        /// 初值 `auto` = 与之前逐字相同的行为，所以旧宿主（不发这个字段）零回归。
+        /// </summary>
+        private string _pomodoroAnchor = "auto";
         /// <summary>倒计时窗每秒重绘的定时器（Host 不每秒推帧，见下）。</summary>
         private DispatcherTimer _pomoTimer;
         /// <summary>回复语音队列的续播泵（见 Init 里的说明）。</summary>
@@ -972,6 +981,16 @@ namespace DshZhuangFangyiPet
                 _bubbleOn = st.Bubble;
                 if (!_bubbleOn) _bubble.HideNow();
                 PetLog.Info("settings: bubble → " + (st.Bubble ? "1" : "0"));
+                changed = true;
+            }
+            // v14：倒计时停靠方位（用户："番茄钟的位置可以调吗"）。
+            // 逐字段 diff：值没变不动（否则每帧重贴一次，看着会抖）。
+            if (st.HasPomodoroAnchor && st.PomodoroAnchor != _pomodoroAnchor)
+            {
+                _pomodoroAnchor = st.PomodoroAnchor;
+                try { _pomo.SetAnchor(_pomodoroAnchor); } catch (Exception ex) { PetLog.Warn("番茄钟方位应用失败: " + PetLog.Describe(ex)); }
+                try { RefreshPomodoro(); } catch { }
+                PetLog.Info("settings: 番茄钟方位 → " + _pomodoroAnchor);
                 changed = true;
             }
             if (st.HasDoubleClick && st.DoubleClick != _doubleClick)
@@ -1930,6 +1949,42 @@ namespace DshZhuangFangyiPet
         /// 失败只记日志（`PostJson` 的既有语义）：宿主不在时不该弹框打断用户。
         /// </summary>
         /// <summary>
+        /// v14：方位 → 中文标签（**与 `src/settings.js` 的 `POMODORO_ANCHOR_LABELS` 同文案**）。
+        ///
+        /// ⚠️ 两边各有一份是**有意的**（exe 不依赖宿主就能画菜单），
+        /// 但必须同文案 —— 由 `tools/test-pet-pomodoro.mjs` 的"文案一致"断言盯着。
+        /// 若菜单显示"下方"、设置页显示"桌宠下方"，用户会以为是两个不同的设置。
+        /// </summary>
+        internal static string PomodoroAnchorLabel(string key)
+        {
+            if (key == "below") return "桌宠下方";
+            if (key == "above") return "桌宠上方";
+            if (key == "left") return "桌宠左侧";
+            if (key == "right") return "桌宠右侧";
+            return "自动（贴下方，放不下自动避让）";
+        }
+
+        /// <summary>
+        /// v14：设置倒计时方位（右键菜单用）。
+        ///
+        /// 本地立即生效 + 回报宿主持久化 —— 与托盘那几个开关同一模式
+        ///（"桌面端调完了、设置页还是旧值"是踩过的坑）。
+        /// </summary>
+        private void SetPomodoroAnchor(string anchor, bool report)
+        {
+            string a = PetSettingsInfo.IsKnownPomodoroAnchor(anchor) ? anchor : "auto";
+            if (a == _pomodoroAnchor) return;
+            _pomodoroAnchor = a;
+            try { _pomo.SetAnchor(a); } catch (Exception ex) { PetLog.Warn("番茄钟方位应用失败: " + PetLog.Describe(ex)); }
+            try { RefreshPomodoro(); } catch { }
+            PetLog.Info("番茄钟方位 → " + a + "（本地已生效）");
+            if (report)
+            {
+                try { _http.PostSettingsPomodoroAnchor(a); } catch (Exception ex) { PetLog.Warn("方位回报失败: " + PetLog.Describe(ex)); }
+            }
+        }
+
+        /// <summary>
         /// 开/关手势调试模式（v13.6）。
         ///
         /// `report=true` 时回报宿主持久化 —— 与 `ReportSettingFlags` 同一纪律：
@@ -2760,6 +2815,40 @@ namespace DshZhuangFangyiPet
             reset.Header = "重置位置(_R)";
             reset.Click += delegate { _win.ReclampPosition(true); };
             m.Items.Add(reset);
+
+            // ── v14：倒计时方位（用户问"番茄钟的位置可以调吗"）─────────────
+            //
+            // 为什么放右键菜单、而不是只放设置页：
+            // 用户的疑问来自**看着倒计时的时候**（她挡住了别的东西/位置别扭），
+            // 那一刻他手上正好在右键。让他为调一个位置去翻设置页，
+            // 等于把门槛设在"他刚觉得别扭"的那一刻 —— 与 v13.6 手势调试开关同理。
+            //
+            // ⚠️ 子菜单**必须有 `PART_Popup`**（v13.4 踩过：自定义模板漏了它，
+            // 箭头照画、点开却是空的）。这里走 `SkinMenu` 的模板，已含该部件。
+            MenuItem anchorMenu = new MenuItem();
+            anchorMenu.Header = "倒计时位置(_P)";
+            string[] anchorKeys = new string[] { "auto", "below", "above", "left", "right" };
+            MenuItem[] anchorItems = new MenuItem[anchorKeys.Length];
+            for (int ai = 0; ai < anchorKeys.Length; ai++)
+            {
+                string key = anchorKeys[ai];
+                MenuItem it = new MenuItem();
+                it.Header = PomodoroAnchorLabel(key);
+                it.IsCheckable = true;
+                it.IsChecked = (_pomodoroAnchor == key);
+                it.Click += delegate
+                {
+                    SetPomodoroAnchor(key, true);
+                    // 勾选状态**按真值重刷**（不是"我点的那项打勾"：
+                    // 回报失败时宿主那份没变，下次快照会把值推回来）
+                    for (int k = 0; k < anchorItems.Length; k++)
+                        if (anchorItems[k] != null)
+                            anchorItems[k].IsChecked = (_pomodoroAnchor == anchorKeys[k]);
+                };
+                anchorItems[ai] = it;
+                anchorMenu.Items.Add(it);
+            }
+            m.Items.Add(anchorMenu);
 
             m.Items.Add(new Separator());
 

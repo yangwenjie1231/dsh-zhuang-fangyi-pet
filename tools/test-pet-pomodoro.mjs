@@ -31,8 +31,16 @@ import {
   POMODORO_FOCUS_MIN, POMODORO_FOCUS_MAX,
   POMODORO_BREAK_MIN, POMODORO_BREAK_MAX,
   POMODORO_LONG_BREAK_MIN, POMODORO_LONG_BREAK_MAX,
-  POMODORO_ROUNDS_MIN, POMODORO_ROUNDS_MAX
+  POMODORO_ROUNDS_MIN, POMODORO_ROUNDS_MAX,
+  POMODORO_ANCHORS, POMODORO_ANCHOR_LABELS
 } from '../src/settings.js'
+
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
+
+const HERE = dirname(fileURLToPath(import.meta.url))
+const ROOT = join(HERE, '..')
 
 let passed = 0
 let failed = 0
@@ -721,6 +729,81 @@ ok('setConfig 越界值被夹取（热更新不是绕过校验的后门）', () 
   const p = createPomodoro({ now: clock.now, config: FAST })
   p.setConfig({ focusMs: 1 })
   assert.equal(p.config.focusMs, POMODORO_LIMITS.focusMs[0])
+})
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * v14：倒计时方位（用户问"番茄钟的位置可以调吗"）
+ *
+ * ⚠️ 这一节盯的是**三份白名单不许漂移** —— 这是本类设置最容易出的静默 bug：
+ * 宿主 / 客户端 / exe 各有一份，不同集时界面能选到一个下游不认识的值
+ * → 下游回落默认 → **界面显示"左侧"、实际贴在下方**，而且不报错。
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+section('v14 倒计时方位（三份白名单同集）')
+
+ok('宿主白名单是五值且含 auto', () => {
+  assert.deepEqual([...POMODORO_ANCHORS].sort(),
+    ['above', 'auto', 'below', 'left', 'right'])
+})
+
+ok('每个方位都有中文标签（下拉框不许出现 undefined）', () => {
+  for (const a of POMODORO_ANCHORS) {
+    assert.equal(typeof POMODORO_ANCHOR_LABELS[a], 'string', `${a} 缺标签`)
+    assert.ok(POMODORO_ANCHOR_LABELS[a].length > 0, `${a} 标签为空`)
+  }
+})
+
+ok('客户端 client.js 的白名单与宿主同集', () => {
+  const src = readFileSync(join(ROOT, 'client.js'), 'utf8')
+  const m = src.match(/PET_POMODORO_ANCHORS\s*=\s*\[([^\]]*)\]/)
+  assert.ok(m, 'client.js 里找不到 PET_POMODORO_ANCHORS')
+  const clientSet = m[1].split(',').map(s => s.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean)
+  assert.deepEqual(clientSet.sort(), [...POMODORO_ANCHORS].sort(),
+    '客户端与宿主的方位白名单不同集 → 界面能选、宿主不认')
+})
+
+ok('exe PetSnapshot.cs 的白名单与宿主同集', () => {
+  const src = readFileSync(join(ROOT, 'pet', 'PetSnapshot.cs'), 'utf8')
+  const m = src.match(/PomodoroAnchors\s*=\s*new string\[\]\s*\{([^}]*)\}/)
+  assert.ok(m, 'PetSnapshot.cs 里找不到 PomodoroAnchors')
+  const exeSet = m[1].split(',').map(s => s.trim().replace(/^"|"$/g, '')).filter(Boolean)
+  assert.deepEqual(exeSet.sort(), [...POMODORO_ANCHORS].sort(),
+    'exe 与宿主的方位白名单不同集 → exe 会拒收合法值，设置静默不生效')
+})
+
+ok('exe 菜单文案与宿主标签逐字一致', () => {
+  // ⚠️ 菜单显示"下方"、设置页显示"桌宠下方"会让用户以为是两个不同的设置。
+  const src = readFileSync(join(ROOT, 'pet', 'Program.cs'), 'utf8')
+  const body = src.match(/PomodoroAnchorLabel\(string key\)\s*\{[\s\S]*?\n        \}/)
+  assert.ok(body, 'Program.cs 里找不到 PomodoroAnchorLabel')
+  for (const a of POMODORO_ANCHORS) {
+    assert.ok(body[0].includes(POMODORO_ANCHOR_LABELS[a]),
+      `exe 菜单缺少文案「${POMODORO_ANCHOR_LABELS[a]}」（方位 ${a}）`)
+  }
+})
+
+ok('client.js 也有全部五个方位的文案（中英各一份）', () => {
+  const src = readFileSync(join(ROOT, 'client.js'), 'utf8')
+  for (const a of POMODORO_ANCHORS) {
+    const key = 'anchor' + a[0].toUpperCase() + a.slice(1)
+    const hits = src.split(new RegExp(`${key}:\\s*'`)).length - 1
+    assert.equal(hits, 2, `${key} 应中英各一份，实际 ${hits} 份`)
+  }
+})
+
+ok('index.js 真的把 pomodoroAnchor 发进快照（不发=设置页是装饰品）', () => {
+  // ⚠️ v10 踩过：快照契约里定义了字段但缺发送方 → exe 那个赋值分支
+  // **永远不会执行** → 设置页选了方位却毫无变化。
+  const src = readFileSync(join(ROOT, 'index.js'), 'utf8')
+  assert.ok(/pomodoroAnchor:\s*s\.pomodoroAnchor/.test(src),
+    'index.js 没把 pomodoroAnchor 发进快照')
+})
+
+ok('归一化拒绝未知方位（不透明透传）', () => {
+  // 用宿主归一化的真实行为验，不是看源码里有没有那个 if
+  const src = readFileSync(join(ROOT, 'src', 'settings.js'), 'utf8')
+  assert.ok(/POMODORO_ANCHORS\.includes\(input\.pomodoroAnchor\)/.test(src),
+    'settings.js 没对 pomodoroAnchor 做白名单校验')
 })
 
 /* ══════════════════════════════════════════════════════════════════════════

@@ -94,6 +94,31 @@ namespace DshZhuangFangyiPet
         public bool HasPomodoroBreath; public bool PomodoroBreath;
 
         /// <summary>
+        /// v14：倒计时停靠方位（用户："番茄钟的位置可以调吗"）。
+        ///
+        /// 字符串枚举 `auto`/`below`/`above`/`left`/`right`。
+        /// 缺省（`Has*`=false）→ exe **不动现状**（additive 兼容，旧宿主零回归）。
+        /// </summary>
+        public bool HasPomodoroAnchor; public string PomodoroAnchor;
+
+        /// <summary>
+        /// v14：方位白名单。**exe 与宿主各有一份**，必须同值域 ——
+        /// 宿主那份在 `src/settings.js` 的 `POMODORO_ANCHORS`，
+        /// 由 `tools/test-pet-pomodoro.mjs` 的"契约同值域"断言盯着两边不许漂移。
+        /// </summary>
+        internal static readonly string[] PomodoroAnchors =
+            new string[] { "auto", "below", "above", "left", "right" };
+
+        /// <summary>v14：这个方位值认不认识（不认识就当没设置，绝不透传）。</summary>
+        internal static bool IsKnownPomodoroAnchor(string v)
+        {
+            if (string.IsNullOrEmpty(v)) return false;
+            for (int i = 0; i < PomodoroAnchors.Length; i++)
+                if (PomodoroAnchors[i] == v) return true;
+            return false;
+        }
+
+        /// <summary>
         /// 契约 §2 v13：**手势灵敏度倍率**（1.0 = 基准）。
         ///
         /// 旧快照缺省 = 1.0（不动现状）。用户点名"我鼠标DPI平时开的比较高，
@@ -602,6 +627,23 @@ namespace DshZhuangFangyiPet
                 {
                     si.HasPomodoroBreath = true;
                     si.PomodoroBreath = st.Bool("pomodoroBreath", PetSettingsInfo.DefaultPomodoroBreath());
+                }
+                // ── 契约 §2 v14：倒计时停靠方位（用户："番茄钟的位置可以调吗"）──
+                //
+                // ⚠️ 字符串枚举，所以判据是 `TStr` **且值在白名单里** ——
+                // 只判 `TStr` 的话，宿主推来一个没见过的值会被当成"用户设过了"，
+                // 下游按未知方位处理 → 位置看起来"没生效"。
+                // 不认识的值一律当作**没设置**（Has*=false → 不动现状），
+                // 与 `debugGestures` 那条（字符串按缺失处理）同一手法。
+                if (st.Get("pomodoroAnchor") != null &&
+                    st.Get("pomodoroAnchor").Kind == PetJson.JVal.TStr)
+                {
+                    string anch = st.Str("pomodoroAnchor", "");
+                    if (PetSettingsInfo.IsKnownPomodoroAnchor(anch))
+                    {
+                        si.HasPomodoroAnchor = true;
+                        si.PomodoroAnchor = anch;
+                    }
                 }
                 // ── 契约 §2 v13：手势灵敏度（缺省 1.0 = 不动现状）──────────────
                 if (st.Get("gestureSensitivity") != null &&

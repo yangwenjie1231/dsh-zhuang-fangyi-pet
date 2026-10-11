@@ -686,6 +686,23 @@ namespace DshZhuangFangyiPet
         }
 
         /// <summary>
+        /// v14：回报番茄钟停靠方位（用户："番茄钟的位置可以调吗"）。
+        ///
+        /// ⚠️ 与 `PostSettingsTheme` 同样的理由：右键菜单改了方位后
+        /// **必须回报宿主**，否则"桌面端调完了、设置页还是旧值"，
+        /// 而且下次重启会跳回旧方位（用户会以为设置没保存）。
+        ///
+        /// ⚠️ 值**先过白名单**再拼进 JSON：这个字符串是直接拼进 body 的，
+        /// 不过白名单的话，一个带引号的值就能破坏 JSON（拼串注入）。
+        /// 与 `PostSettingsTheme` 的三元兜底是同一手法。
+        /// </summary>
+        public void PostSettingsPomodoroAnchor(string anchor)
+        {
+            string a = PetSettingsInfo.IsKnownPomodoroAnchor(anchor) ? anchor : "auto";
+            PostJson("/api/zhuang-fangyi/pet/settings", "{\"pomodoroAnchor\":\"" + a + "\"}");
+        }
+
+        /// <summary>
         /// 托盘 / 右键菜单改了**开关类**设置之后回报宿主持久化
         /// （POST /pet/settings，body 只带真正改动的那几个字段）。
         ///

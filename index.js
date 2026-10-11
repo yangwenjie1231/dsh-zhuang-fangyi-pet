@@ -2120,6 +2120,15 @@ export function apply (ctx, config) {
       hoverReact: s.hoverReact,
       pomodoroBreath: s.pomodoroBreath,
       /**
+       * v14：倒计时停靠方位（用户问："番茄钟的位置可以调吗"）。
+       *
+       * ⚠️ 必须**发出去** —— 这与上面那四个开关是同一个坑：
+       * 快照契约里定义了字段（`PetSettingsInfo.HasPomodoroAnchor`/值），
+       * 但缺发送方的话，exe 侧那个赋值分支**永远不会执行**，
+       * 设置页选了方位却毫无变化（用户会以为"这个功能没做"）。
+       */
+      pomodoroAnchor: s.pomodoroAnchor,
+      /**
        * v13 手势灵敏度（用户："我鼠标DPI平时开的比较高，所以很多手势触发不了"）。
        *
        * 容差是**屏幕物理像素**（点击 4px / 摸头 6px），而要吸收的是"手抖了多少
