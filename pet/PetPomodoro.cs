@@ -641,5 +641,57 @@ namespace DshZhuangFangyiPet
             double dpi;
             CurrentMetrics(out bw, out bh, out dpi);
         }
+
+        /// <summary>
+        /// 自检诊断用：当前生效的缩放（v13.9）。
+        ///
+        /// 用户报"番茄钟的位置和大小是固定的" —— 根因是**设置页那条缩放入口
+        /// 从来没调过 `_pomo.SetScale()`**，所以它的 `_scale` 一直是 1.0。
+        /// 这条诊断就是为了让"它到底有没有跟着缩"变成可断言的事实。
+        /// </summary>
+        internal double DiagScale { get { return _scale; } }
+
+        /// <summary>
+        /// 自检诊断用：按当前 `_scale` 与给定本体矩形，算出窗口该在的位置（物理像素）。
+        ///
+        /// 抽出来是为了让"位置**跟着缩放走**"能被断言 ——
+        /// 只断言"字号变了"是不够的：位置与尺寸是两件事，
+        /// 而用户报的是"位置**和**大小"。
+        ///
+        /// ⚠️ 尺寸走 `CurrentMetrics`（**真实渲染尺寸**，随 `_scale` 变），
+        /// 位置走 `ComputeTarget`（**与产品同一个**定位算法，不复制算术）。
+        ///
+        /// ⚠️⚠️ `CurrentMetrics` 读的是 `_chrome.DesiredSize` —— 那需要**布局真的跑过**。
+        /// 我第一版直接调它，拿到的是 `bw<=0` 的兜底值 `60x20`（两次都一样），
+        /// 于是断言误报"位置没变"。所以这里**先强制布局**再量。
+        /// 判据：**量尺寸之前必须先让布局发生**，否则量的是兜底常数。
+        /// </summary>
+        internal void DiagPlacementFor(int petX, int petY, int petW, int petH,
+                                       out int x, out int y, out int w, out int h)
+        {
+            try { UpdateLayout(); } catch { }
+            double dpi;
+            CurrentMetrics(out w, out h, out dpi);
+            ComputeTarget(petX, petY, petW, petH, w, h, dpi, out x, out y);
+        }
+
+        /// <summary>
+        /// 自检诊断用：强制走一次"设文字 + 布局 + 量尺寸"，拿到该缩放下窗口的真实尺寸。
+        ///
+        /// 单独一条是因为自检需要**在不 Show 的前提下**量到真实尺寸
+        ///（Show 会真的把窗口挂到桌面上，多个 Topmost 窗口会互相干扰测量）。
+        /// </summary>
+        internal void DiagMeasureAtScale(double scale, string sampleText, out int w, out int h)
+        {
+            SetScale(scale);
+            _text.Text = sampleText ?? "24:59";
+            UpdateRingSize();
+            try { UpdateLayout(); } catch { }
+            // `SizeToContent` 在未 Show 时不会自己量，这里手动催一次布局。
+            try { _chrome.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity)); } catch { }
+            try { _chrome.Arrange(new Rect(_chrome.DesiredSize)); } catch { }
+            double dpi;
+            CurrentMetrics(out w, out h, out dpi);
+        }
     }
 }

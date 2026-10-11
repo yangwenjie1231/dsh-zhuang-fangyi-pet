@@ -64,6 +64,24 @@ namespace DshZhuangFangyiPet
         private bool _hint;
         private bool _clickThrough;
 
+        /// <summary>
+        /// v13.9：**本体当前是否可见**（用户："隐藏桌宠的时候，桌宠下方的小字
+        /// 常驻状态下不会隐藏"）。
+        ///
+        /// ⚠️ 为什么必须由外面喂进来，而不是本类自己查：
+        /// 状态文字是**独立窗口**，它不知道本体的存在。原先的显隐判据只看
+        /// `statusAlways`/`hint`/`clickThrough` —— **唯独没有"本体在不在"**。
+        ///
+        /// 于是出现这个 bug：点「隐藏桌宠」时 `Program` 确实调了 `_status.Hide()`，
+        /// 但**下一次快照**（15 秒一次，或任何状态变化）又会走
+        /// `RefreshStatusLabel()` → `ShouldShow()` 返回 true → **`Show()` 把它拉回来**。
+        /// 用户看到的就是"隐藏了桌宠，底下还常驻一行小字"。
+        ///
+        /// 判据：**隐藏本体必须是一条"判据级"的事实**，不能只靠一次 `Hide()` 调用 ——
+        /// 任何会重新求值显隐的路径都会把它撤销。
+        /// </summary>
+        private bool _petVisible = true;
+
         public PetStatusLabel()
         {
             Title = "DSH 庄方宜桌宠-状态";
@@ -170,6 +188,22 @@ namespace DshZhuangFangyiPet
             _hovering = hovering;
             ApplyVisibility();
         }
+
+        /// <summary>
+        /// 自检诊断用：注入**本体显隐**后重新评估（v13.9）。
+        ///
+        /// 单独一条是因为"隐藏桌宠后小字不隐藏"的 bug **只在"隐藏之后又来一次刷新"时出现**：
+        /// `Program` 隐藏那一刻确实调了 `Hide()`，但下一次快照刷新会把它 `Show()` 回来。
+        /// 所以自检必须能**先隐藏、再刷新**，只看隐藏那一刻的 `IsVisible` 是测不出来的。
+        /// </summary>
+        internal void DiagSetPetVisible(bool visible)
+        {
+            _petVisible = visible;
+            ApplyVisibility();
+        }
+
+        /// <summary>自检诊断用：当前**真实窗口**是否可见（不是 `ShouldShow` 的意图）。</summary>
+        internal bool DiagIsReallyVisible { get { return IsVisible; } }
 
         /// <summary>自检诊断用：直接设文字与缩放（不依赖快照）。</summary>
         internal void DiagSetLabel(string label, double scale, bool dark)
@@ -344,11 +378,26 @@ namespace DshZhuangFangyiPet
         public void Update(string label, bool statusAlways, bool hint, bool clickThrough,
                            bool hovering, int[] petRect)
         {
+            // 兼容旧签名：不知道本体显隐时按"可见"处理（= 保持既有行为）。
+            // 真实路径走下面那个带 `petVisible` 的重载（Program 会传真实值）。
+            Update(label, statusAlways, hint, clickThrough, hovering, petRect, true);
+        }
+
+        /// <summary>
+        /// v13.9：带**本体显隐**的统一入口（推荐）。
+        ///
+        /// `petVisible=false` 时状态文字**必须**隐藏 —— 见 `_petVisible` 的说明
+        ///（用户报"隐藏桌宠的时候，桌宠下方的小字常驻状态下不会隐藏"）。
+        /// </summary>
+        public void Update(string label, bool statusAlways, bool hint, bool clickThrough,
+                           bool hovering, int[] petRect, bool petVisible)
+        {
             _label = label ?? "";
             _statusAlways = statusAlways;
             _hint = hint;
             _clickThrough = clickThrough;
             _hovering = hovering;
+            _petVisible = petVisible;
             _text.Text = _label;
             _lastPetRect = petRect;
             ApplyVisibility();
@@ -365,6 +414,10 @@ namespace DshZhuangFangyiPet
         /// </summary>
         private bool ShouldShow()
         {
+            // ⚠️ v13.9：**本体藏了，小字必须一起藏** —— 而且必须是**判据**，
+            // 不能只靠 `Program` 在隐藏那一刻调一次 `Hide()`
+            //（下一次快照刷新就会把它 `Show()` 回来，用户报的正是这个）。
+            if (!_petVisible) return false;
             if (_clickThrough) return false;
             if (string.IsNullOrEmpty(_label)) return false;   // 没内容不显示空框
             return _statusAlways || (_hint && _hovering);

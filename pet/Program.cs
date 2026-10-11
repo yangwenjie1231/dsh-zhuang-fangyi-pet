@@ -878,6 +878,40 @@ namespace DshZhuangFangyiPet
         // ------------------------------------------------------------------
 
         /// <summary>
+        /// v13.9：把缩放应用到**全部四个窗口**（本体 + 气泡 + 状态文字 + 番茄钟）。
+        ///
+        /// ── 为什么必须收成一条路径（用户报的真 bug）──────────────────────────
+        ///
+        /// 用户原话："番茄钟的位置和大小是固定的"。
+        ///
+        /// 缩放有**两个入口**，原先它们做的事**不一样**：
+        ///   · 滚轮 → `OnScaleAdjusted`：四个都缩（本体/气泡/状态/番茄钟）；
+        ///   · 设置页/宿主快照 → `ApplySettings`：**只缩本体与气泡**。
+        /// 于是从设置页调大小、或滚轮松手后宿主回推一次时，
+        /// 状态文字与番茄钟停在旧尺寸、位置也按旧尺寸贴 ——
+        /// 正是用户看到的"番茄钟的位置和大小是固定的"。
+        ///
+        /// ⚠️ 判据：**同一个语义有两个入口时，必须让它们走同一段代码**，
+        /// 否则"只改了一个入口"这类 bug 既不会被发现、也不会被自检抓到
+        ///（本项目已经因为"两份实现互相掩护"栽过多次：
+        ///  v12 `ResolveRelease`、v13 `HoldTickCore`、v13.1 `DispatchRelease`、
+        ///  v13.6 面包屑接线、v13.7 松手补判定）。
+        ///
+        /// 每个窗口各自 try/catch：一个是独立窗口，它失败不该拖累其它三个。
+        /// </summary>
+        internal void ApplyScaleToAllWindows(double s)
+        {
+            try { _win.SetScale(s); } catch (Exception ex) { PetLog.Warn("本体缩放失败: " + PetLog.Describe(ex)); }
+            try { _bubble.SetScale(s); } catch (Exception ex) { PetLog.Warn("气泡缩放失败: " + PetLog.Describe(ex)); }
+            try { _status.SetScale(s); } catch (Exception ex) { PetLog.Warn("状态文字缩放失败: " + PetLog.Describe(ex)); }
+            try { _pomo.SetScale(s); } catch (Exception ex) { PetLog.Warn("番茄钟缩放失败: " + PetLog.Describe(ex)); }
+            // 番茄钟/状态文字的位置是按"本体矩形"算的 —— 本体刚改完尺寸，
+            // 必须立刻重贴一次，否则它们会按**旧尺寸**停在错的位置上。
+            try { RefreshPomodoro(); } catch { }
+            try { RefreshStatusLabel(); } catch { }
+        }
+
+        /// <summary>
         /// 把 snapshot.settings 里**出现且变化**的字段应用到窗口/托盘/气泡。
         /// 字段缺失（Has*=false）→ 完全不动现状（additive 兼容）；块缺失（null）→ 整体跳过。
         /// </summary>
@@ -892,7 +926,20 @@ namespace DshZhuangFangyiPet
                 if (Math.Abs(s - _win.Scale) > 0.001)
                 {
                     _win.SetScale(s);   // 内部含 ApplySizeForSheet + ReclampPosition
-                    _bubble.SetScale(s);  // 气泡同比缩放（它是独立窗口，不会自己跟）
+                    // ⚠️⚠️ v13.9：**四个窗口都要跟着缩**，不能只缩本体和气泡。
+                    //
+                    // 用户原话："番茄钟的位置和大小是固定的"。
+                    //
+                    // 真因：缩放有**两条**入口，而它们做的事不一样：
+                    //   · 滚轮（`OnScaleAdjusted`）→ 本体/气泡/状态/番茄钟**都缩**；
+                    //   · 设置页/宿主快照（这里）→ 只缩本体与气泡。
+                    // 于是"在设置页调大小"或"滚轮松手后宿主回推一次"时，
+                    // 状态文字与番茄钟**停在旧尺寸**，而且位置也按旧尺寸贴 ——
+                    // 用户看到的就是"番茄钟的位置和大小是固定的"。
+                    //
+                    // 教训：**同一个语义（跟随缩放）有两个入口时，必须有一处漏了就红**
+                    //（这里靠 `ApplyScaleToAllWindows` 把四个收成一条路径）。
+                    ApplyScaleToAllWindows(s);
                     PetLog.Info("settings: scale → " + s.ToString("0.0#", CultureInfo.InvariantCulture));
                     changed = true;
                 }
@@ -1870,11 +1917,9 @@ namespace DshZhuangFangyiPet
             _scalePostTimer.Stop();
             _scalePostTimer.Start();
             _tray.Refresh();   // 缩放档位勾选立即对齐
-            // 气泡同比缩放：滚轮时立刻重排（否则气泡僵在原尺寸，看着很突兀）
-            try { _bubble.SetScale(newScale); } catch (Exception ex) { PetLog.Warn("气泡缩放失败: " + PetLog.Describe(ex)); }
-            try { _status.SetScale(newScale); } catch { }
-            try { _pomo.SetScale(newScale); } catch { }
-            try { RefreshPomodoro(); } catch { }
+            // v13.9：走**与设置页同一条**路径（原先这里四行、设置页只有两行，
+            // 于是"番茄钟位置大小固定"只在设置页那条入口出现）。
+            ApplyScaleToAllWindows(newScale);
         }
 
         /// <summary>
@@ -2096,7 +2141,13 @@ namespace DshZhuangFangyiPet
                     _hintOn,
                     _win.ClickThrough,
                     _hovering,
-                    anchor);
+                    anchor,
+                    // ⚠️ v13.9：**本体显隐必须喂进去**。少这个参数的话，
+                    // 「隐藏桌宠」后下一次快照会把小字 `Show()` 回来
+                    //（用户报的正是"隐藏桌宠的时候，桌宠下方的小字常驻状态下不会隐藏"）。
+                    // 用 `_win.IsVisible`（WPF 真值）—— 这是本进程内的权威状态，
+                    // 不经过宿主，不会滞后。
+                    _win.IsVisible);
             }
             catch (Exception ex) { PetLog.Warn("状态文字刷新失败: " + PetLog.Describe(ex)); }
         }

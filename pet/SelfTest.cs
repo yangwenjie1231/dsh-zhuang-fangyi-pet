@@ -1464,6 +1464,191 @@ namespace DshZhuangFangyiPet
                 Check(false, "首帧状态栏尺寸自检", PetLog.Describe(ex));
             }
 
+            // ⭐⭐⭐ v13.9：**隐藏桌宠之后，状态小字不许被"刷新"回来**。
+            //
+            // 用户原话："隐藏桌宠的时候，桌宠下方的小字常驻状态下不会隐藏"。
+            //
+            // ⚠️ 关键：这个 bug **只在"隐藏之后又来一次刷新"时出现**。
+            // `Program` 隐藏那一刻确实调了 `_status.Hide()`，看不出问题；
+            // 而**下一次快照**（15 秒一次，或任何状态变化）会走
+            // `RefreshStatusLabel()` → `ShouldShow()` → `Show()`，把它**拉回来**。
+            //
+            // 所以断言必须**先隐藏、再刷新**，并且观察**真实窗口状态**
+            //（`DiagIsReallyVisible`），而不是只读 `ShouldShow()` 那个意图 ——
+            // 只看意图的话，"意图正确但窗口被 Show 回来"这种情况照样绿。
+            {
+                PetStatusLabel hideProbe = new PetStatusLabel();
+                try
+                {
+                    hideProbe.DiagSetLabel("待机中", 1.0, false);
+                    // 常显态 + 本体可见 → 应该显示
+                    hideProbe.Update("待机中", true, false, false, false,
+                                     new[] { 100, 100, 200, 200 }, true);
+                    Pump(200);
+                    bool shownFirst = hideProbe.DiagIsReallyVisible;
+
+                    // ① 隐藏本体 → 立刻要藏
+                    hideProbe.Update("待机中", true, false, false, false,
+                                     new[] { 100, 100, 200, 200 }, false);
+                    Pump(200);
+                    bool hiddenNow = !hideProbe.DiagIsReallyVisible;
+
+                    // ② ⭐ 再来一次"快照刷新"（模拟 15 秒后的状态推送）→ 必须**仍然藏着**
+                    hideProbe.Update("正在调用工具…", true, false, false, false,
+                                     new[] { 100, 100, 200, 200 }, false);
+                    Pump(200);
+                    bool staysHidden = !hideProbe.DiagIsReallyVisible;
+
+                    // ③ 再刷新几次也不许回来（快照会持续推）
+                    for (int i = 0; i < 3; i++)
+                    {
+                        hideProbe.Update("待机中", true, false, false, false,
+                                         new[] { 100, 100, 200, 200 }, false);
+                        Pump(60);
+                    }
+                    bool stillHidden = !hideProbe.DiagIsReallyVisible;
+
+                    // ④ 本体回来 → 小字要跟着回来（否则就从"藏不住"变成"再也出不来"）
+                    hideProbe.Update("待机中", true, false, false, false,
+                                     new[] { 100, 100, 200, 200 }, true);
+                    Pump(200);
+                    bool comesBack = hideProbe.DiagIsReallyVisible;
+
+                    Check(shownFirst && hiddenNow && staysHidden && stillHidden && comesBack,
+                          "⭐⭐⭐ 隐藏桌宠后小字**不会被下一次快照拉回来**（用户报的常驻不隐藏）",
+                          "初始显示=" + shownFirst + " 隐藏后=" + hiddenNow +
+                          " 刷新后仍藏=" + staysHidden + " 多次刷新仍藏=" + stillHidden +
+                          " 本体回来后=" + comesBack);
+                }
+                finally { try { hideProbe.ForceClose(); } catch { } }
+                Pump(120);
+            }
+
+            // ⭐⭐⭐ v13.9：**番茄钟必须跟着缩放走（位置 + 大小）**。
+            //
+            // 用户原话："番茄钟的位置和大小是固定的"。
+            //
+            // 根因：缩放有**两个入口**，原先做的事不一样 ——
+            //   · 滚轮 `OnScaleAdjusted`：四个窗口都缩；
+            //   · 设置页/宿主快照 `ApplySettings`：**只缩本体与气泡**。
+            // 于是从设置页调大小时，番茄钟的 `_scale` 一直是 1.0 → 字号、环径、
+            // 位置全都不动，看起来"位置和大小是固定的"。
+            //
+            // ⚠️ 判据必须同时钉住**大小**与**位置**（用户报的是两件事）：
+            // 只断言字号变化的话，"字大了但还贴在旧位置"照样绿。
+            {
+                PetPomodoro pomo = new PetPomodoro();
+                try
+                {
+                    // ⚠️ 用 `DiagMeasureAtScale`（内含强制布局）而不是裸 `SetScale`：
+                    // 不跑布局的话 `CurrentMetrics` 会落到 `60x20` 的**兜底常数**，
+                    // 两次一样 → 断言会误报"大小没变"（我第一版就是这么错的）。
+                    int w1, h1, w2, h2;
+                    pomo.DiagMeasureAtScale(1.0, "24:59", out w1, out h1);
+                    double fs1 = pomo.DiagFontSize;
+                    pomo.DiagMeasureAtScale(2.0, "24:59", out w2, out h2);
+                    double fs2 = pomo.DiagFontSize;
+
+                    bool scaleApplied = Math.Abs(pomo.DiagScale - 2.0) < 0.001;
+                    bool fontGrew = fs2 > fs1 * 1.5;
+                    bool sizeGrew = w2 > w1 && h2 > h1;
+                    Check(scaleApplied && fontGrew && sizeGrew,
+                          "⭐⭐⭐ 番茄钟跟着缩放变大（字号**和窗口尺寸**都变）",
+                          "字号 " + fs1.ToString("0.#") + "→" + fs2.ToString("0.#") +
+                          " 尺寸 " + w1 + "x" + h1 + "→" + w2 + "x" + h2);
+
+                    // ⭐ 位置也必须重算：窗口尺寸变了，居中贴在本体下方时左上角就该移动。
+                    // 只钉字号的话，"字大了但还钉在旧坐标"照样绿。
+                    int x1, y1, x2, y2;
+                    pomo.SetScale(1.0);
+                    int rw1, rh1;
+                    pomo.DiagPlacementFor(1000, 500, 200, 200, out x1, out y1, out rw1, out rh1);
+                    pomo.SetScale(2.0);
+                    int rw2, rh2;
+                    pomo.DiagPlacementFor(1000, 500, 200, 200, out x2, out y2, out rw2, out rh2);
+                    bool moved = (x2 != x1) || (y2 != y1);
+                    Check(moved,
+                          "⭐⭐ 番茄钟变大后**位置跟着重算**（不是钉死在旧坐标）",
+                          "1×: (" + x1 + "," + y1 + " " + rw1 + "x" + rh1 + ") → " +
+                          "2×: (" + x2 + "," + y2 + " " + rw2 + "x" + rh2 + ")");
+                }
+                finally { try { pomo.ForceClose(); } catch { } }
+                Pump(120);
+            }
+
+            // ⭐⭐⭐⭐ 缩放的**两个入口必须走同一条路径**，而且那条路径**必须真的覆盖四个窗口**。
+            //
+            // ⚠️ 这是本 bug 的真正教训（不是"补一次 SetScale 就完了"）：
+            // 滚轮那条入口四个窗口都缩、设置页那条只缩两个，于是"从设置页调大小"
+            // 就漏了两个窗口。如果只把那两行补上、不把入口收成一条，
+            // **下次再加一个窗口时还会漏**（而且回滚验证也钉不住）。
+            //
+            // ⚠️⚠️ 判据必须**限定在方法体内**：
+            // 我第一版只验 `IndexOf("ApplyScaleToAllWindows(s);")` —— 于是把
+            // **公共路径内部**改坏（漏番茄钟 / 漏状态文字 / 缩完不重贴位）
+            // 断言**照样全绿**（回滚 P2/P3/P4）。判据：**验"某个方法做了 X"就要把
+            // 范围圈在那个方法里**，否则"别处也出现过这个词"就会让它假绿。
+            {
+                string progSrc9 = ReadSelfSource("Program.cs");
+                string shared = ExtractMethodBody(progSrc9, "void ApplyScaleToAllWindows(");
+
+                // ① 两个入口都调公共路径（`OnScaleAdjusted` 不许再写私有副本）
+                string wheelBody = ExtractMethodBody(progSrc9, "void OnScaleAdjusted(");
+                string settingsRegion = null;
+                {
+                    // 设置页那条：取 `st.HasScale` 到 `st.HasOpacity` 之间那段
+                    int a9 = progSrc9 == null ? -1 : progSrc9.IndexOf("if (st.HasScale)", StringComparison.Ordinal);
+                    int b9 = progSrc9 == null ? -1 : progSrc9.IndexOf("if (st.HasOpacity)", StringComparison.Ordinal);
+                    if (a9 >= 0 && b9 > a9) settingsRegion = progSrc9.Substring(a9, b9 - a9);
+                }
+                bool wheelUsesShared = wheelBody != null &&
+                    wheelBody.IndexOf("ApplyScaleToAllWindows(newScale);", StringComparison.Ordinal) >= 0;
+                bool wheelHasNoPrivateCopy = wheelBody != null &&
+                    wheelBody.IndexOf("_bubble.SetScale(", StringComparison.Ordinal) < 0;
+                bool settingsUsesShared = settingsRegion != null &&
+                    settingsRegion.IndexOf("ApplyScaleToAllWindows(s);", StringComparison.Ordinal) >= 0;
+
+                // ② 公共路径**内部**必须覆盖四个窗口（本体/气泡/状态/番茄钟）
+                bool hasWin = shared != null && shared.IndexOf("_win.SetScale(s)", StringComparison.Ordinal) >= 0;
+                bool hasBubble = shared != null && shared.IndexOf("_bubble.SetScale(s)", StringComparison.Ordinal) >= 0;
+                bool hasStatus = shared != null && shared.IndexOf("_status.SetScale(s)", StringComparison.Ordinal) >= 0;
+                bool hasPomo = shared != null && shared.IndexOf("_pomo.SetScale(s)", StringComparison.Ordinal) >= 0;
+
+                // ③ 缩完必须**重新贴位**（尺寸变了，位置还按旧的算 = 用户报的"位置固定"）
+                bool rePlaces = shared != null &&
+                    shared.IndexOf("RefreshPomodoro();", StringComparison.Ordinal) >= 0 &&
+                    shared.IndexOf("RefreshStatusLabel();", StringComparison.Ordinal) >= 0;
+
+                Check(wheelUsesShared && settingsUsesShared && wheelHasNoPrivateCopy,
+                      "⭐⭐⭐⭐ 缩放的滚轮入口与设置页入口走**同一条**路径（否则下次还会漏窗口）",
+                      "滚轮共用=" + wheelUsesShared + " 设置页共用=" + settingsUsesShared +
+                      " 滚轮无私有副本=" + wheelHasNoPrivateCopy);
+                Check(hasWin && hasBubble && hasStatus && hasPomo,
+                      "⭐⭐⭐⭐ 公共缩放路径**内部**覆盖四个窗口（本体/气泡/状态/番茄钟）",
+                      "本体=" + hasWin + " 气泡=" + hasBubble +
+                      " 状态=" + hasStatus + " 番茄钟=" + hasPomo);
+                Check(rePlaces,
+                      "⭐⭐⭐ 缩放后重新贴位（状态/番茄钟的位置按新尺寸重算）",
+                      "公共路径内含 RefreshPomodoro+RefreshStatusLabel=" + rePlaces);
+            }
+
+            // ⭐⭐⭐ 状态文字的本体显隐**必须由 Program 真的喂进去**。
+            //
+            // ⚠️ 同样是"限定范围"的判据：只看 `PetStatusLabel` 内部判据是对的，
+            // 但 `Program` 那边如果传常量 `true`（回滚 H3），小字照样藏不住。
+            {
+                string progSrcH = ReadSelfSource("Program.cs");
+                string refreshBody = ExtractMethodBody(progSrcH, "void RefreshStatusLabel(");
+                bool feedsPetVisible = refreshBody != null &&
+                    refreshBody.IndexOf("_win.IsVisible", StringComparison.Ordinal) >= 0;
+                bool updateHas7Args = refreshBody != null &&
+                    refreshBody.IndexOf("_win.VisibleLabel(),", StringComparison.Ordinal) >= 0;
+                Check(feedsPetVisible && updateHas7Args,
+                      "⭐⭐⭐ Program 把**真实的本体显隐**喂给状态文字（喂常量 true 就藏不住）",
+                      "刷新体内含 _win.IsVisible=" + feedsPetVisible +
+                      " 走的是带 petVisible 的 Update=" + updateHas7Args);
+            }
+
             // ⭐ 状态文字**独立字号倍率**（用户点名"我希望能够调整字的大小，
             // 因为有的时候字太小了"）。
             //
@@ -5488,6 +5673,69 @@ namespace DshZhuangFangyiPet
                 return File.ReadAllText(p, System.Text.Encoding.UTF8);
             }
             catch { return null; }
+        }
+
+        /// <summary>
+        /// 去掉 C# 源码里的**行注释**（`//` 到行尾）。
+        ///
+        /// ⚠️ v13.9 加的（回滚 H3 抓到的洞）：我在 `RefreshStatusLabel` 里写了
+        /// 一句解释性注释，其中提到 `_win.IsVisible` 这个词 —— 于是把**真正的参数**
+        /// 换成常量 `true` 之后，源码扫描**仍然找得到那个词**（在注释里）→ 断言假绿。
+        ///
+        /// 判据：**源码扫描必须先剥注释**，否则"解释代码的注释"会让断言认错。
+        /// （这是一个反复出现的坑：注释越多、越详细，假绿越容易发生。）
+        /// </summary>
+        private static string StripLineComments(string source)
+        {
+            if (string.IsNullOrEmpty(source)) return source;
+            StringBuilder sb = new StringBuilder(source.Length);
+            string[] lines = source.Replace("\r\n", "\n").Split('\n');
+            for (int i = 0; i < lines.Length; i++)
+            {
+                string ln = lines[i];
+                int cut = ln.IndexOf("//", StringComparison.Ordinal);
+                if (cut >= 0) ln = ln.Substring(0, cut);
+                sb.Append(ln);
+                if (i < lines.Length - 1) sb.Append('\n');
+            }
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// 从源码里取出**某个方法的函数体**（从签名行到花括号配平结束）。
+        ///
+        /// ⚠️ v13.9 加的（回滚 P2/P3/P4 抓到的洞）：
+        /// 我原先的接线断言只验"**公共路径被调用了**"（`ApplyScaleToAllWindows(s);`），
+        /// 于是把**公共路径内部**改坏（漏掉番茄钟 / 漏掉状态文字 / 缩完不重贴位）
+        /// 断言**照样全绿** —— 那些字面量在源码里都还在。
+        ///
+        /// 判据：验"某个方法做了 X"时，必须**把范围限定在那个方法体内**，
+        /// 否则"别处也出现过这个词"就会让断言假绿。
+        ///
+        /// ⚠️ 内部**先剥注释**：否则方法里的解释性注释会让"那个词还在"成立（回滚 H3）。
+        /// </summary>
+        /// <param name="source">整个源文件</param>
+        /// <param name="signature">方法签名里的唯一片段（如 `void ApplyScaleToAllWindows(`）</param>
+        private static string ExtractMethodBody(string source, string signature)
+        {
+            source = StripLineComments(source);
+            if (string.IsNullOrEmpty(source)) return null;
+            int at = source.IndexOf(signature, StringComparison.Ordinal);
+            if (at < 0) return null;
+            int brace = source.IndexOf('{', at);
+            if (brace < 0) return null;
+            int depth = 0;
+            for (int i = brace; i < source.Length; i++)
+            {
+                char c = source[i];
+                if (c == '{') depth++;
+                else if (c == '}')
+                {
+                    depth--;
+                    if (depth == 0) return source.Substring(brace, i - brace + 1);
+                }
+            }
+            return null;
         }
 
         /// <summary>
