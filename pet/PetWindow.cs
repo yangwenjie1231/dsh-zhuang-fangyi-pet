@@ -644,6 +644,24 @@ namespace DshZhuangFangyiPet
             _timer.Start();
         }
 
+        /// <summary>
+        /// v13.8：可见性自愈之后**重启精灵动画计时器**。
+        ///
+        /// ⚠️ 为什么需要单独一个方法：`HidePet()` 会 `_timer.Stop()`，
+        /// 而自愈走的是"直接 `ShowWindow` 补 `WS_VISIBLE`"这条路 ——
+        /// **绕过了 `ShowPet()`**，所以计时器不会自己回来。
+        /// 少了这一步，她虽然"回来了"，但**定格在某一帧不动** ——
+        /// 那是比消失更难解释的现象（用户会以为她卡死了）。
+        ///
+        /// 抽成具名方法而不是把 `RestartTimer` 改成 public：
+        /// 那个名字说的是"重启计时器"，而调用点要表达的是"自愈后的收尾"，
+        /// 两者语义不同（以后自愈还要做别的事，也加在这里）。
+        /// </summary>
+        internal void RestartAnimationAfterHeal()
+        {
+            try { RestartTimer(); } catch { }
+        }
+
         private void OnTick(object sender, EventArgs e)
         {
             if (_sheet == null || !IsVisible) return;
@@ -2328,6 +2346,32 @@ namespace DshZhuangFangyiPet
         // task-6：滚轮缩放（悬停在桌宠本体上）
         // ------------------------------------------------------------------
 
+        /// <summary>
+        /// v13.8：处理 `WM_POWERBROADCAST`（抽出来以便自检直接驱动）。
+        ///
+        /// 只**通知**、不自己修：三个窗口（本体/气泡/状态）分属三个对象，
+        /// 协调必须由 Program 做（它持有全部三个）。
+        ///
+        /// ⚠️ `wParam` 的两个"已恢复"值**都要认**：
+        /// `PBT_APMRESUMEAUTOMATIC`（无用户交互的自动恢复）与
+        /// `PBT_APMRESUMESUSPEND`（用户触发的恢复）。只认一个的话，
+        /// 另一半唤醒场景仍然修不回来（这正是回滚 V7 要钉的东西）。
+        /// </summary>
+        internal void HandlePowerBroadcast(int wParam)
+        {
+            if (wParam != PetNative.PBT_APMRESUMEAUTOMATIC &&
+                wParam != PetNative.PBT_APMRESUMESUSPEND) return;
+            PetLog.Startup("电源广播：系统已恢复（wParam=0x" + wParam.ToString("X") +
+                           "）→ 触发可见性自愈");
+            try { SystemResumed(); } catch { }
+        }
+
+        /// <summary>
+        /// v13.8：系统从休眠/挂起恢复（`WM_POWERBROADCAST`）。
+        /// Program 装配成"自愈三个窗口的可见性"。
+        /// </summary>
+        public Action SystemResumed = delegate { };
+
         /// <summary>滚轮调整缩放后触发（UI 线程）；Program 挂接去抖上报 /pet/settings 与托盘刷新。</summary>
         public Action<double> ScaleAdjusted = delegate { };
 
@@ -2801,6 +2845,17 @@ namespace DshZhuangFangyiPet
                     // 点桌宠/按钮不要把用户的编辑器焦点抢走（按钮用 MouseLeftButtonUp 触发，仍能收到点击）
                     handled = true;
                     return new IntPtr(PetNative.MA_NOACTIVATE);
+
+                case PetNative.WM_POWERBROADCAST:
+                    // v13.8：休眠/唤醒。**唤醒的那一刻**就通知外面去自愈可见性 ——
+                    // 用户报的正是"休眠唤醒后主体和气泡消失"。
+                    //
+                    // ⚠️ 判定逻辑抽在 `HandlePowerBroadcast` 里（**不是**长在这个 case 里）：
+                    // 长在事件处理器里的话自检只能测拷贝（本项目已五次踩过），
+                    // 而"唤醒到底认哪几个 wParam"正是这里唯一会错的地方。
+                    HandlePowerBroadcast(wParam.ToInt32());
+                    handled = true;
+                    return IntPtr.Zero;
 
                 case PetNative.WM_DISPLAYCHANGE:
                     Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(delegate

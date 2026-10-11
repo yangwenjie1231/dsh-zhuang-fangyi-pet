@@ -50,6 +50,12 @@ namespace DshZhuangFangyiPet
 
         private readonly DispatcherTimer _hideTimer;
         private IntPtr _hwnd;
+
+        /// <summary>
+        /// v13.8 自愈用：原生窗口句柄（休眠唤醒后系统会清掉 `WS_VISIBLE`，
+        /// 而 WPF 的 `IsVisible` 仍是 true —— 必须拿系统真值对齐，见 `PetVisibilityHeal`）。
+        /// </summary>
+        internal IntPtr Handle { get { return _hwnd; } }
         private HwndSource _source;
         private bool _reallyClosing;
 

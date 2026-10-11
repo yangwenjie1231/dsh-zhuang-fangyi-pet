@@ -393,6 +393,23 @@ namespace DshZhuangFangyiPet
                 FollowInputWindow();
             };
             _win.OnDisplayChanged = OnDisplayChanged;
+            // v13.8：休眠唤醒 → 立刻自愈可见性（用户报"休眠后主体和气泡消失"）。
+            //
+            // ⚠️ **延迟一拍再修**：`WM_POWERBROADCAST` 到达时系统可能还没把
+            // 桌面窗口全部恢复完，此刻读到的 `IsWindowVisible` 未必是最终状态。
+            // 所以先按背景优先级排一次（让消息循环把恢复期的其它消息处理掉），
+            // 再交给与 15 秒轮询**同一个** `HealVisibilityIfLost` —— 单一实现。
+            _win.SystemResumed = delegate
+            {
+                try
+                {
+                    _ui.BeginInvoke(DispatcherPriority.Background, new Action(delegate
+                    {
+                        try { HealVisibilityIfLost(); } catch { }
+                    }));
+                }
+                catch { }
+            };
             _win.ScaleAdjusted = OnScaleAdjusted;       // task-6：滚轮缩放 → 去抖上报 + 托盘刷新
             _win.DoubleClickInvoked = OnPetDoubleClick; // task-6：双击行为由 settings.doubleClick 决定
             // v9：单击（与拖动区分）→ 记一次互动。判据在 PetWindow.IsClickGesture。
@@ -1972,12 +1989,56 @@ namespace DshZhuangFangyiPet
 
         private void OnDiagTick(object sender, EventArgs e)
         {
+            // ⚠️ v13.8：自愈必须**无条件**跑，不能放在下面那句 `if (!_opt.Verbose) return;`
+            // 之后 —— 否则"没开 verbose 的用户"永远修不回来，而休眠唤醒是**所有人**都会遇到的。
+            HealVisibilityIfLost();
+
             if (!_opt.Verbose) return;
             string http = _http == null ? "offline" :
                 ("connected=" + _http.Connected + " frames=" + _http.FramesReceived +
                  " 401/403=" + _http.Consecutive401 + " last=" + (_http.LastError == null ? "-" : _http.LastError));
             PetLog.Info("diag: 状态=" + _win.CurrentState + " 切换=" + _stateChanges +
                         " 可见=" + _win.IsVisible + " http[" + http + "]");
+        }
+
+        /// <summary>
+        /// v13.8：休眠唤醒后的**可见性自愈**。
+        ///
+        /// 用户原话："计算机在休眠后，又启动之后，主体和气泡消失了"。
+        ///
+        /// 现场（枚举窗口实测）：本体与气泡的 `WS_VISIBLE` 被系统清掉了，
+        /// 但 **WPF 的 `IsVisible` 仍是 true** —— 所以既有的
+        /// `if (!IsVisible) Show()` 那类自愈**永远不会执行**（条件不成立）。
+        /// 判据必须是 `PetNative.IsWindowVisible(hwnd)`（系统真值）。
+        ///
+        /// 为什么挂在 15 秒的诊断 tick 上：它已经在跑、代价可忽略，
+        /// 而且"唤醒后最多 15 秒回来"对用户是可接受的（比永远回不来好得多）。
+        /// 检测到不一致时**必然打一行日志** —— 否则用户报"又消失了"时，
+        /// 我们无法区分"自愈没生效"与"自愈压根没跑"。
+        /// </summary>
+        private void HealVisibilityIfLost()
+        {
+            try
+            {
+                // 本体：最要紧的一个（气泡/状态都挂在它旁边）
+                if (PetVisibilityHeal.HealIfHidden(_win, _win.Handle))
+                {
+                    PetLog.Warn("可见性自愈：本体窗被系统隐藏（休眠唤醒？）→ 已重新显示");
+                    // 本体回来之后：精灵计时器要重启（`HidePet` 停过它，
+                    // 而自愈绕过了 `ShowPet`），两个独立窗口也要跟着对齐。
+                    try { _win.RestartAnimationAfterHeal(); } catch { }
+                }
+                if (_bubble != null && PetVisibilityHeal.HealIfHidden(_bubble, _bubble.Handle))
+                {
+                    PetLog.Warn("可见性自愈：气泡窗被系统隐藏（休眠唤醒？）→ 已重新显示");
+                    try { _bubble.PlaceNearPet(); } catch { }
+                }
+                if (_status != null && PetVisibilityHeal.HealIfHidden(_status, _status.Handle))
+                {
+                    PetLog.Warn("可见性自愈：状态文字窗被系统隐藏（休眠唤醒？）→ 已重新显示");
+                }
+            }
+            catch (Exception ex) { PetLog.Warn("可见性自愈失败: " + PetLog.Describe(ex)); }
         }
 
         // ------------------------------------------------------------------

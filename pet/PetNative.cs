@@ -17,6 +17,20 @@ namespace DshZhuangFangyiPet
         public const int WM_NCHITTEST = 0x0084;
         public const int WM_MOUSEACTIVATE = 0x0021;
         public const int WM_DISPLAYCHANGE = 0x007E;
+        /// <summary>
+        /// 电源广播（v13.8）。休眠/唤醒时系统会发它，`wParam` 见下面的 `PBT_*`。
+        ///
+        /// 为什么要它：用户报"计算机在休眠后，又启动之后，主体和气泡消失了" ——
+        /// 有了这条消息就能**在唤醒的瞬间**自愈，而不是等 15 秒的轮询。
+        /// 轮询仍然保留（它是兜底：万一这条消息没到，15 秒内也会修好）。
+        /// </summary>
+        public const int WM_POWERBROADCAST = 0x0218;
+        /// <summary>`WM_POWERBROADCAST` 的 `wParam`：系统即将挂起。</summary>
+        public const int PBT_APMSUSPEND = 0x0004;
+        /// <summary>`WM_POWERBROADCAST` 的 `wParam`：系统已从挂起恢复（**自愈的时机**）。</summary>
+        public const int PBT_APMRESUMEAUTOMATIC = 0x0012;
+        /// <summary>`WM_POWERBROADCAST` 的 `wParam`：用户触发的恢复。</summary>
+        public const int PBT_APMRESUMESUSPEND = 0x0007;
         public const int WM_DPICHANGED = 0x02E0;
         public const int WM_WINDOWPOSCHANGING = 0x0046;
         public const int WM_EXITSIZEMOVE = 0x0232;

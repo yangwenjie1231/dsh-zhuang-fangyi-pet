@@ -5283,6 +5283,152 @@ namespace DshZhuangFangyiPet
                     PetBreadcrumb.DiagReset();
                 }
 
+                // ── (11d) v13.8 休眠唤醒后的可见性自愈 ──
+                //
+                // 用户原话："计算机在休眠后，又启动之后，主体和气泡消失了"。
+                //
+                // 现场（枚举窗口实测）：本体与气泡的 `WS_VISIBLE` 被系统清掉，
+                // 但 **WPF 的 `IsVisible` 仍是 true** —— 所以既有的
+                // `if (!IsVisible) Show()` 那类自愈**永远不会执行**（条件不成立）。
+                //
+                // ⚠️ 判据必须落在**两个真值的不一致**上：
+                // 只断言"有个 HealIfHidden 函数"是假断言 —— 它完全可以在
+                // 不一致时什么都不做（回滚会证明这点）。
+                {
+                    System.Windows.Window host = null;
+                    try
+                    {
+                        host = new System.Windows.Window();
+                        host.WindowStyle = System.Windows.WindowStyle.None;
+                        host.ShowInTaskbar = false;
+                        host.ShowActivated = false;
+                        host.Width = 40; host.Height = 40;
+                        host.Left = -4000; host.Top = -4000;
+                        host.Show();
+                        Pump(150);
+
+                        IntPtr h = new System.Windows.Interop.WindowInteropHelper(host).Handle;
+                        bool hwndOk = h != IntPtr.Zero;
+                        // ① 正常显示时：两个真值一致，自愈**不该动手**
+                        bool consistent = hwndOk && host.IsVisible &&
+                                          PetNative.IsWindowVisible(h);
+                        bool noHealWhenFine = !PetVisibilityHeal.HealIfHidden(host, h);
+                        bool notMismatchedWhenFine = !PetVisibilityHeal.IsMismatched(host, h);
+
+                        // ② 人为制造"WPF 说可见、系统说不可见"（= 休眠唤醒后的真实状态）
+                        //    用 SW_HIDE 直接清掉 WS_VISIBLE，**绕过 WPF** ——
+                        //    这样 WPF 的 IsVisible 仍是 true，正是现场那个不一致。
+                        PetNative.ShowWindow(h, 0 /* SW_HIDE */);
+                        Pump(80);
+                        bool osHidden = !PetNative.IsWindowVisible(h);
+                        bool wpfStillThinksVisible = host.IsVisible;
+                        bool mismatchDetected = PetVisibilityHeal.IsMismatched(host, h);
+
+                        Check(consistent && noHealWhenFine && notMismatchedWhenFine &&
+                              osHidden && wpfStillThinksVisible && mismatchDetected,
+                              "⭐⭐⭐ 能识别「WPF 说可见、系统说不可见」这个不一致（休眠唤醒的真实现场）",
+                              "正常时一致=" + consistent + " 不误修=" + noHealWhenFine +
+                              " ｜制造后 系统隐藏=" + osHidden +
+                              " WPF仍认为可见=" + wpfStillThinksVisible +
+                              " 检出不一致=" + mismatchDetected);
+
+                        // ③ 自愈必须**真的把它显示回来**
+                        bool healed = PetVisibilityHeal.HealIfHidden(host, h);
+                        Pump(80);
+                        bool visibleAgain = PetNative.IsWindowVisible(h);
+                        Check(healed && visibleAgain,
+                              "⭐⭐⭐⭐ 自愈真的把窗口显示回来（不是只返回 true）",
+                              "执行了修复=" + healed + " 系统说可见=" + visibleAgain +
+                              "（只断言「调过函数」是假断言 —— 它可能什么都不做）");
+
+                        // ④ 修好之后不该反复触发（幂等：一致了就不再动手）
+                        bool noRepeat = !PetVisibilityHeal.HealIfHidden(host, h);
+                        Check(noRepeat,
+                              "⭐ 修好之后不再重复动手（一致即静默）",
+                              "第二次调用返回=" + (!noRepeat ? "true（多余）" : "false（正确）"));
+
+                        // ⑤ 我们希望它**隐藏**时不许抢回来（保守方向）
+                        host.Hide();
+                        Pump(80);
+                        bool staysHidden = !PetVisibilityHeal.HealIfHidden(host, h) &&
+                                           !host.IsVisible;
+                        Check(staysHidden,
+                              "⭐⭐ 用户/系统正常隐藏时**不抢回来**（只在「我们要它可见」时自愈）",
+                              "隐藏后自愈未动手=" + staysHidden);
+                    }
+                    finally { try { if (host != null) host.Close(); } catch { } }
+                    Pump(60);
+
+                    // ⑥ ⭐⭐⭐⭐ 唤醒消息的**判定逻辑**必须真的认那两个 wParam。
+                    //
+                    // ⚠️ 判据是**驱动产品那个方法**，不是扫源码里有没有那个字符串：
+                    // 我第一版用 `IndexOf("SystemResumed();")` 之类去验接线，
+                    // 而回滚 V5/V6/V7（把接线改坏）**全部 GREEN** ——
+                    // 因为那些字面量在源码里**仍然存在**（只是被 `if (false)` 之类绕开了）。
+                    // 判据：**接线必须靠行为验证，不能靠文本出现**。
+                    {
+                        PetWindow pw = null;
+                        try
+                        {
+                            pw = new PetWindow(opt, null, store);
+                            pw.Show();
+                            Pump(150);
+
+                            int resumed = 0;
+                            int suspended = 0;
+                            pw.SystemResumed = delegate { resumed++; };
+
+                            // 两种"已恢复"都要认（只认一个的话另一半唤醒场景修不回来）
+                            pw.HandlePowerBroadcast(PetNative.PBT_APMRESUMEAUTOMATIC);
+                            int afterAuto = resumed;
+                            pw.HandlePowerBroadcast(PetNative.PBT_APMRESUMESUSPEND);
+                            int afterUser = resumed;
+                            // 挂起与无关消息**不许**触发（否则每次挂起都白跑一遍自愈）
+                            pw.HandlePowerBroadcast(PetNative.PBT_APMSUSPEND);
+                            int afterSuspend = resumed;
+                            pw.HandlePowerBroadcast(0x0001);
+                            int afterJunk = resumed;
+
+                            Check(afterAuto == 1 && afterUser == 2 &&
+                                  afterSuspend == 2 && afterJunk == 2,
+                                  "⭐⭐⭐⭐ 唤醒消息认「两种恢复」、忽略「挂起/无关」",
+                                  "自动恢复→" + afterAuto + " 用户恢复→" + afterUser +
+                                  "（应 1→2）挂起后=" + afterSuspend +
+                                  " 无关消息后=" + afterJunk + "（应都是 2）");
+                        }
+                        finally { try { if (pw != null) pw.ForceClose(); } catch { } }
+                        Pump(60);
+                    }
+
+                    // ⑦ ⭐⭐⭐ 自愈的**两个触发点**都真的接到同一实现上。
+                    //
+                    // ⚠️ 同样不能只扫字符串（回滚 V5/V6 全绿的教训）。
+                    // 这里数的是"**以语句形态出现**的调用点"（`HealVisibilityIfLost()`），
+                    // 定义处那次带 `private void ` 前缀，所以不计入。
+                    //
+                    // ⚠️ 计数要**容忍包裹形态**：触发点②写成 `try { Heal...(); } catch { }`，
+                    // 与触发点①的裸调用**后缀不同** —— 我第一版按"裸调用"去数，
+                    // 只数到 2（应为 2 个触发点），差点把正确的产品判成红的。
+                    string progSrc3 = ReadSelfSource("Program.cs");
+                    int healCallSites = 0;
+                    if (progSrc3 != null)
+                    {
+                        string[] lines = progSrc3.Replace("\r\n", "\n").Split('\n');
+                        for (int li = 0; li < lines.Length; li++)
+                        {
+                            string ln = lines[li];
+                            // 定义处排除（它带 `void ` 前缀且以 `)` 结尾）
+                            if (ln.IndexOf("private void HealVisibilityIfLost", StringComparison.Ordinal) >= 0)
+                                continue;
+                            if (ln.IndexOf("HealVisibilityIfLost();", StringComparison.Ordinal) >= 0)
+                                healCallSites++;
+                        }
+                    }
+                    Check(healCallSites == 2,
+                          "⭐⭐⭐ 自愈有两个触发点（唤醒事件 + 15 秒轮询兜底）",
+                          "调用点 " + healCallSites + " 处（应为 2：唤醒回调 + 诊断 tick）");
+                }
+
                 // ── (12) 离屏截图：把每个窗口渲染成 PNG，供人眼确认 ──
                 //
                 // `RenderTargetBitmap` 渲染的是**已排布的元素**，不需要窗口真的显示
