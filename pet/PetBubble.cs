@@ -289,6 +289,37 @@ namespace DshZhuangFangyiPet
         public bool Showing { get; private set; }
 
         /// <summary>
+        /// v14.1：**本体是否可见**（用户："桌宠隐藏的时候，气泡有概率不隐藏"）。
+        ///
+        /// ⚠️ 为什么必须是"判据级"事实，而不是隐藏时调一次 `HideNow()` 就够：
+        /// 与 v13.9 状态小字那个 bug **完全同形** —— 点「隐藏桌宠」时
+        /// `Program` 确实调了 `HideNow()`，但**下一次快照**里如果来了一条新气泡
+        ///（`snap.Bubble.Id > _lastBubbleId`），`ShowBubbleFrom` → `Show()` →
+        /// `if (!IsVisible) Show()` 就把它**重新拉出来**。
+        ///
+        /// 这解释了用户说的"有概率"：**取决于隐藏之后有没有新气泡到来** ——
+        /// 而他正是在跟 DSH 对话（回复不断）时去点的隐藏，所以很容易撞上。
+        ///
+        /// 判据：**任何会重新求值显隐的路径都会撤销一次 `Hide()`** ——
+        /// 影响显隐的事实必须进判据（v13.9 已为此踩过一次，这是第二次）。
+        /// </summary>
+        private bool _petVisible = true;
+
+        /// <summary>
+        /// v14.1：设置本体显隐。`false` 时立刻收起，并且**之后所有 `Show()` 一律拒绝**
+        /// （含新气泡、attention 恒亮、画廊兜底 —— 一处判据管住全部入口）。
+        /// </summary>
+        public void SetPetVisible(bool visible)
+        {
+            if (visible == _petVisible) return;
+            _petVisible = visible;
+            if (!visible) HideNow();
+        }
+
+        /// <summary>v14.1：自检用 —— 本体显隐判据的当前值。</summary>
+        internal bool DiagPetVisible { get { return _petVisible; } }
+
+        /// <summary>
         /// 自检用：当前是否处于「不透明满幅」呈现
         /// （背景透明 / 边框厚 0 / 无内边距 / 图片上限放宽到 240）。
         /// </summary>
@@ -549,6 +580,17 @@ namespace DshZhuangFangyiPet
         public bool Show(PetBubbleInfo b, BitmapSource img, BitmapSource[] frames, int frameMs)
         {
             if (b == null) return false;
+
+            // ⚠️ v14.1：**本体藏了，气泡一律不许显示**。
+            //
+            // 用户："桌宠隐藏的时候，气泡有概率不隐藏" —— 真因就是缺这一道判据：
+            // 隐藏时那次 `HideNow()` 会被**下一次新气泡**撤销（见 `_petVisible` 的说明）。
+            //
+            // ⚠️ 判据放在 `Show()` 里（而不是每个调用点各加一个 `if`）：
+            // 气泡有**四个**入口 —— 新气泡快照、隐藏后重放、attention 恒亮、
+            // 画廊预览。在调用点各判一次的话，以后加第五个入口就会漏，
+            // 而且"漏了"表现为"偶尔冒出来"，最难查。
+            if (!_petVisible) return false;
             if (b.Id == _currentId && _currentId >= 0) return false;
             if (Showing && b.Priority < _currentPriority) return false;
 

@@ -2309,6 +2309,94 @@ namespace DshZhuangFangyiPet
                                bubble.BadgeText == null;
                 Check(plainOk, "普通气泡：无 attention 头部条/徽标/按钮/脉动", "全隐藏");
 
+                // ⭐⭐⭐ v14.1：**隐藏桌宠后，气泡不许被"下一条气泡"重新拉出来**。
+                //
+                // 用户原话："桌宠隐藏的时候，气泡有概率不隐藏"。
+                //
+                // 真因（与 v13.9 状态小字**完全同形**，这是第二次）：
+                // 隐藏时那次 `HideNow()` 会被**下一次新气泡**撤销 ——
+                // `ApplySnapshot` 看到 `snap.Bubble.Id > _lastBubbleId` 就调
+                // `ShowBubbleFrom` → `Show()` → `if (!IsVisible) Show()`
+                // → 气泡又冒出来。"有概率"正是因为**取决于隐藏之后有没有新气泡**。
+                //
+                // ⚠️ 判据：**隐藏之后再喂一条新气泡**，它必须仍然藏着 ——
+                // 只断言"隐藏那一刻收了"测不出这个 bug（那一刻确实收了）。
+                {
+                    PetBubbleInfo h1 = new PetBubbleInfo();
+                    h1.Id = 9001; h1.Kind = "text"; h1.Text = "隐藏前";
+                    bool beforeHide = bubble.Show(h1, null);
+                    bool visibleBefore = bubble.Showing;
+
+                    // ① 隐藏本体 → 立刻收起
+                    bubble.SetPetVisible(false);
+                    bool hiddenNow = !bubble.Showing && !bubble.IsVisible;
+                    bool petFlagOff = !bubble.DiagPetVisible;
+
+                    // ② ⭐ **藏起来之后再来一条新气泡** → 必须拒绝显示
+                    PetBubbleInfo h2 = new PetBubbleInfo();
+                    h2.Id = 9002; h2.Kind = "text"; h2.Text = "隐藏后新来的";
+                    bool refused = !bubble.Show(h2, null);
+                    bool stillHidden = !bubble.Showing && !bubble.IsVisible;
+
+                    // ③ attention 恒亮也不能例外（它"该一直亮着"，但本体藏了
+                    //    就不该有任何窗口挂在那儿）
+                    PetBubbleInfo h3 = new PetBubbleInfo();
+                    h3.Id = 9003; h3.Kind = "attention"; h3.Text = "在等你";
+                    h3.Sticky = true; h3.Priority = 100;
+                    bool attnRefused = !bubble.Show(h3, null);
+                    bool stillHidden2 = !bubble.Showing && !bubble.IsVisible;
+
+                    // ④ 本体回来 → 气泡要能正常显示（否则从"藏不住"变成"再也出不来"）
+                    bubble.SetPetVisible(true);
+                    PetBubbleInfo h4 = new PetBubbleInfo();
+                    h4.Id = 9004; h4.Kind = "text"; h4.Text = "回来了";
+                    bool showsAgain = bubble.Show(h4, null) && bubble.Showing;
+
+                    Check(beforeHide && visibleBefore && hiddenNow && petFlagOff &&
+                          refused && stillHidden && attnRefused && stillHidden2 && showsAgain,
+                          "⭐⭐⭐ 隐藏本体后，新气泡/attention 都不许把它拉回来（用户报的「有概率不隐藏」）",
+                          "隐藏前显示=" + (beforeHide && visibleBefore) +
+                          " 隐藏后收起=" + hiddenNow + " 判据置false=" + petFlagOff +
+                          " 新气泡被拒=" + refused + " 仍藏=" + stillHidden +
+                          " attention被拒=" + attnRefused + " 仍藏=" + stillHidden2 +
+                          " 本体回来后能显示=" + showsAgain);
+                }
+
+                // ⭐⭐⭐⭐ v14.1 接线：Program 两处必须都判（缺一处这个 bug 就还在）。
+                //
+                // ① `ShowBubbleFrom` 在本体隐藏时**早退**，且把 `_shownBubbleId` 置 -1
+                //    —— 置错的话重放判据 `_lastBubbleId != _shownBubbleId` 不成立，
+                //    那条气泡**永远回不来**（从"藏不住"变成"再也出不来"）。
+                // ② `VisibilityChanged` 要**立判据**（`SetPetVisible`）而不是只 `HideNow()`。
+                //
+                // ⚠️ 判据限定在方法体/代码块内（v13.9 的教训：全文件扫描会因为
+                // "别处也出现过这个词"而假绿）。
+                {
+                    string progSrc14 = ReadSelfSource("Program.cs");
+                    string sbf = ExtractMethodBody(progSrc14, "void ShowBubbleFrom(");
+                    bool sbfGuards = sbf != null &&
+                        sbf.IndexOf("!_win.IsVisible", StringComparison.Ordinal) >= 0;
+                    bool sbfResetsShown = sbf != null &&
+                        sbf.IndexOf("_shownBubbleId = -1;", StringComparison.Ordinal) >= 0;
+                    bool sbfKeepsLast = sbf != null &&
+                        sbf.IndexOf("_lastBubbleId = snap.Bubble.Id;", StringComparison.Ordinal) >= 0;
+
+                    // VisibilityChanged 是个 lambda，不是方法 —— 按起止标记截取那一段
+                    string visRegion = ExtractRegion(progSrc14,
+                        "_win.VisibilityChanged = delegate(bool visible)", "_tray.SetClickThrough");
+                    bool visSetsFlag = visRegion != null &&
+                        visRegion.IndexOf("_bubble.SetPetVisible(false)", StringComparison.Ordinal) >= 0 &&
+                        visRegion.IndexOf("_bubble.SetPetVisible(true)", StringComparison.Ordinal) >= 0;
+                    bool visResetsShown = visRegion != null &&
+                        visRegion.IndexOf("_shownBubbleId = -1;", StringComparison.Ordinal) >= 0;
+
+                    Check(sbfGuards && sbfResetsShown && sbfKeepsLast && visSetsFlag && visResetsShown,
+                          "⭐⭐⭐⭐ 接线：新气泡路径过滤 + 隐藏时立判据 + 清「已显示」标记（缺一不可）",
+                          "取图前判本体=" + sbfGuards + " 记last=" + sbfKeepsLast +
+                          " 清shown=" + sbfResetsShown + " ｜ 隐藏时立判据=" + visSetsFlag +
+                          " 隐藏时清shown=" + visResetsShown);
+                }
+
                 // 6b. attention 气泡：头部条+描边加粗+脉动；count=1 无徽标
                 PetBubbleInfo ab1 = new PetBubbleInfo();
                 ab1.Id = 1002; ab1.Kind = "attention"; ab1.Text = "在等你审批";
@@ -5907,6 +5995,28 @@ namespace DshZhuangFangyiPet
                 }
             }
             return null;
+        }
+
+        /// <summary>
+        /// 从源码里截取**两个标记之间**的一段（用于 lambda / 字段初始化这类
+        /// 没有方法签名的代码块）。
+        ///
+        /// v14.1 加：`_win.VisibilityChanged = delegate(bool visible) { ... }` 是个
+        /// lambda 赋值，`ExtractMethodBody` 抓不到它（它按方法签名找起点的
+        /// 第一个 `{`，会落在 lambda 体的外面或错位）。而"隐藏时有没有立判据"
+        /// 恰恰只能在那段 lambda 里验。
+        ///
+        /// 判据与 `ExtractMethodBody` 同源：**验某段代码做了什么，就要把范围圈住**。
+        /// </summary>
+        private static string ExtractRegion(string source, string startMarker, string endMarker)
+        {
+            source = StripLineComments(source);
+            if (string.IsNullOrEmpty(source)) return null;
+            int a = source.IndexOf(startMarker, StringComparison.Ordinal);
+            if (a < 0) return null;
+            int b = source.IndexOf(endMarker, a + startMarker.Length, StringComparison.Ordinal);
+            if (b < 0) return null;
+            return source.Substring(a, b - a);
         }
 
         /// <summary>

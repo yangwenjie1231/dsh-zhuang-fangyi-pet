@@ -492,7 +492,20 @@ namespace DshZhuangFangyiPet
                 {
                     if (!visible)
                     {
+                        // ⚠️ v14.1：**先**把判据置为"本体不可见"，**再**收起。
+                        // 顺序反了的话，两步之间若有气泡事件插进来就会被显示出来
+                        //（虽然同线程不该发生，但判据先立起来是免费的保险 ——
+                        // 这个 bug 的本质就是"判据没立住"）。
+                        try { _bubble.SetPetVisible(false); } catch { }
                         _bubble.HideNow();
+                        // ⚠️ 同时把"已显示"标记清掉。
+                        //
+                        // `_shownBubbleId` 的语义是**"当前真正显示着哪一条"** ——
+                        // 本体藏了、气泡也收了，就没有"正在显示的那条"了。
+                        // 不清的话，重新显示时 `_lastBubbleId != _shownBubbleId`
+                        // **不成立** → 重放被跳过 → 那条气泡**永远回不来**
+                        //（要等下一条新气泡才恢复，用户会以为"气泡丢了"）。
+                        _shownBubbleId = -1;
                         // 状态文字也是独立窗口 —— 与气泡同理：本体藏了它必须一起藏，
                         // 否则会出现「隐藏了桌宠、底下还挂着一行状态」。
                         _status.Hide();
@@ -502,6 +515,8 @@ namespace DshZhuangFangyiPet
                     }
                     else
                     {
+                        // 重新显示：判据先恢复，再补回独立窗口（顺序与隐藏时对称）。
+                        try { _bubble.SetPetVisible(true); } catch { }
                         // 重新显示：气泡与倒计时都要补回来（独立窗口不会自己重现）。
                         if (_bubbleOn && _lastBubbleId != _shownBubbleId) ReplayCurrentBubble();
                         RefreshPomodoro();
@@ -718,6 +733,27 @@ namespace DshZhuangFangyiPet
         private void ShowBubbleFrom(PetSnapshot snap)
         {
             if (snap == null || snap.Bubble == null) return;
+
+            // ⚠️ v14.1：**本体藏了就不显示气泡**（用户："桌宠隐藏的时候，
+            // 气泡有概率不隐藏"）。
+            //
+            // 这里是那个 bug 的**主入口**：隐藏后每来一条新气泡都会走到这儿，
+            // 而原先没有这道判断 → `_bubble.Show()` 把它重新拉出来。
+            // "有概率"正是因为**取决于隐藏之后有没有新气泡**（他在跟 DSH 对话时点的隐藏）。
+            //
+            // 两个细节都必须对：
+            //   ① `_lastBubbleId` 要更新（记下"最新是哪条"，重放时才有得放）；
+            //   ② `_shownBubbleId` **不能**更新成这条 —— 它表示"当前真正显示着哪一条"，
+            //      而此刻一条都没显示。写错的话重放判据 `!=` 不成立 → 气泡永远回不来。
+            if (!_win.IsVisible)
+            {
+                _lastBubbleId = snap.Bubble.Id;
+                _shownBubbleId = -1;
+                PetLog.Info("本体已隐藏 → 气泡 id=" + snap.Bubble.Id +
+                            " 暂不显示（重新显示时会重放）");
+                return;
+            }
+
             _lastBubbleId = snap.Bubble.Id;
             _shownBubbleId = snap.Bubble.Id;
             BitmapSource img = null;
