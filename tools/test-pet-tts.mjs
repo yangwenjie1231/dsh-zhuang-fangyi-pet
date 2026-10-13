@@ -261,6 +261,135 @@ ok('空/异常输入不抛', () => {
 })
 
 /* ══════════════════════════════════════════════════════════════════════════
+ * 2b. v15 语气风格：缓存键与请求体
+ *
+ * 这一节防的是"换了风格却毫无变化"这一类**没有报错**的故障。
+ * 两个必须同时成立的事实：
+ *   · 非 normal 的风格 → 缓存键**必须**变（否则命中旧音频，播的是旧语气）；
+ *   · normal / 空     → 缓存键**必须不变**（否则升级一次就要把已缓存的句子
+ *                        全部重新合成 —— `normal` 与 v1 的音频字节相同，
+ *                        变了纯属白花钱）。
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+section('2b. v15 语气风格（缓存键 + 请求体）')
+
+/** 从 fetch 调用里把 JSON body 取出来。 */
+function bodyOf (init) {
+  try { return JSON.parse(init.body) } catch { return null }
+}
+
+ok('⭐⭐ 非默认风格 → 缓存键必须不同（否则播的是旧语气）', () => {
+  const base = createTtsClient({})
+  const firm = createTtsClient({ style: 'firm' })
+  assert.notEqual(firm.cacheKey('你好'), base.cacheKey('你好'),
+    'firm 与"无风格"必须算出不同的键 —— 相同就是命中旧音频，且毫无报错')
+  assert.notEqual(createTtsClient({ style: 'gentle' }).cacheKey('你好'),
+    firm.cacheKey('你好'), 'firm 与 gentle 也必须是不同的键')
+})
+
+ok('⭐⭐ normal / 空串 → 缓存键与"无风格"**完全相同**（不作废既有缓存）', () => {
+  // normal 的参考音频与 v1 的 default.wav SHA256 相同，所以它是"没有风格"。
+  // 这条断言是**升级友好性**的守卫：一旦有人把 normal 也算成一种风格，
+  // 用户升级后第一次说话就会把整批已缓存的句子重新合成一遍。
+  const base = createTtsClient({})
+  assert.equal(createTtsClient({ style: 'normal' }).cacheKey('你好'), base.cacheKey('你好'))
+  assert.equal(createTtsClient({ style: '' }).cacheKey('你好'), base.cacheKey('你好'))
+  assert.equal(createTtsClient({}).styleTag, '', '没设风格时 styleTag 应为空')
+  assert.equal(createTtsClient({ style: 'normal' }).styleTag, '')
+  assert.equal(createTtsClient({ style: 'firm' }).styleTag, 'firm')
+})
+
+ok('风格接受"取值函数"（改设置立刻生效，不必重建 client）', () => {
+  let cur = 'normal'
+  const c = createTtsClient({ style: () => cur })
+  const before = c.cacheKey('你好')
+  cur = 'firm'
+  assert.notEqual(c.cacheKey('你好'), before, '取值函数变了，键就该跟着变')
+  assert.equal(c.styleTag, 'firm')
+})
+
+await okAsync('⭐ 请求体：默认**不带** style（与 v15 之前逐字节一致）', async () => {
+  const seen = []
+  const c = createTtsClient({
+    fetchImpl: async (url, init) => { seen.push({ url, body: bodyOf(init) }); return binRes(makeWav(1600)) }
+  })
+  await c.synthesize('你好')
+  assert.equal(seen.length, 1)
+  assert.deepEqual(seen[0].body, { text: '你好' },
+    `默认风格不该往 body 里塞 style，实际 ${JSON.stringify(seen[0].body)}`)
+})
+
+await okAsync('⭐ 请求体：非默认风格带上 style（HTTP 那条路真的会换语气）', async () => {
+  const seen = []
+  const c = createTtsClient({
+    style: 'gentle',
+    fetchImpl: async (url, init) => { seen.push({ url, body: bodyOf(init) }); return binRes(makeWav(1600)) }
+  })
+  await c.synthesize('你好')
+  assert.equal(seen[0].body.style, 'gentle')
+})
+
+await okAsync('⭐ 缓存键含风格时，**同一个后端**下 firm 与 normal 是两段不同音频', async () => {
+  // 把"身份"这条既有语义与风格拼在一起看：后端相同的两个 client，
+  // 只因为风格不同就必须是两个键。
+  const mk = async style => {
+    const c = createTtsClient({ style, fetchImpl: async () => jsonRes({ ok: true, backend: 'torch' }) })
+    await c.health()
+    return c
+  }
+  const a = await mk('normal')
+  const b = await mk('firm')
+  assert.equal(a.identity, b.identity, '后端身份相同')
+  assert.notEqual(a.cacheKey('你好'), b.cacheKey('你好'), '风格不同 → 键必须不同')
+  assert.equal(a.cacheKey('你好'), speechCacheKey('你好', 'torch'), 'normal 保持旧键')
+  assert.equal(b.cacheKey('你好'), speechCacheKey('你好', 'torch|style=firm'), 'firm 的键含风格')
+})
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * 2c. v15：三处白名单同集（宿主 / 客户端）
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+section('2c. v15 风格白名单：宿主与客户端同集')
+
+const hostSettingsSrc = fs.readFileSync(path.join(ROOT, 'src', 'settings.js'), 'utf8')
+const clientSrcForStyle = fs.readFileSync(path.join(ROOT, 'client.js'), 'utf8')
+
+/** 从源码里抠出 `const NAME = [...]` 的字符串字面量数组。 */
+function arrayLiteral (src, name) {
+  const m = new RegExp(`${name}\\s*=\\s*\\[([^\\]]*)\\]`).exec(src)
+  if (m === null) return null
+  return [...m[1].matchAll(/'([^']*)'/g)].map(x => x[1])
+}
+
+ok('⭐ 宿主 `TTS_STYLES` 与客户端 `PET_TTS_STYLES` **同集同序**', () => {
+  const host = arrayLiteral(hostSettingsSrc, 'TTS_STYLES')
+  const cli = arrayLiteral(clientSrcForStyle, 'PET_TTS_STYLES')
+  assert.ok(host !== null, 'src/settings.js 里找不到 TTS_STYLES')
+  assert.ok(cli !== null, 'client.js 里找不到 PET_TTS_STYLES')
+  assert.deepEqual(cli, host,
+    '两边不同集时：界面能选到一个宿主不认识的值 → 宿主回落 normal → 界面写着"语音娇"、实际正常说话，且零报错')
+  assert.deepEqual(host, ['normal', 'firm', 'gentle'], '风格清单就是 v2 的三种语气')
+})
+
+ok('⭐ 默认值三处一致：都是 `normal`（= v1 的声音）', () => {
+  assert.match(hostSettingsSrc, /ttsStyle:\s*'normal'/, 'settings.js 默认值应为 normal')
+  assert.match(clientSrcForStyle, /ttsStyle:\s*'normal'/, 'client.js 默认值应为 normal')
+  assert.match(hostSettingsSrc, /if \(TTS_STYLES\.includes\(input\.ttsStyle\)\)/,
+    'settings.js 必须做白名单归一化（不认识的值回落，不能透传）')
+  assert.match(clientSrcForStyle, /if \(PET_TTS_STYLES\.includes\(input\.ttsStyle\)\)/,
+    'client.js 必须做白名单归一化（否则设置页选了发不出去）')
+})
+
+ok('⭐ 客户端有"用哪一档"的下拉框，选项来自同一个白名单', () => {
+  assert.match(clientSrcForStyle, /PET_TTS_STYLES\.map\(/,
+    '下拉框的选项应由 PET_TTS_STYLES 生成（手写三个 option 迟早与白名单漂移）')
+  for (const key of ['ttsStyleNormal', 'ttsStyleFirm', 'ttsStyleGentle']) {
+    const n = clientSrcForStyle.split(`${key}:`).length - 1
+    assert.ok(n >= 2, `文案键 ${key} 应在中英两份里都定义（实际出现 ${n} 次）`)
+  }
+})
+
+/* ══════════════════════════════════════════════════════════════════════════
  * 3. WAV 时长解析（exe 靠它做"没播完别播下一句"）
  * ══════════════════════════════════════════════════════════════════════════ */
 

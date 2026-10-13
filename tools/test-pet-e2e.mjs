@@ -22,7 +22,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { normalizeSettings } from '../src/settings.js'
-import { sanitizeForSpeech } from '../src/pet/tts.js'
+import { sanitizeForSpeech, DEFAULT_TTS_URL } from '../src/pet/tts.js'
 import { EMOTE_BY_KEY, EMOTE_EXCLUDE_FROM_RANDOM } from '../src/pet/emotes.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -1631,6 +1631,223 @@ await ok('⭐⭐ 装了语音 DSH 插件 → 委派给它（`zfhVoice` 服务，
   assert.ok(st2.launch.argv.join(' ').includes('--backend'),
     `launch 应是插件的完整命令（含 --backend），实际 ${st2.launch.argv.join(' ')}`)
 
+  await ws.close()
+  for (const d of local.__effects) if (typeof d === 'function') assert.doesNotThrow(() => d())
+})
+
+await ok('⭐⭐ v15 两版并存 → 选 v2 + 风格贯通 + **不推默认端口**', async () => {
+  // 用户的原话是"以上是语音合成的新版本，适配一下"。
+  //
+  // 语音插件 v2 的设计是**故意不抢** `zfhVoice`（挂 `zfhVoiceV2`，另加别名
+  // `zfhVoice2`），所以"两个都装着时用谁"由桌宠决定 —— 这条断言就是钉住那个决定。
+  //
+  // 同时钉住两个**真 bug**：
+  //   ① 缓存键必须含风格（在 test-pet-tts.mjs 里钉）；
+  //   ② **不能**把默认 `ttsUrl` 的端口推给插件 —— v2 默认 8766，
+  //      被推成 8765 就会和正跑着的 v1 抢同一个端口，"并存"当场崩一个。
+  fs.rmSync(path.join(tmpHome, 'zhuang-fangyi-pet', 'chat.json'), { force: true })
+  const chatHome = fs.mkdtempSync(path.join(os.tmpdir(), 'zf-svc-v2-'))
+  const local = makeCtx(makeWebServer())
+  const calls = { v2synth: [], v1synth: [], v2configure: [], v1configure: [], setStyle: [] }
+  /** v2 的服务面：多两个方法（`styles` / `setStyle`）—— 桌宠就是靠它们认出版本的。 */
+  const fakeV2 = {
+    async synthesize (text, style) {
+      calls.v2synth.push([text, style])
+      return { bytes: fakeWav(1600), durationMs: 50, backend: 'torch', style }
+    },
+    async styles () {
+      return {
+        current: 'normal',
+        styles: [
+          { name: 'normal', label: '正常说话', available: true, is_default: true },
+          { name: 'firm', label: '语气强硬', available: true },
+          { name: 'gentle', label: '语音娇', available: false }
+        ]
+      }
+    },
+    setStyle (name) { calls.setStyle.push(name); return { style: name, applied: true } },
+    async health () { return { ok: true, backend: 'torch' } },
+    status () {
+      return {
+        ready: true, ours: true, pid: 888, backend: 'torch', resident: false,
+        idleMs: 0, idleStopSec: 300, lastError: null, launchable: true,
+        launch: { argv: ['python', '-m', 'zfh_voice2', '--backend', 'torch', 'serve', '--port', '8766'], cwd: 'D:/v2' }
+      }
+    },
+    start () { return true },
+    stop () { return true },
+    configure (patch) { calls.v2configure.push(patch); return this.status() }
+  }
+  const fakeV1 = {
+    async synthesize (text) { calls.v1synth.push([text]); return { bytes: fakeWav(1600), durationMs: 50, backend: 'torch' } },
+    status () { return { ready: true, ours: true, pid: 777, backend: 'torch' } },
+    start () { return true },
+    stop () { return true },
+    configure (patch) { calls.v1configure.push(patch); return this.status() }
+  }
+  local.provide('zfhVoiceV2', fakeV2)
+  local.provide('zfhVoice2', fakeV2)
+  local.provide('zfhVoice', fakeV1)
+  local.provide('sessionController', {
+    async list () { return { items: [] } },
+    async create () { return { sessionId: 'chat-v2-1' } },
+    async prompt (req, signal) { signal.throwIfAborted(); return { accepted: true } }
+  })
+  const petIndex = await import(`file://${path.join(ROOT, 'index.js').replace(/\\/g, '/')}`)
+  petIndex.apply(toCordisLike(local, ['webServer']), {})
+  const ws = local.__services.get('webServer')
+  await ws.listen()
+  const base = `http://127.0.0.1:${ws.port}`
+
+  // ① 选中的是 **v2**（不是先注册的、也不是 v1）
+  const st0 = await (await fetch(`${base}/api/zhuang-fangyi/pet/speech`)).json()
+  assert.equal(st0.provider, 'zfhVoiceV2',
+    `两版并存时应选 v2，实际 ${st0.provider}（v1 的 synthesize 调用数=${calls.v1synth.length}）`)
+  assert.equal(st0.service.provider, 'zfhVoiceV2', 'service 块里也要写明是哪一版在管')
+  assert.equal(st0.styleSupported, true, 'v2 有 styles()/setStyle() → 必须报支持风格')
+  assert.equal(st0.style, 'normal', '默认风格是 normal（= v1 的声音）')
+
+  // ② ⭐⭐ 默认地址**不该**被当成"用户指定的端口"推过去
+  //
+  // ⚠️ 必须先把 `ttsUrl` **显式设回默认值**：本文件前面的用例把它改成了
+  // `http://127.0.0.1:9`（用来验"连不上"的分支），而设置是**落盘共享**的 ——
+  // 不重置的话这里验的就成了"用户设过 :9 会不会推 9"，与本题无关。
+  await fetch(`${base}/api/zhuang-fangyi/pet/settings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: { speakReplies: true, ttsResident: false, ttsUrl: DEFAULT_TTS_URL } })
+  })
+  assert.ok(calls.v2configure.length >= 1, '设置应推给 v2')
+  const push0 = calls.v2configure[calls.v2configure.length - 1]
+  assert.equal(push0.style, 'normal', '默认也要显式推 style（不推 = 保持上一次的值，界面会骗人）')
+  assert.ok(!('port' in push0),
+    `默认 ttsUrl（${DEFAULT_TTS_URL}）不该推 port —— v2 默认 8766，推过去会与 v1 抢端口，实际推了 ${JSON.stringify(push0.port)}`)
+  assert.equal(calls.v1configure.length, 0, 'v1 不该被推到任何配置（它没在被使用）')
+
+  // ③ 用户显式改地址 → 这时候**才**推端口
+  await fetch(`${base}/api/zhuang-fangyi/pet/settings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: { ttsUrl: 'http://127.0.0.1:9999' } })
+  })
+  assert.equal(calls.v2configure[calls.v2configure.length - 1].port, 9999,
+    '用户显式指了别的地址时，端口仍要推（这就是"只推用户真的设了的键"）')
+
+  // ④ 换风格：推给插件 + 真的进了调用参数 + 写进状态
+  await fetch(`${base}/api/zhuang-fangyi/pet/settings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: { ttsStyle: 'firm', speakReplies: true } })
+  })
+  assert.equal(calls.v2configure[calls.v2configure.length - 1].style, 'firm', '风格应推给 v2')
+  const st1 = await (await fetch(`${base}/api/zhuang-fangyi/pet/speech`)).json()
+  assert.equal(st1.style, 'firm', '状态里应报当前风格')
+  assert.equal(st1.styleSupported, true)
+
+  // ⑤ ⭐ 真念一句 → 第二个参数就是风格（不能只推 configure 就完事）
+  await fetch(`${base}/api/zhuang-fangyi/pet/chat`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text: '在吗？' })
+  })
+  local.emit('session/event', { id: 'chat-v2-1' }, {
+    type: 'assistant/message', seq: 9700, time: Date.now(),
+    data: {
+      turn: 1, step: 1,
+      message: {
+        id: 'msg-v2-1', role: 'assistant',
+        content: [{ type: 'text', text: '**语气**也要跟得上。' }],
+        source: { kind: 'model', provider: 'e2e', model: 'e2e' }
+      },
+      stream: []
+    }
+  })
+  const dl = Date.now() + 6000
+  while (Date.now() < dl && calls.v2synth.length === 0) await new Promise(r => setTimeout(r, 50))
+  const spoken = calls.v2synth.filter(([t]) => t.includes('语气'))
+  assert.equal(spoken.length, 1, `真回复应恰好送进 v2 一次，实际 ${spoken.length}（${JSON.stringify(calls.v2synth)}）`)
+  assert.equal(spoken[0][1], 'firm',
+    `合成调用必须带上风格（第二参），实际 ${JSON.stringify(spoken[0][1])} —— 只推 configure 是不够的`)
+  assert.equal(calls.v1synth.length, 0, 'v2 在位时绝不该调用 v1')
+
+  // ⑥ 试一句：报风格可用性（firm 可用 / gentle 不可用）
+  const probe = await (await fetch(`${base}/api/zhuang-fangyi/pet/speech/probe`, { method: 'POST' })).json()
+  assert.equal(probe.ok, true, `v2 下试一句应成功：${JSON.stringify(probe.reason)}`)
+  assert.equal(probe.provider, 'zfhVoiceV2')
+  assert.equal(probe.style, 'firm')
+  assert.ok(Array.isArray(probe.styles) && probe.styles.length === 3,
+    `试一句应带回风格清单，实际 ${JSON.stringify(probe.styles)}`)
+  assert.equal(probe.styles.find(s => s.name === 'gentle').available, false, 'gentle 不可用应如实传回')
+  assert.match(String(probe.styleNote), /firm/, `styleNote 应点名当前风格：${probe.styleNote}`)
+  const snapProbe1 = await (await fetch(`${base}/api/zhuang-fangyi/pet/state`)).json()
+  const nameFirm = snapProbe1.speak?.name
+  assert.match(String(nameFirm), /^[0-9a-f]{16}$/, '试一句应交付一条语音（speak.name = 缓存键）')
+
+  // ⑦ ⭐⭐ 换风格后**再点一次**试一句：缓存键必须变。
+  //
+  // exe 是按 `name`（缓存键）去重的（`Program.cs` 只记"最近播过的 name"）——
+  // 键不变的话，用户"改了风格再点试一句"会**一声都不出**，
+  // 而他只会得出"风格这个功能没做"的结论。这是本功能的验收动作。
+  await fetch(`${base}/api/zhuang-fangyi/pet/settings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: { ttsStyle: 'gentle' } })
+  })
+  const probe2 = await (await fetch(`${base}/api/zhuang-fangyi/pet/speech/probe`, { method: 'POST' })).json()
+  assert.equal(probe2.ok, true, '换风格后试一句也应成功')
+  const snapProbe2 = await (await fetch(`${base}/api/zhuang-fangyi/pet/state`)).json()
+  assert.equal(snapProbe1.speak?.text, snapProbe2.speak?.text, '两次试一句念的是同一句话')
+  assert.notEqual(snapProbe2.speak?.name, nameFirm,
+    `换风格后再试一句必须换一个 name（exe 按 name 去重，同 name 不会再出声）：${nameFirm}`)
+  assert.match(String(probe2.styleNote), /gentle|不可用/,
+    `gentle 不可用时要把结论说出来，实际 ${probe2.styleNote}`)
+
+  await ws.close()
+  for (const d of local.__effects) if (typeof d === 'function') assert.doesNotThrow(() => d())
+})
+
+await ok('⭐ v15 只装 v1 → 回落 v1，且**不推** style（能力探测）', async () => {
+  // 这条防的是"按服务名判断版本"那种写法：它会在 v2 缺席时把风格推给 v1。
+  // v1 的 normalizeConfig 只认白名单键、`style` 会被静默丢弃 —— 推了也没用，
+  // 但**推了就等于桌宠在假装这个开关有效**。正确行为：能力探测为假 → 不推。
+  fs.rmSync(path.join(tmpHome, 'zhuang-fangyi-pet', 'chat.json'), { force: true })
+  const chatHome = fs.mkdtempSync(path.join(os.tmpdir(), 'zf-svc-v1only-'))
+  const local = makeCtx(makeWebServer())
+  const calls = { synth: [], configure: [] }
+  const fakeV1 = {
+    async synthesize (text) { calls.synth.push([text]); return { bytes: fakeWav(1600), durationMs: 50, backend: 'torch' } },
+    // 故意**不**提供 styles / setStyle —— 这就是 v1 的形状
+    status () {
+      return { ready: true, ours: true, pid: 777, backend: 'torch', launch: { argv: ['python', '-m', 'zfh_voice', 'serve'], cwd: 'D:/v1' } }
+    },
+    start () { return true },
+    stop () { return true },
+    configure (patch) { calls.configure.push(patch); return this.status() }
+  }
+  local.provide('zfhVoice', fakeV1)
+  local.provide('sessionController', {
+    async list () { return { items: [] } },
+    async create () { return { sessionId: 'chat-v1-1' } },
+    async prompt (req, signal) { signal.throwIfAborted(); return { accepted: true } }
+  })
+  const petIndex = await import(`file://${path.join(ROOT, 'index.js').replace(/\\/g, '/')}`)
+  petIndex.apply(toCordisLike(local, ['webServer']), {})
+  const ws = local.__services.get('webServer')
+  await ws.listen()
+  const base = `http://127.0.0.1:${ws.port}`
+  await fetch(`${base}/api/zhuang-fangyi/pet/settings`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ settings: { speakReplies: true, ttsStyle: 'gentle' } })
+  })
+  const st = await (await fetch(`${base}/api/zhuang-fangyi/pet/speech`)).json()
+  assert.equal(st.provider, 'zfhVoice', `应回落到 v1，实际 ${st.provider}`)
+  assert.equal(st.styleSupported, false, 'v1 没有 styles()/setStyle() → 必须报不支持')
+  assert.equal(st.style, 'gentle', '用户选的风格照原样保留（换回 v2 时立刻生效，不必重选）')
+  const push = calls.configure[calls.configure.length - 1]
+  assert.ok(!('style' in push),
+    `v1 不支持风格时**不该推** style（推了等于假装开关有效），实际 ${JSON.stringify(push)}`)
+  // 试一句：必须明说"当前插件不支持风格"，而不是让用户听不出来
+  const probe = await (await fetch(`${base}/api/zhuang-fangyi/pet/speech/probe`, { method: 'POST' })).json()
+  assert.equal(probe.ok, true, 'v1 下试一句应照常成功（只是没有风格）')
+  assert.equal(probe.provider, 'zfhVoice')
+  assert.equal(probe.styles, null, 'v1 没有 styles() → 清单为 null（而不是编一份）')
+  assert.match(String(probe.styleNote), /不支持风格/,
+    `试一句应明说"当前插件不支持风格"，实际 ${probe.styleNote}`)
   await ws.close()
   for (const d of local.__effects) if (typeof d === 'function') assert.doesNotThrow(() => d())
 })

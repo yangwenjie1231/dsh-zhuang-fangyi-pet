@@ -301,6 +301,18 @@ window.__ModuleLoader__.load({
          * 这个值只决定"每段多长"，也就是**多久开口**。
          */
         speechMaxCharsHint: '一段念多少字。整段回复都会念完，这个值只影响"多久开口"：调小开口更快，调大合成次数更少',
+        ttsStyle: '语气风格',
+        /**
+         * ⚠️ 措辞与语音插件 v2 的 `STYLE_LABELS` **必须一致** ——
+         * 同一个东西在两个界面上叫两个名字，用户会以为是两回事。
+         */
+        ttsStyleNormal: '正常说话',
+        ttsStyleFirm: '语气强硬',
+        ttsStyleGentle: '语音娇',
+        ttsStyleHint: '三种语气要语音插件 v2 才有效',
+        /** 诊断卡里"当前插件支持三种风格"的短标记。 */
+        styleSupported: '插件支持三种风格',
+        styleUnsupported: '当前插件不支持风格',
         ttsResident: '让语音模型常驻',
         ttsResidentHint: '常驻：启动一次后一直留在显存里，每次合成立刻开始（占显存）。关闭：空闲后自动停掉释放显存，但每次会话第一次合成要等模型加载',
         ttsIdleStopSec: '空闲多少秒后释放（秒，0 = 不停）',
@@ -391,7 +403,7 @@ window.__ModuleLoader__.load({
         noteLabel: '说明',
         notePet: '桌面窗口是真的浮在桌面上（支持滚轮缩放、右键菜单、表情包画廊、托盘图标）。窗口内悬浮只是兜底：只在 DSH 窗口里可见，也不再补新功能 —— 原生窗口不可用时会自动回落到它。',
         noteBubble: '「对话文字大小」和「大小」（桌宠本体）是两件事：把桌宠调小是为了不占地，而气泡里的正文是要读的 —— 跟着一起缩就会小到看不清，所以单独可调。「审批/提问常亮」不看气泡时长：AI 在等你处理时会一直亮着。',
-        noteSpeak: '需要合成子插件在跑（默认 127.0.0.1:8765）；连不上会自动退回固定台词，聊天不受影响。整段回复都会念完，按句分段、边合成边播 ——「每段朗读字数」只决定多久开口：调小开口更快，调大合成次数更少。常驻：加载一次后一直留在显存里，每次合成立刻开始；关闭：空闲后释放显存，但每次会话第一次合成要等模型加载。',
+        noteSpeak: '需要合成子插件在跑（默认 127.0.0.1:8765）；连不上会自动退回固定台词，聊天不受影响。整段回复都会念完，按句分段、边合成边播 ——「每段朗读字数」只决定多久开口：调小开口更快，调大合成次数更少。常驻：加载一次后一直留在显存里，每次合成立刻开始；关闭：空闲后释放显存，但每次会话第一次合成要等模型加载。语气风格：三档语气（正常说话 / 语气强硬 / 语音娇）是语音插件 v2（`dsh-zhuang-fangyi-voice-v2`）的能力，它挂 `zfhVoiceV2` 服务、默认监听 8766，和 v1（`zfhVoice`，8765）可以同时装着；桌宠两版都认，谁的 v2 在就用谁。只在 v1 上时只有「正常说话」一档 —— 选了别的不会有变化，诊断卡会写明"当前插件不支持风格"。默认档「正常说话」与 v1 的声音是同一段参考音频（字节相同），所以升级过去不会突然换个语气，已经缓存过的句子也不用重新合成。',
         advancedHint: '出问题时才需要看：服务状态、启动命令、素材与会话信息',
         // ── 诊断区键名 ──────────────────────────────────────────────────────
         diagAssets: '素材',
@@ -551,6 +563,13 @@ window.__ModuleLoader__.load({
         ttsUrl: 'TTS service URL',
         speechMaxChars: 'Characters per segment',
         speechMaxCharsHint: 'How many characters per segment. The whole reply is always spoken — this only controls how soon the first audio starts: smaller = starts sooner, larger = fewer synthesis calls',
+        ttsStyle: 'Voice style',
+        ttsStyleNormal: 'Normal',
+        ttsStyleFirm: 'Firm',
+        ttsStyleGentle: 'Gentle',
+        ttsStyleHint: 'Three styles need voice plugin v2',
+        styleSupported: 'plugin supports 3 styles',
+        styleUnsupported: 'plugin does not support styles',
         ttsResident: 'Keep the voice model resident',
         ttsResidentHint: 'Resident: load once and stay in VRAM — every synthesis starts instantly (uses VRAM). Off: unload when idle to free VRAM, but the first synthesis of each session waits for model load',
         ttsIdleStopSec: 'Unload after idle (seconds, 0 = never)',
@@ -633,7 +652,7 @@ window.__ModuleLoader__.load({
         noteLabel: 'Details',
         notePet: 'The desktop window truly floats on your desktop (wheel zoom, right-click menu, emote gallery, tray icon). The in-window overlay is a fallback only: visible inside DSH, and it gets no new features — it appears automatically when the native window is unavailable.',
         noteBubble: 'Chat text size and pet size are separate: you shrink the pet to save space, but bubble text is meant to be read, so it stays adjustable on its own. The sticky approval alert ignores bubble duration — it stays lit while the AI waits for you.',
-        noteSpeak: 'Needs the synthesis sub-plugin (default 127.0.0.1:8765); when unreachable it falls back to fixed lines and chat is unaffected. The whole reply is always spoken, in sentence-sized segments synthesized while playing — the segment size only controls how soon the first audio starts. Resident: load once and stay in VRAM, instant synthesis. Off: free VRAM when idle, but the first synthesis of each session waits for the model to load.',
+        noteSpeak: 'Needs the synthesis sub-plugin (default 127.0.0.1:8765); when unreachable it falls back to fixed lines and chat is unaffected. The whole reply is always spoken, in sentence-sized segments synthesized while playing — the segment size only controls how soon the first audio starts. Resident: load once and stay in VRAM, instant synthesis. Off: free VRAM when idle, but the first synthesis of each session waits for the model to load. Voice style: the three styles (Normal / Firm / Gentle) come from voice plugin v2 (`dsh-zhuang-fangyi-voice-v2`), which provides the `zfhVoiceV2` service on port 8766 and can coexist with v1 (`zfhVoice`, 8765); the pet uses whichever v2 is present. With v1 only "Normal" exists — picking another changes nothing (the diagnostics card says so). The default "Normal" uses the very same reference audio as v1 (identical bytes), so upgrading never changes her voice and already-cached lines are not re-synthesized.',
         advancedHint: 'Only needed when something is wrong: service state, launch command, assets and session info',
         diagAssets: 'Assets',
         diagStates: 'states covered',
@@ -700,6 +719,23 @@ window.__ModuleLoader__.load({
      *（宿主 / 客户端 / exe 的 `PetSettingsInfo.PomodoroAnchors`）。
      */
     const PET_POMODORO_ANCHORS = ['auto', 'below', 'above', 'left', 'right']
+
+    /**
+     * v15：语气风格白名单（**必须与 `src/settings.js` 的 `TTS_STYLES` 同集**）。
+     *
+     * 与 `PET_POMODORO_ANCHORS` 同一个道理：这里是下拉框的选项值，真正的校验在宿主。
+     * 两边不同集时，界面能选到一个宿主不认识的值 → 宿主回落 `normal`
+     * → **界面写着「语音娇」、实际是正常说话**，而且零报错。
+     * ⚠️ 注意这里**没有空串** —— 风格不像 `ttsIdleAction` 那样有"用插件默认"
+     * 这一档（插件的默认恒等于 `normal`）。
+     */
+    const PET_TTS_STYLES = ['normal', 'firm', 'gentle']
+    /** 风格 → 文案键（`t()` 用）。顺序与 `PET_TTS_STYLES` 一致。 */
+    const PET_TTS_STYLE_LABELS = {
+      normal: 'ttsStyleNormal',
+      firm: 'ttsStyleFirm',
+      gentle: 'ttsStyleGentle'
+    }
 
     /** 预设 → 四个时长字段。与 Host 的 `POMODORO_PRESET_VALUES` 同值。 */
     const PET_POMODORO_PRESET_VALUES = {
@@ -822,6 +858,12 @@ window.__ModuleLoader__.load({
         ttsIdleStopSec: 300,
         /** '' = 用语音插件的默认值。 */
         ttsIdleAction: '',
+        /**
+         * v15：语气风格。与宿主 `src/settings.js` 的 `TTS_STYLES` 同集同默认。
+         * 默认 `normal` = v1 的声音（`ref/styles/normal.wav` 与 `ref/default.wav`
+         * 字节相同），所以升级到 v2 不会突然换个语气说话。
+         */
+        ttsStyle: 'normal',
         /** 机器相关路径：由插件 loader 配置管，这里只做透传与只读展示。 */
         ttsPython: '',
         ttsRepoDir: '',
@@ -919,6 +961,10 @@ window.__ModuleLoader__.load({
       if (input.ttsIdleAction === '' || input.ttsIdleAction === 'unload' || input.ttsIdleAction === 'stop') {
         out.ttsIdleAction = input.ttsIdleAction
       }
+      // v15 语气风格：与 Host 的 `TTS_STYLES` 同集。
+      // 漏掉这一行的症状和上面那批**完全一样**：设置页能选、POST 里没有这个键、
+      // 宿主静默忽略 —— 看起来"选了没用"，而且零报错。
+      if (PET_TTS_STYLES.includes(input.ttsStyle)) out.ttsStyle = input.ttsStyle
       // 机器相关路径与后端：长度限住，后端只认三个值（与 Host 的 `TT_BACKENDS` 同集）。
       // 这几个**不提供编辑控件**（归插件 loader 配置管），但必须能透传 ——
       // 否则设置页 POST 完整对象时会把它们冲掉。
@@ -1875,7 +1921,11 @@ window.__ModuleLoader__.load({
             if (r.ok === true) {
               setSpeakNote(`${t('speakOk')}：${r.backend ?? '?'}` +
                 (r.elapsedMs != null ? ` · ${r.elapsedMs} ms` : '') +
-                (r.played === true ? ` · ${t('speakPlayed')}` : ''))
+                (r.played === true ? ` · ${t('speakPlayed')}` : '') +
+                // v15：把"这一档风格到底有没有真的用上"一并说出来。
+                // 不说的话，用户换了风格点试一句、听完觉得"好像一样"，
+                // 只能来问 —— 而这里其实**已经知道**答案（插件的 styles() 报的）。
+                (r.styleNote ? ` · ${r.styleNote}` : ''))
             } else {
               setSpeakNote(`${t('speakFail')}：${r.reason ?? 'unknown'}`)
             }
@@ -2627,6 +2677,25 @@ window.__ModuleLoader__.load({
               onBlur: e => set({ speechMaxChars: Number(e.target.value) })
             })
           }),
+          // v15：语气风格。三条与 v2 插件**逐字相同**的文案（`STYLE_LABELS`），
+          // 免得同一个东西在两个界面上叫两个名字。
+          // ⚠️ 下拉框**永远显示**（不存在"检测不到就不显示"）——
+          // 装着 v1 时它是"当前插件不支持"的**可见提示**，而不是一个假开关：
+          // 用户至少能看到"这一档存在、但你现在这版没有"，而不是对着空白猜。
+          h(Row, {
+            key: 'ttsStyle',
+            label: t('ttsStyle'),
+            desc: t('ttsStyleHint'),
+            control: h('select', {
+              key: 's',
+              className: 'zf-pet-row__input',
+              value: PET_TTS_STYLES.includes(settings.ttsStyle) ? settings.ttsStyle : 'normal',
+              onChange: e => {
+                const v = e.target.value
+                if (PET_TTS_STYLES.includes(v)) set({ ttsStyle: v })
+              }
+            }, PET_TTS_STYLES.map(id => h('option', { key: id, value: id }, t(PET_TTS_STYLE_LABELS[id]))))
+          }),
           // 常驻开关：合成要加载模型（CUDA 下更慢），加载完长期占显存。
           // 所以"常驻 vs 用完释放"必须让用户选 —— 代价写在卡片的「说明」里。
           h(Toggle, {
@@ -2991,6 +3060,21 @@ window.__ModuleLoader__.load({
                 k: t('svcLaunch'),
                 mono: true,
                 v: (speakStatus.launch.argv ?? []).join(' ')
+              }),
+          // v15：语气风格这一行要回答的是"我选的风格**到底有没有生效**"，
+          // 所以三个事实一起给：选了什么、谁在服务宿主、它支不支持风格。
+          // ⚠️ 只说"风格=firm"是不够的 —— 装着 v1 时用户选了 firm 也**毫无变化**，
+          // 而界面上看不出任何异常（这正是"假开关"的形状）。
+          speakStatus === null
+            ? null
+            : h(Diag, {
+                key: 'style',
+                k: t('ttsStyle'),
+                v: `${speakStatus.style ?? 'normal'}` +
+                  (speakStatus.provider ? ` · ${speakStatus.provider}` : '') +
+                  (speakStatus.styleSupported === true
+                    ? ` · ${t('styleSupported')}`
+                    : (speakStatus.styleSupported === false ? ` · ⚠ ${t('styleUnsupported')}` : ''))
               }),
           speakStatus === null
             ? null

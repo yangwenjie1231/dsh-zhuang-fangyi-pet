@@ -37,7 +37,7 @@ import os from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 
-import { defaultSettings, normalizeSettings, SETTINGS_VERSION } from './src/settings.js'
+import { defaultSettings, normalizeSettings, SETTINGS_VERSION, TTS_STYLES } from './src/settings.js'
 import { createPetState, DEFAULT_BUBBLE_STATES, EVENT_TEXT } from './src/pet/state.js'
 import { activityConfig } from './src/pet/activity.js'
 import { bridgeHostEvents } from './src/pet/events.js'
@@ -1349,6 +1349,10 @@ export function apply (ctx, config) {
       ttsClient = createTtsClient({
         baseUrl: url,
         maxChars,
+        // v15：风格传**取值函数**而不是当时的字符串 —— 用户在设置页改一下，
+        // 下一次合成就带上新值，不必等这条惰性 client 被重建
+        //（它也同时决定缓存键，见 `src/pet/tts.js` 的 `cacheIdentity`）。
+        style: () => ttsStyle(),
         logger
       })
       ttsClientKey = key
@@ -1469,14 +1473,83 @@ export function apply (ctx, config) {
    * 端口/进程），只把开关推给它、并调用它的 `synthesize`。
    *
    * 没装 → 退回"自己起进程 + HTTP"的老路（那套仍然完整可用）。
+   *
+   * ── v15：两个版本并存时选谁 ──────────────────────────────────────────────
+   *
+   * 语音插件 v2（`dsh-zhuang-fangyi-voice-v2`）**故意不抢** `zfhVoice`
+   *（它挂 `zfhVoiceV2`，另加短别名 `zfhVoice2`）—— 这样 v1 的调用方一个都不受影响。
+   * 于是"谁在服务宿主"这件事由**我们**决定，顺序是：
+   *
+   *     zfhVoiceV2  →  zfhVoice2  →  zfhVoice
+   *     （v2 正式名）   （v2 别名）    （v1）
+   *
+   * 为什么用"有没有这个服务"而不是再加一个"用哪个插件"的设置项：
+   * `ctx.get` **每次都重新解析**，所以用户想换回去只要在插件管理器里停用 v2 那一条，
+   * **下一次合成**就走 v1 —— 不需要重启、也不需要桌宠这边多一份状态。
+   * 再加一个设置项等于把插件管理器的启用/停用再实现一遍，还多一处会漂移的白名单。
    */
+  const VOICE_SERVICE_NAMES = ['zfhVoiceV2', 'zfhVoice2', 'zfhVoice']
+
+  /**
+   * 按 `VOICE_SERVICE_NAMES` 的顺序找第一个可用的语音服务。
+   * @returns {{name: string, svc: object}|null}
+   */
+  const voiceServiceInfo = () => {
+    if (typeof ctx.get !== 'function') return null
+    for (const name of VOICE_SERVICE_NAMES) {
+      try {
+        const svc = ctx.get(name)
+        if (svc === null || svc === undefined) continue
+        if (typeof svc.synthesize !== 'function') continue
+        return { name, svc }
+      } catch { /* 这个服务名没有，继续找下一个 */ }
+    }
+    return null
+  }
+
+  /** 服务本体（不关心它是哪一版）—— 现有调用点的兼容入口。 */
   const voiceService = () => {
-    try {
-      const svc = typeof ctx.get === 'function' ? ctx.get('zfhVoice') : undefined
-      if (svc === null || svc === undefined) return null
-      if (typeof svc.synthesize !== 'function') return null
-      return svc
-    } catch { return null }
+    const info = voiceServiceInfo()
+    return info === null ? null : info.svc
+  }
+
+  /**
+   * 这个服务**支持三种语气风格**吗？
+   *
+   * 判据是能力探测而不是版本号字符串：v2 挂了 `styles()`/`setStyle()`，
+   * v1 没有。用能力探测的好处是——**将来第三版只要还提供这两个方法就自动可用**，
+   * 而"按服务名判断"会在那一刻静默失效（新版被当成 v1，风格开关变成装饰品）。
+   */
+  const voiceStyleSupported = svc => {
+    if (svc === null || svc === undefined) return false
+    return typeof svc.setStyle === 'function' || typeof svc.styles === 'function'
+  }
+
+  /**
+   * 要发给合成服务的风格名（v15）。
+   *
+   * 默认 `normal` —— 它同时是 v2 的 `DEFAULT_STYLE` 与 v1 的行为
+   *（`ref/styles/normal.wav` 与 `ref/default.wav` 的 SHA256 实测相同），
+   * 所以"升级到 v2"这一步**不改变任何声音**，除非用户主动去改风格。
+   */
+  const ttsStyle = () => {
+    const s = String(settings.get().ttsStyle ?? '').trim().toLowerCase()
+    return TTS_STYLES.includes(s) ? s : 'normal'
+  }
+
+  /**
+   * 风格的"是否算非默认"判据 —— 与 `src/pet/tts.js` 的 `styleTagOf()` **同一语义**。
+   *
+   * `''` 表示"没有风格"（normal 与空都算）。它决定：HTTP body 里带不带 `style`、
+   * 缓存键里带不带后缀、试一句的键带不带后缀。
+   *
+   * ⚠️ 试一句的键**必须**跟着风格变：exe 是按 `name`（缓存键）去重的
+   *（见 `pet/Program.cs` 的 `_lastSpokenName`）—— 键不变的话，用户"改了风格
+   * 再点试一句"**一声都不出**"，他会直接判定"风格这个功能没做"。
+   */
+  const styleTag = () => {
+    const s = ttsStyle()
+    return s === 'normal' ? '' : s
   }
 
   const supervisor = createTtsSupervisor({
@@ -1563,7 +1636,10 @@ export function apply (ctx, config) {
         if (svc !== null) {
           // 插件模式：控制权在它那儿（同一时间只该有一个监管者）。
           if (typeof svc.start === 'function') await svc.start()
-          if (typeof svc.synthesize === 'function') await svc.synthesize(TTS_WARMUP_TEXT)
+          // v15：预热**必须带上当前风格** —— 不同风格走的是不同的参考音频，
+          // 特征提取那一小段不是同一批内核；不带的话用户换了风格，
+          // 第一次真实合成还是要自己付那段开销。
+          if (typeof svc.synthesize === 'function') await svc.synthesize(TTS_WARMUP_TEXT, ttsStyle())
         } else {
           // 没装插件：桌宠自己起进程 + HTTP。
           if (await supervisor.ensure()) await tts().synthesize(TTS_WARMUP_TEXT)
@@ -1578,6 +1654,13 @@ export function apply (ctx, config) {
     })()
   }
 
+  /**
+   * 上一次记过日志的"谁在服务宿主 + 支不支持风格"（v15）。
+   * 只用于**去重那行 boot 日志** —— 它不是状态，别拿它做判断依据
+   *（`voiceServiceInfo()` 每次都是现查的，所以停用 v2 后下一次合成就走 v1）。
+   */
+  let lastVoiceProvider = null
+
   const syncTtsService = () => {
     const cfg = settings.get()
     // 常驻关掉 → 允许下次打开时重新预热（否则一次热过就再也不热了）。
@@ -1588,7 +1671,20 @@ export function apply (ctx, config) {
       launch: resolveLaunch()
     })
     // 装了语音插件 → 把开关与路径推给它（设置页仍是**唯一**的控制面）。
-    const svc = voiceService()
+    const info = voiceServiceInfo()
+    const svc = info === null ? null : info.svc
+    // v15：**谁在服务宿主**、风格支不支持 —— 变化时记一行。
+    //
+    // 为什么要在日志里写死这一行：并存是新常态（v1 在 8765、v2 在 8766），
+    // 而"我到底在用哪一版"从界面上看不出来 —— 排查"风格没生效"时，
+    // 第一个要回答的就是这个问题。只在**变化时**记，避免每次改设置都刷一行。
+    const providerLine = svc === null
+      ? 'HTTP（没装语音 DSH 插件：桌宠自己起进程）'
+      : `${info.name}（风格支持：${voiceStyleSupported(svc) ? '是' : '否'}）`
+    if (providerLine !== lastVoiceProvider) {
+      lastVoiceProvider = providerLine
+      boot(`语音合成：${providerLine} · 风格=${ttsStyle()}`)
+    }
     if (svc !== null && typeof svc.configure === 'function') {
       try {
         // ⚠️ **只推"用户真的设了"的键**。
@@ -1633,9 +1729,23 @@ export function apply (ctx, config) {
           modelDir: String(cfg.ttsModelDir ?? '').trim()
         }
         for (const [k, v] of Object.entries(explicit)) if (v !== '') patch[k] = v
-        // 端口只在用户显式改了地址时才推（ttsUrl 有值意味着他指了别的服务）。
+        // v15：风格。**只要服务支持风格就推**，默认 `normal` 也推 ——
+        // 同 `idleAction` 的道理：不推 = "保持上一次的值"，于是用户把
+        // 设置页改回「正常说话」而插件还是 firm，界面与行为不一致且无处报错。
+        // 推了之后，"桌宠设置页 = 风格的唯一控制面"这句话才是真的
+        //（插件 loader 里的 `style` 只是桌宠启动前的初值）。
+        if (voiceStyleSupported(svc)) patch.style = ttsStyle()
+        // 端口：**只在用户真的改过地址时才推**。
+        //
+        // ⚠️ v15 修的真 bug：原先的判断是 `if (url !== '')`，而 `ttsUrl` 的
+        // **默认值本来就非空**（`http://127.0.0.1:8765`）→ 于是无条件推 8765，
+        // 把插件的端口顶成 8765。对 v1 恰好等于它自己的默认值（看不出来），
+        // 但 **v2 的默认端口是 8766** —— 一旦并存，v2 会被推到 v1 正占着的
+        // 8765 上，两个服务里必然有一个起不来。
+        // 这与本函数上面那条自己写的规矩本来就是一致的：
+        // "⚠️ **只推"用户真的设了"的键**" —— `ttsUrl` 的默认值违反了它。
         const url = String(cfg.ttsUrl ?? '').trim()
-        if (url !== '') patch.port = portFromUrl(url)
+        if (url !== '' && url !== DEFAULT_TTS_URL) patch.port = portFromUrl(url)
         svc.configure(patch)
       } catch (error) {
         logger.warn?.(`zhuang-fangyi-pet: 同步语音插件配置失败：${error?.message ?? error}`)
@@ -1734,7 +1844,9 @@ export function apply (ctx, config) {
             const svc = voiceService()
             let r = null
             if (svc !== null) {
-              const out = await svc.synthesize(piece)
+              // v15：风格**显式传参**，不依赖前面那一次 `configure` 有没有生效
+              //（推送是异步的、也可能被插件的校验挡掉；调用自带的参数才是准的）。
+              const out = await svc.synthesize(piece, ttsStyle())
               r = out === null ? null : { bytes: out.bytes, durationMs: out.durationMs }
             } else {
               await supervisor.ensure()
@@ -1766,8 +1878,8 @@ export function apply (ctx, config) {
           // 交付：seq 递增 → exe 看到变化就去取。
           // `utterance` 相同表示"还是同一句回复的后续分片" → exe 排队而不是抢占。
           speechSeq += 1
-          speechLatest = { seq: speechSeq, name: key, durationMs, text: piece, utterance }
-          boot(`动态语音就绪（${fromCache ? '缓存' : '新合成'}，${durationMs}ms，第 ${i + 1}/${chunks.length} 段）：${piece.slice(0, 24)}`)
+          speechLatest = { seq: speechSeq, name: key, durationMs, text: piece, utterance, style: ttsStyle() }
+          boot(`动态语音就绪（${fromCache ? '缓存' : '新合成'}${styleTag() === '' ? '' : ` · ${styleTag()}`}，${durationMs}ms，第 ${i + 1}/${chunks.length} 段）：${piece.slice(0, 24)}`)
           hub.broadcast(withSettings(machine.snapshot()))
         }
       } catch (error) {
@@ -3148,14 +3260,31 @@ export function apply (ctx, config) {
       },
       /** 给设置页/诊断用：当前状态（开没开、服务地址、已缓存几条）。 */
       status: () => {
+        const info = voiceServiceInfo()
         return {
           enabled: settings.get().speakReplies === true,
           url: String(settings.get().ttsUrl ?? '') || DEFAULT_TTS_URL,
           maxChars: speechMaxChars(),
           cached: speechCacheCount(),
+          /**
+           * v15：语气风格（当前选择）与"这条合成路支不支持风格"。
+           *
+           * `styleSupported` 是**能力**（插件有没有 `styles()`/`setStyle()`），
+           * 不是"这个风格可用吗" —— 后者只有插件的 `styles()` 知道
+           *（某个风格的参考音频缺失时它会退回 normal 且不报错），
+           * 所以那部分在 `/pet/speech/probe` 里给（那是异步的）。
+           */
+          style: ttsStyle(),
+          styleSupported: info === null ? null : voiceStyleSupported(info.svc),
+          provider: info === null ? null : info.name,
           latest: speechLatest === null
             ? null
-            : { name: speechLatest.name, durationMs: speechLatest.durationMs, text: speechLatest.text },
+            : {
+                name: speechLatest.name,
+                durationMs: speechLatest.durationMs,
+                text: speechLatest.text,
+                style: speechLatest.style ?? null
+              },
           /**
            * 进程监管状态。
            *
@@ -3163,11 +3292,13 @@ export function apply (ctx, config) {
            *   · `plugin` —— 装了语音 DSH 插件，进程由它管（这里的状态从它那儿取）；
            *   · `http`   —— 没装插件，桌宠自己起进程 + HTTP。
            * 用户看设置页时要能分清"到底谁在管"，否则排查时会找错地方。
+           *
+           * v15：plugin 模式补 `provider`（**哪一个**服务名：`zfhVoiceV2` 还是
+           * `zfhVoice`）—— 并存时"谁在管"与"哪一版在管"是两个问题。
            */
           service: (() => {
-            const svc = voiceService()
-            if (svc !== null && typeof svc.status === 'function') {
-              try { return { mode: 'plugin', ...svc.status() } } catch { /* 退回本地状态 */ }
+            if (info !== null && typeof info.svc.status === 'function') {
+              try { return { mode: 'plugin', provider: info.name, ...info.svc.status() } } catch { /* 退回本地状态 */ }
             }
             return { mode: 'http', ...supervisor.status() }
           })(),
@@ -3179,10 +3310,9 @@ export function apply (ctx, config) {
            * 而插件实际执行的是带 `--backend torch --gsv-root …` 的完整命令）。
            */
           launch: (() => {
-            const svc = voiceService()
-            if (svc !== null && typeof svc.status === 'function') {
+            if (info !== null && typeof info.svc.status === 'function') {
               try {
-                const st = svc.status()
+                const st = info.svc.status()
                 if (st?.launch) return st.launch
               } catch { /* 退回自己解析 */ }
             }
@@ -3199,7 +3329,34 @@ export function apply (ctx, config) {
        */
       probe: async () => {
         const started = Date.now()
-        const svc = voiceService()
+        const info = voiceServiceInfo()
+        const svc = info === null ? null : info.svc
+        const style = ttsStyle()
+        /**
+         * v15：问插件"三种风格各自到底能不能用"。
+         *
+         * 为什么必须问它而不是照着我们自己的清单显示：**某个风格的参考音频缺失时
+         * Python 侧会静默退回 normal**（`styles.resolve_style` 的兜底链），
+         * 合成照常成功、只是语气没变 —— 用户会以为"这个开关是假的"。
+         * 唯一知道真相的是 `styles()` 返回的 `available`（它来自
+         * `list_styles`：`resolved == key` 才算可用）。
+         *
+         * 失败一律返回 null（试一句不该因为"查不到风格清单"而失败）。
+         */
+        const stylesOf = async () => {
+          if (svc === null || typeof svc.styles !== 'function') return null
+          try {
+            const r = await svc.styles()
+            if (r === null || typeof r !== 'object' || !Array.isArray(r.styles)) return null
+            return r.styles
+              .filter(s => s !== null && typeof s === 'object' && typeof s.name === 'string')
+              .map(s => ({
+                name: s.name,
+                label: typeof s.label === 'string' ? s.label : s.name,
+                available: s.available !== false
+              }))
+          } catch { return null }
+        }
         // 插件模式下用插件自己的 url/缓存键（缓存键含服务身份，两边算出来不同）
         const client = svc === null ? tts() : null
         const status = {
@@ -3221,8 +3378,11 @@ export function apply (ctx, config) {
         let bytes = null
         let durationMs = 0
         let cacheKey = null
+        // v15：风格可用性只在**插件模式**问得到（HTTP 那条路没有统一契约：
+        // v1 没有 `/styles`，v2 有）。查不到就是 null，界面据此显示"未知"。
+        const styles = await stylesOf()
         if (svc !== null) {
-          const r = await svc.synthesize(probeText)
+          const r = await svc.synthesize(probeText, style)
           if (r === null) {
             const st = (() => {
               try { return svc.status() } catch { return {} }
@@ -3232,6 +3392,9 @@ export function apply (ctx, config) {
               reason: st.lastError ?? '插件没能启动或合成（看宿主日志里的「庄方宜语音」）',
               backend: st.backend ?? null,
               elapsedMs: Date.now() - started,
+              provider: info.name,
+              style,
+              styles,
               status: { ...status, service: st }
             }
           }
@@ -3278,15 +3441,21 @@ export function apply (ctx, config) {
           if (ensureSpeechDir()) {
             // 插件模式：我们的缓存键只用于**本地文件命名**，与插件内部缓存无关 ——
             // 用同样的算法（文本 + 服务身份）会拿不到身份，所以这里用文本哈希。
-            const key = cacheKey ?? speechCacheKey(probeText, `probe:${backend ?? ''}`)
+            //
+            // ⚠️ v15：**风格必须进这个键**。exe 是按 `name` 去重的
+            //（`Program.cs` 只记"最近播过的 name"）—— 键不变的话，
+            // 用户"改了风格再点试一句"会一声都不出（exe 认为同一句刚播过），
+            // 他只会得出"风格这个功能没做"的结论。这正是本功能的验收动作。
+            const styleSuffix = style === 'normal' ? '' : `|style=${style}`
+            const key = cacheKey ?? speechCacheKey(probeText, `probe:${backend ?? ''}${styleSuffix}`)
             fs.writeFileSync(path.join(SPEECH_DIR, `${key}.wav`), bytes)
             speechSeq += 1
             // 探针每次都给一个**新的 utterance**：它是一条独立的试听，
             // 不该被 exe 当成"上一句的后续分片"排队等着（那样点第二下没声音）。
-            speechLatest = { seq: speechSeq, name: key, durationMs, text: probeText, utterance: ++speechUtterance }
+            speechLatest = { seq: speechSeq, name: key, durationMs, text: probeText, utterance: ++speechUtterance, style }
             hub.broadcast(withSettings(machine.snapshot()))
             delivered = true
-            boot('动态语音探测成功，已交付 exe 播放')
+            boot(`动态语音探测成功，已交付 exe 播放（风格=${style}）`)
           }
         } catch (error) {
           logger.warn?.(`zhuang-fangyi-pet: 探测语音写入失败：${error?.message ?? error}`)
@@ -3298,6 +3467,27 @@ export function apply (ctx, config) {
           elapsedMs: Date.now() - started,
           durationMs,
           delivered,
+          // ── v15：风格 ────────────────────────────────────────────────────
+          // `style` = 这次试听请求的风格；`styles` = 插件报的三种风格各自可用性
+          //（null = 问不到：v1 没这个能力，或调用失败）。
+          // `styleNote` 是一句**给人看**的结论 —— 把"选了 firm 但插件说 firm
+          // 不可用（会静默退回正常说话）"这件事直接讲出来，而不是让用户
+          // 听完觉得"好像没变化"然后来问。
+          provider: info === null ? null : info.name,
+          style,
+          styles,
+          styleNote: (() => {
+            if (info === null) return `HTTP 直连模式 · 风格=${style}（是否支持由服务端决定）`
+            if (!voiceStyleSupported(svc)) {
+              return `当前语音插件（${info.name}）不支持风格，语气始终是「正常说话」`
+            }
+            if (styles === null) return `风格=${style}（插件没报风格清单，可用性未知）`
+            const hit = styles.find(s => s.name === style)
+            if (hit === undefined) return `风格=${style}（不在插件报的清单里，插件会按未知值处理）`
+            return hit.available
+              ? `风格=${style}（${hit.label}）可用`
+              : `⚠ 风格=${style} 不可用（缺参考音频）—— 插件会静默退回「正常说话」`
+          })(),
           // 向后兼容：老的面板读 `played`。语义与 `delivered` 相同（= 已交付），
           // 不是"已出声" —— 别再拿它当成功判据。
           played: delivered,

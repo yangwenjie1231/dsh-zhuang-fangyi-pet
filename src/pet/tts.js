@@ -18,6 +18,17 @@
  *
  * 本模块**只依赖这个契约**，不关心它是 onnx 还是 torch、跑在哪台机器上。
  *
+ * ── v15：语气风格（v2 子插件新增）─────────────────────────────────────────
+ *
+ * v2（`dsh-zhuang-fangyi-voice-v2`，端口 8766）多了一档可选参数：
+ *
+ *     POST /tts  body {"text":"...","style":"firm"}    // normal / firm / gentle
+ *     GET  /styles  → {"ok":true,"current":"normal","styles":[{name,available,…}]}
+ *
+ * 风格**只在非 normal 时才发**（见 `styleTagOf`）：`normal` 的参考音频与 v1 的
+ * `ref/default.wav` 字节相同，所以"不发"与"发 normal"是同一段音频，而前者
+ * 让默认路径与 v15 之前逐字节一致、也不必指望老服务忽略未知键。
+ *
  * ── 延迟是设计约束，不是细节（子插件 README 实测）─────────────────────────
  *
  *     torch + CUDA   RTF 0.45   6 秒音频 ≈ 3 秒   ← 可用
@@ -343,6 +354,10 @@ export function wavDurationMs (bytes) {
  * @param {string} [opts.baseUrl]
  * @param {number} [opts.timeoutMs]
  * @param {typeof fetch} [opts.fetchImpl] - 注入便于测试
+ * @param {string|(() => string)} [opts.style] - v15：**语气风格**（`normal`/`firm`/`gentle`）。
+ *   收"取值函数"也收字符串，是因为它是**活的**：用户在设置页改一下，
+ *   下一次合成就该带上新值 —— 传死字符串的话 `index.js` 那条惰性 client 得跟着重建。
+ *   取值得到 `''` 或 `'normal'` = **不带风格**（见 `styleTagOf` 的说明）。
  * @param {object} [opts.logger]
  * @returns {object} `{ health, synthesize, cacheKey, maxChars }`
  */
@@ -361,6 +376,44 @@ export function createTtsClient (opts = {}) {
 
   /** 服务身份（缓存键用）：`backend|参考音频`。健康检查时填。 */
   let identity = ''
+
+  /**
+   * 语气风格的**唯一判据**（v15）。
+   *
+   * 返回 `''`（= 没有风格）当且仅当设置是空串或 `normal`。为什么把 `normal`
+   * 也算成"没有"：
+   *
+   *   · **音色上** `normal` 就是 v1 —— 实测 `ref/styles/normal.wav` 与
+   *     `ref/default.wav` 的 SHA256 **完全相同**，所以"不带 style"与
+   *     "带 style=normal"合成出的是同一段音频；
+   *   · **缓存上**于是升级到 v15 **不会作废任何既有缓存** ——
+   *     否则用户第一次说话要把整批已缓存的句子重新合成一遍。
+   *
+   * 这个方法**同时**决定两件事：HTTP body 里带不带 `style`、缓存键里带不带后缀。
+   * 分成两处判断迟早会漂移成"body 带了 firm、键还是旧的"—— 那就是"换了风格
+   * 却命中旧缓存"（听起来只是"没生效"）。
+   *
+   * @returns {string} `''` 或风格名
+   */
+  const styleTagOf = () => {
+    const raw = typeof opts.style === 'function' ? opts.style() : opts.style
+    const s = String(raw ?? '').trim().toLowerCase()
+    if (s === '' || s === 'normal') return ''
+    return s
+  }
+
+  /**
+   * 缓存身份串 = 服务身份 + 风格。
+   *
+   * ⚠️ 风格**必须**参与缓存键。`speechCacheKey` 的注释早就写明这个道理
+   *（"只按文本做键会让换音色后仍播旧音，而且毫无报错"），但 v15 之前
+   * `identity` 里**只有后端名** —— 一旦支持了多风格，同一句话在
+   * firm 与 normal 下本该是两段音频，却会命中同一个键。
+   */
+  const cacheIdentity = () => {
+    const tag = styleTagOf()
+    return tag === '' ? identity : `${identity}|style=${tag}`
+  }
 
   /**
    * 健康检查。
@@ -399,12 +452,20 @@ export function createTtsClient (opts = {}) {
    * 优先用 `/tts`（二进制，省掉 base64 编解码与 33% 体积）；
    * 老版本服务没有它时退回 `/tts.json`。
    *
+   * v15：风格**只在非默认时才进 body**。这样 ① 默认（normal）路径与 v15 之前
+   * **逐字节相同**；② 指着 v1 的服务时也不会多塞一个它不认识的键
+   *（实测 v1 的 Python 只读 `text`/`seed`/`brightness_db`，多传的键会被忽略 ——
+   *但"不依赖别人忽略什么"更稳）。
+   *
    * @param {string} text - **已清洗**的文本（本函数不再清洗）
    * @returns {Promise<{bytes: Buffer, durationMs: number, cached: boolean}|null>}
    */
   const synthesize = async text => {
     if (fetchImpl === null) return null
     if (typeof text !== 'string' || text.trim() === '') return null
+    // v15：真实 HTTP 那条路的风格走 body（插件模式不走这里 —— 见 index.js）。
+    const tag = styleTagOf()
+    const payload = tag === '' ? { text } : { text, style: tag }
     const ctrl = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), timeoutMs)
     try {
@@ -414,7 +475,7 @@ export function createTtsClient (opts = {}) {
           method: 'POST',
           signal: ctrl.signal,
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ text })
+          body: JSON.stringify(payload)
         })
       } catch (error) {
         logger?.warn?.(`zhuang-fangyi-pet: TTS 合成失败：${error?.message ?? error}`)
@@ -457,7 +518,9 @@ export function createTtsClient (opts = {}) {
     sanitizeFull: raw => sanitizeForSpeech(raw, { maxChars, truncate: false }),
     /** 把（已清洗的）文本切成可逐段合成的分片。 */
     chunk: text => chunkForSpeech(text, maxChars),
-    cacheKey: text => speechCacheKey(text, identity),
+    cacheKey: text => speechCacheKey(text, cacheIdentity()),
+    /** v15：当前风格（`''` = 没风格）。诊断用 —— 别拿它当"插件是否支持风格"。 */
+    get styleTag () { return styleTagOf() },
     get identity () { return identity }
   }
 }

@@ -206,6 +206,21 @@ export const TT_BACKENDS = ['', 'torch', 'onnx']
 /** 空闲释放方式白名单（'' = 用语音插件默认）。 */
 export const TT_IDLE_ACTIONS = ['', 'stop', 'unload']
 
+/**
+ * 语气风格白名单（v15）—— 与语音插件 v2 的 `STYLES` **同集**。
+ *
+ *   · `normal` 正常说话 —— 参考音频与 v1 的 `ref/default.wav` **字节相同**
+ *     （实测 SHA256 一致），所以它是"与 v1 完全一样"的那一档，也是默认值；
+ *   · `firm`   语气强硬；`gentle` 语音娇。
+ *
+ * ⚠️ 这里**没有 `''`（用插件默认）** —— 与 `TT_IDLE_ACTIONS` 不同。
+ * 原因：空闲释放的"插件默认"是一个**真实的第三种选择**（stop 还是 unload 由插件定），
+ * 而风格的"插件默认"恒等于 `normal` —— 多一个选项只是让用户多猜一次。
+ * 另外 `''` 在推送语义里是"不推"（= 保持上一次的值），那正是
+ * `ttsIdleAction` 踩过的"界面显示 A、行为是 B"的坑（见 index.js 的说明）。
+ */
+export const TTS_STYLES = ['normal', 'firm', 'gentle']
+
 export const SETTINGS_VERSION = 1
 
 /** 默认设置。 */
@@ -477,6 +492,18 @@ export function defaultSettings () {
      * 空串 = 用语音插件自己的默认值。
      */
     ttsIdleAction: '',
+    /**
+     * **语气风格**（v15）：`normal` / `firm` / `gentle`。
+     *
+     * 只有语音插件 **v2**（`zfhVoiceV2`）支持三种语气；v1（`zfhVoice`）只有一种，
+     * 它会把 `style` 当未知键丢掉（`normalizeConfig` 只认白名单）—— 所以选了
+     * 非 normal 却又装着 v1 时，声音正常、语气不变。诊断卡会写明"当前插件不支持风格"，
+     * 不让用户对着一个没反应的开关猜。
+     *
+     * 默认 `normal`（= v1 的行为，也 = v2 的 `DEFAULT_STYLE`）：升级到 v2 之后
+     * **声音一模一样**，除非用户主动去改。
+     */
+    ttsStyle: 'normal',
     /** 启动合成服务用的 python（留空 = 自动探测）。 */
     ttsPython: '',
     /** 合成子插件仓库目录（留空 = 自动探测）。 */
@@ -586,6 +613,10 @@ export function normalizeSettings (input) {
   out.ttsIdleStopSec = clamp(input.ttsIdleStopSec, 0, 86400, base.ttsIdleStopSec)
   // 释放方式：只认两个值 + 空串（= 用插件默认）。别的值一律不传下去。
   if (TT_IDLE_ACTIONS.includes(input.ttsIdleAction)) out.ttsIdleAction = input.ttsIdleAction
+  // v15 语气风格：与 `pomodoroAnchor` 同一条纪律 —— **枚举白名单**，
+  // 不认识的值必须回落到 base，不能透传（透传的话下游会拿着一个插件不认的名字
+  // 去合成，插件按未知风格回落到 normal，用户改了设置却听不出任何变化）。
+  if (TTS_STYLES.includes(input.ttsStyle)) out.ttsStyle = input.ttsStyle
   // 启动服务用的路径与后端。长度限住，后端只认两个值。
   for (const key of ['ttsPython', 'ttsRepoDir', 'ttsGsvRoot', 'ttsModelDir']) {
     if (typeof input[key] === 'string' && input[key].length <= 300) out[key] = input[key].trim()

@@ -645,6 +645,8 @@ ok('⭐⭐ 往返不丢字段：宿主设置 → 客户端归一化 → 回送�
     voice: true, persona: '严谨', chatWorkspace: 'D:\\ws', chatEnabled: false,
     memoryAuto: false, speakReplies: true, ttsUrl: 'http://127.0.0.1:9999',
     speechMaxChars: 111, ttsResident: true, ttsIdleStopSec: 77, ttsIdleAction: 'unload',
+    // v15：语气风格也要往返 —— 它是**枚举**，最容易在两边白名单不同集时被悄悄吃掉。
+    ttsStyle: 'gentle',
     ttsPython: 'D:\\py\\python.exe', ttsRepoDir: 'D:\\repo', ttsBackend: 'torch',
     ttsGsvRoot: 'D:\\gsv', ttsModelDir: 'D:\\models'
   })
@@ -2000,6 +2002,7 @@ ok('⭐ 重排后每个设置控件都还在（防"功能悄悄消失"）', () =
     '活跃度', '完成后的开心时长', '空闲多久后睡觉', '深浅色主题',
     '悬停时显示状态', '桌宠下方常显状态', '状态文字大小',
     '让庄方宜说话', '把 AI 的回答念出来', '合成服务地址', '每段朗读字数',
+    '语气风格',
     '让语音模型常驻', '空闲时怎么释放', '空闲多少秒后释放（秒，0 = 不停）',
     '启用番茄钟', '专注时长', '短休息', '长休息', '每几轮长休息',
     '自动进入下一段', '阶段结束时提醒我', '桌宠下方显示倒计时',
@@ -2010,8 +2013,61 @@ ok('⭐ 重排后每个设置控件都还在（防"功能悄悄消失"）', () =
   assert.deepEqual(missing, [], `这些控件的文案在重排中丢了：${missing.join('、')}`)
 })
 
-ok('⭐ 状态文字大小：独立滑杆，能改到设置（用户要"调大一点"）', () => {
-  // 用户点名："我希望能够调整字的大小，因为有的时候字太小了"。
+ok('⭐⭐ v15 语气风格：下拉框渲染三种语气、选了能发出去、POST body 带键', () => {
+  // 这条同时防三件事（每一件都是"设置页看起来能用、其实没生效"的形状）：
+  //   ① 控件不在（用户在设置页找不到这个功能）；
+  //   ② 选项值不在宿主的白名单里（宿主回落 normal → 界面写着"语音娇"、实际正常说话）；
+  //   ③ 客户端归一化漏了这个键 → POST body 里没有 → 宿主是**合并**语义，缺键 = 完全没反应。
+  const l = loadClient()
+  l.exports.apply(l.ctx)
+  const { Section, runtime } = l.exports.__test
+  runtime.__state.atlas = { frameHeight: 256, states: { idle: { file: 'i.png', frames: 1 } } }
+  runtime.__state.snapshot = { petState: 'idle', label: '', bubble: null, nativeAvailable: true }
+  runtime.__state.settings = normalizePet({ speakReplies: true, ttsStyle: 'firm' })
+  l.react.resetHooks()
+  const tree = switchTab(l, Section({ close () {} }), 'voice')
+  const expanded = expandTree(tree)
+
+  // ① 控件在，而且是**下拉框**（三档互斥的选择，不是开关）
+  const selects = collectByType(expanded, 'select')
+  assert.ok(selects.length >= 1, '语音页应有下拉框（语气风格）')
+  const styleSelect = selects.find(s => (s.props.children ?? [])
+    .some(o => o?.props?.value === 'firm'))
+  assert.ok(styleSelect, `找不到"语气风格"下拉框（选项值里应有 firm），实际选到了 ${selects.length} 个 select`)
+  const values = (styleSelect.props.children ?? []).map(o => o.props.value)
+  assert.deepEqual(values, ['normal', 'firm', 'gentle'],
+    `选项必须与宿主白名单同集同序，实际 ${JSON.stringify(values)}`)
+
+  // ② 三档的文案用的是插件 v2 的原词（同一个东西不该有两个名字）
+  // （`h('option', {}, '文字')` 的 children 是数组，先摊平再比。）
+  const labels = (styleSelect.props.children ?? [])
+    .map(o => [].concat(o.props.children ?? []).map(String).join(''))
+  assert.deepEqual(labels, ['正常说话', '语气强硬', '语音娇'],
+    `文案应与语音插件 v2 的 STYLE_LABELS 一致，实际 ${JSON.stringify(labels)}`)
+
+  // ③ 当前值来自设置（而不是永远显示第一项 —— 那会让用户以为"保存不了"）
+  assert.equal(styleSelect.props.value, 'firm', '下拉框应显示当前设置值')
+
+  // ④ 真的选一下 → POST body 里必须有 ttsStyle
+  l.calls.fetches.length = 0
+  styleSelect.props.onChange({ target: { value: 'gentle' } })
+  const post = l.calls.fetches.find(f => f.init?.method === 'POST')
+  assert.ok(post, '切换语气应发出 POST')
+  const body = JSON.parse(post.init.body)
+  assert.equal(body.settings.ttsStyle, 'gentle',
+    `POST body 里没有 ttsStyle（或值不对）—— 宿主合并语义下等于这次切换**完全没生效**，实际 ${JSON.stringify(body.settings.ttsStyle)}`)
+
+  // ⑤ 非法值不该被发出去（客户端也要挡一道）
+  l.calls.fetches.length = 0
+  styleSelect.props.onChange({ target: { value: '怒吼' } })
+  const post2 = l.calls.fetches.find(f => f.init?.method === 'POST')
+  if (post2) {
+    const b2 = JSON.parse(post2.init.body)
+    assert.equal(b2.settings.ttsStyle, 'gentle', '非法风格值不该覆盖掉合法值')
+  }
+})
+
+ok('⭐ 状态文字大小：独立滑杆，能改到设置（用户要"调大一点"）', () => {  // 用户点名："我希望能够调整字的大小，因为有的时候字太小了"。
   // 之前字号**只能**跟着"大小"（桌宠本体）走 —— 用户把桌宠调到 0.4 是为了不占地，
   // 字却被一起缩小（实测被下限夹到 8px，确实看不清）。
   const l = loadClient()
